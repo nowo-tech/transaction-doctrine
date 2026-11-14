@@ -95,14 +95,8 @@
     },
     "repositories": [
         {
-            "type": "path",
-            "url": "../transaction-contract",
-            "options": {
-                "symlink": false,
-                "versions": {
-                    "nowo-tech/transaction-contract": "1.0.0"
-                }
-            }
+            "type": "vcs",
+            "url": "https://github.com/nowo-tech/transaction-contract"
         }
     ]
 }

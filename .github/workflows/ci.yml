@@ -26,6 +26,8 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: ${{ matrix.php == '8.2' && 'pcov' || 'none' }}
           tools: composer:v2
+          # nowo-tech/transaction-contract comes from a vcs repository until it is on Packagist.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate composer.json
         run: composer validate --strict
@@ -56,6 +58,8 @@ jobs:
           php-version: '8.2'
           coverage: none
           tools: composer:v2
+          # nowo-tech/transaction-contract comes from a vcs repository until it is on Packagist.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: composer update --prefer-dist --no-progress --no-interaction
@@ -76,6 +80,8 @@ jobs:
           php-version: '8.2'
           coverage: none
           tools: composer:v2
+          # nowo-tech/transaction-contract comes from a vcs repository until it is on Packagist.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: composer update --prefer-dist --no-progress --no-interaction

@@ -1,4 +1,4 @@
-# Transaction Doctrine (proposal, not published)
+# Transaction Doctrine
 
 Safe plain-Doctrine default for [`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract):
 `DoctrineTransactionRunner` implements `TransactionRunnerInterface` with **one attempt and no retry**, for a bundle
@@ -25,8 +25,8 @@ Transient failures (1213, 1205, 40001, 40P01, 1305 on a Doctrine savepoint, any 
 Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as
 `nowo-tech/doctrine-deadlock-retry-bundle` 3.0, which could depend on this package instead of carrying a copy).
 
-`composer.json` carries a temporary `path` repository to `../transaction-contract` for local testing; remove it
-before publishing.
+Until `nowo-tech/transaction-contract` is on Packagist, `composer.json` resolves it from its GitHub repository (a
+`vcs` repository, `^1.0@dev` through the `dev-main` → `1.0.x-dev` alias); both go once the 1.0.0 tags are published.
 
 ## License
 

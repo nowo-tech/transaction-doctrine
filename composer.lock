@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "61a35b93b20d1df196b1833c361e5da2",
+    "content-hash": "135827d3d82d822ac505858026902ca3",
     "packages": [
         {
             "name": "doctrine/dbal",
@@ -165,11 +165,17 @@
         },
         {
             "name": "nowo-tech/transaction-contract",
-            "version": "1.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../transaction-contract",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/nowo-tech/transaction-contract.git",
                 "reference": "ef8023d569ff7db1a689c57d4046ded773aa1650"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/ef8023d569ff7db1a689c57d4046ded773aa1650",
+                "reference": "ef8023d569ff7db1a689c57d4046ded773aa1650",
+                "shasum": ""
             },
             "require": {
                 "php": ">=8.2 <8.6"
@@ -181,6 +187,7 @@
                 "phpunit/phpunit": "^10.0 || ^11.0",
                 "rector/rector": "^2.0"
             },
+            "default-branch": true,
             "type": "library",
             "extra": {
                 "branch-alias": {
@@ -253,10 +260,7 @@
                 "issues": "https://github.com/nowo-tech/transaction-contract/issues",
                 "source": "https://github.com/nowo-tech/transaction-contract"
             },
-            "transport-options": {
-                "symlink": false,
-                "relative": true
-            }
+            "time": "2026-11-14T22:22:31+00:00"
         },
         {
             "name": "psr/cache",
