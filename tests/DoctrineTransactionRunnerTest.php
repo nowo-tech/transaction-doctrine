@@ -11,6 +11,7 @@ use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\UnitOfWork;
+use Doctrine\Persistence\Event\LifecycleEventArgs;
 use Doctrine\Persistence\ManagerRegistry;
 use Doctrine\Persistence\ObjectManager;
 use DomainException;
@@ -18,7 +19,7 @@ use Exception;
 use LogicException;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
-use Nowo\TransactionDoctrine\FlushObserver;
+use Nowo\TransactionDoctrine\RunObserver;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use stdClass;
@@ -118,11 +119,11 @@ final class DoctrineTransactionRunnerTest extends TestCase
     public function testADomainFailureAfterAFlushInsideTheOperationClears(): void
     {
         $connection = $this->connection([0, 1, 1]);
-        /** @var list<FlushObserver> $listeners */
+        /** @var list<RunObserver> $listeners */
         $listeners = [];
         $events    = $this->createMock(EventManager::class);
         $events->method('addEventListener')->willReturnCallback(static function (array|string $names, object $listener) use (&$listeners): void {
-            if ($listener instanceof FlushObserver) {
+            if ($listener instanceof RunObserver) {
                 $listeners[] = $listener;
             }
         });
@@ -147,6 +148,7 @@ final class DoctrineTransactionRunnerTest extends TestCase
         $connection = $this->connection([0, 1, 1]);
         $unitOfWork = $this->createMock(UnitOfWork::class);
         $unitOfWork->method('computeChangeSets')->willThrowException(new LogicException('new entity found through a relationship'));
+        $unitOfWork->method('getIdentityMap')->willReturn([]);   // ORM 2: no native return type, the mock would return null
         $manager = $this->manager($connection, true, unitOfWork: $unitOfWork);
         $manager->expects($this->once())->method('clear');
         $refusal = new DomainException('refused');
@@ -246,7 +248,112 @@ final class DoctrineTransactionRunnerTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->method('getTransactionNestingLevel')->willReturnOnConsecutiveCalls(...$levels);
 
+        // DBAL 3 legs: the mock would otherwise report emulated nesting.
+        $connection->method('getNestTransactionsWithSavepoints')->willReturn(true);
+
         return $connection;
+    }
+
+    public function testARefusalDetachesTheEntitiesTheRunLoadedAndKeepsTheCallers(): void
+    {
+        $caller     = new stdClass();
+        $loaded     = new stdClass();
+        $observers  = [];
+        $events     = $this->capturingEvents($observers);
+        $unitOfWork = $this->unitOfWork(identityMap: ['App\\Thing' => [1 => $caller]]);
+        $manager    = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork, events: $events);
+        $manager->method('contains')->willReturnCallback(static fn (object $entity): bool => $entity === $loaded);
+        $manager->expects($this->once())->method('detach')->with($loaded);
+        $manager->expects($this->never())->method('clear');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(function () use (&$observers, $loaded, $refusal): never {
+            $this->load($observers, $loaded);   // a row the run wrote through DBAL, then found
+
+            throw $refusal;
+        });
+    }
+
+    public function testARefusalAfterReHydratingACallersEntityClears(): void
+    {
+        $caller     = new stdClass();
+        $observers  = [];
+        $events     = $this->capturingEvents($observers);
+        $unitOfWork = $this->unitOfWork(identityMap: ['App\\Thing' => [1 => $caller]]);
+        $manager    = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork, events: $events);
+        $manager->expects($this->once())->method('clear');
+        $manager->expects($this->never())->method('detach');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(function () use (&$observers, $caller, $refusal): never {
+            $this->load($observers, $caller);   // refresh() or a proxy initialised: the caller's object holds rolled-back data
+
+            throw $refusal;
+        });
+    }
+
+    public function testScheduledWorkIsDetectedWithoutComputingChangeSets(): void
+    {
+        $unitOfWork = $this->unitOfWork(insertions: [new stdClass()]);
+        $unitOfWork->expects($this->never())->method('computeChangeSets');
+        $manager = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork);
+        $manager->expects($this->once())->method('clear');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($refusal): never {
+            throw $refusal;
+        });
+    }
+
+    /**
+     * @param list<RunObserver> $observers
+     */
+    private function capturingEvents(array &$observers): EventManager&MockObject
+    {
+        $events = $this->createMock(EventManager::class);
+        $events->method('addEventListener')->willReturnCallback(static function (array|string $names, object $listener) use (&$observers): void {
+            if ($listener instanceof RunObserver) {
+                $observers[] = $listener;
+            }
+        });
+
+        return $events;
+    }
+
+    /**
+     * @param list<RunObserver> $observers
+     */
+    private function load(array $observers, object $entity): void
+    {
+        $args = $this->createMock(LifecycleEventArgs::class);
+        $args->method('getObject')->willReturn($entity);
+
+        foreach ($observers as $observer) {
+            $observer->postLoad($args);
+        }
+    }
+
+    /**
+     * @param array<string, array<mixed, object>> $identityMap
+     * @param list<object> $insertions
+     */
+    private function unitOfWork(array $identityMap = [], array $insertions = []): UnitOfWork&MockObject
+    {
+        $unitOfWork = $this->createMock(UnitOfWork::class);
+        $unitOfWork->method('getIdentityMap')->willReturn($identityMap);
+        $unitOfWork->method('getScheduledEntityInsertions')->willReturn($insertions);
+        $unitOfWork->method('getScheduledEntityUpdates')->willReturn([]);
+        $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);
+        $unitOfWork->method('getScheduledCollectionDeletions')->willReturn([]);
+        $unitOfWork->method('getScheduledCollectionUpdates')->willReturn([]);
+
+        return $unitOfWork;
     }
 
     private function manager(Connection $connection, bool $open, bool $pending = false, ?UnitOfWork $unitOfWork = null, ?EventManager $events = null): EntityManagerInterface&MockObject
@@ -258,6 +365,7 @@ final class DoctrineTransactionRunnerTest extends TestCase
             $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);
             $unitOfWork->method('getScheduledCollectionDeletions')->willReturn([]);
             $unitOfWork->method('getScheduledCollectionUpdates')->willReturn([]);
+            $unitOfWork->method('getIdentityMap')->willReturn([]);
         }
 
         $manager = $this->createMock(EntityManagerInterface::class);
