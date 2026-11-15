@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
+use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Events;
 use Doctrine\Persistence\ManagerRegistry;
 use Nowo\TransactionContract\TransactionRunnerInterface;
 use Nowo\TransactionContract\TransientStorageFailure;
+use PDOException;
 use Throwable;
 
 use function assert;
@@ -24,9 +28,15 @@ use function assert;
  *   rollback fails (after a MySQL / MariaDB deadlock in a nested transaction the server dropped the savepoints and
  *   ROLLBACK TO SAVEPOINT fails with 1305). An ordinary failure therefore keeps session state: variables, GET_LOCK()
  *   and PostgreSQL advisory locks survive;
- * - the entity manager is closed and reset through the ManagerRegistry when one is given, and cleared otherwise, so
- *   nothing the failed operation persisted or changed is committed by a later flush, run() or request. Inside a
- *   caller's transaction that also discards the caller's pending changes, as EntityManager::wrapInTransaction() does.
+ * - nothing the failed operation persisted or changed stays pending in the entity manager, while a host's own entities
+ *   are disturbed only as much as that requires:
+ *   - storage failure (a DBAL / driver error in the chain) or a manager the ORM closed: the manager is closed and
+ *     reset through the ManagerRegistry when one is given, and cleared otherwise (its state cannot be trusted);
+ *   - domain failure (any other exception) with the manager open: cleared when the operation left changes pending or
+ *     flushed inside the runner's transaction (its writes were rolled back, so the identity map is stale), and left
+ *     untouched otherwise, so a host's entities stay managed after a plain refusal.
+ *   Clearing or resetting a shared manager also discards the caller's own pending changes, as
+ *   EntityManager::wrapInTransaction() does.
  *
  * Transient failures (deadlock, lock wait timeout, serialization failure, lost savepoint) are rethrown as
  * TransientStorageFailure with the storage error as previous; anything else is rethrown unchanged.
@@ -80,6 +90,8 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         $connection = $manager?->getConnection() ?? $this->connection;
         assert($connection instanceof Connection);
         $entryLevel = $connection->getTransactionNestingLevel();
+        $flushes    = new FlushObserver();
+        $manager?->getEventManager()->addEventListener([Events::postFlush], $flushes);
 
         try {
             $connection->beginTransaction();
@@ -92,7 +104,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
             $this->repairer->afterFailure($connection, $entryLevel);
 
             if ($manager instanceof EntityManagerInterface) {
-                $this->discardPendingChanges($manager);
+                $this->discardPendingChanges($manager, $throwable, $flushes->flushed);
             }
 
             if ($throwable instanceof TransientStorageFailure || !$this->classifier->isTransient($throwable)) {
@@ -100,21 +112,55 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
             }
 
             throw TransientStorageFailure::fromPrevious($throwable, $this->retryAfterSeconds);
+        } finally {
+            $manager?->getEventManager()->removeEventListener([Events::postFlush], $flushes);
         }
     }
 
-    private function discardPendingChanges(EntityManagerInterface $manager): void
+    private function discardPendingChanges(EntityManagerInterface $manager, Throwable $failure, bool $flushed): void
     {
-        if ($this->registry instanceof ManagerRegistry) {
-            $manager->close();
-            $this->registry->resetManager($this->managerName);
+        if (!$manager->isOpen() || $this->isStorageFailure($failure)) {
+            if ($this->registry instanceof ManagerRegistry) {
+                $manager->close();
+                $this->registry->resetManager($this->managerName);
+            } elseif ($manager->isOpen()) {
+                $manager->clear();
+            }
 
             return;
         }
 
-        if ($manager->isOpen()) {
+        if ($flushed || $this->hasPendingChanges($manager)) {
             $manager->clear();
         }
+    }
+
+    private function isStorageFailure(Throwable $failure): bool
+    {
+        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
+            if ($current instanceof DbalException || $current instanceof DriverExceptionInterface || $current instanceof PDOException) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasPendingChanges(EntityManagerInterface $manager): bool
+    {
+        $unitOfWork = $manager->getUnitOfWork();
+
+        try {
+            $unitOfWork->computeChangeSets();
+        } catch (Throwable) {
+            return true;   // an inconsistent unit of work cannot be trusted either
+        }
+
+        return $unitOfWork->getScheduledEntityInsertions() !== []
+            || $unitOfWork->getScheduledEntityUpdates() !== []
+            || $unitOfWork->getScheduledEntityDeletions() !== []
+            || $unitOfWork->getScheduledCollectionDeletions() !== []
+            || $unitOfWork->getScheduledCollectionUpdates() !== [];
     }
 
     private function manager(): ?EntityManagerInterface
