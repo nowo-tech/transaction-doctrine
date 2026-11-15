@@ -21,4 +21,4 @@ Target 1.0.0.
 - `ConnectionRepairer`.
 - Real-database tests (MySQL 8.4, MariaDB 11.4, PostgreSQL 16) and their CI job.
 
-Requires `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.
+Requires `nowo-tech/transaction-contract ^1.0` and `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.

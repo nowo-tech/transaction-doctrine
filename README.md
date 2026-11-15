@@ -37,8 +37,7 @@ Tests: unit tests plus a real-database suite (MySQL 8.4, MariaDB 11.4, PostgreSQ
 Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as
 `nowo-tech/doctrine-deadlock-retry-bundle` 3.0, which could depend on this package instead of carrying a copy).
 
-Until `nowo-tech/transaction-contract` is on Packagist, `composer.json` resolves it from its GitHub repository (a
-`vcs` repository, `^1.0@dev` through the `dev-main` → `1.0.x-dev` alias); both go once the 1.0.0 tags are published.
+
 
 ## Documentation
 

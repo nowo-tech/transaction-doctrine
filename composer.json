@@ -33,7 +33,7 @@
     "require": {
         "php": ">=8.2 <8.6",
         "doctrine/dbal": "^4.0",
-        "nowo-tech/transaction-contract": "^1.0@dev"
+        "nowo-tech/transaction-contract": "^1.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.0",
@@ -92,11 +92,5 @@
     "suggest": {
         "doctrine/orm": "For DoctrineTransactionRunner::forEntityManager()",
         "doctrine/persistence": "To reset a closed entity manager through a ManagerRegistry"
-    },
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/nowo-tech/transaction-contract"
-        }
-    ]
+    }
 }
