@@ -28,9 +28,12 @@ Target 1.1.0.
     cleared, same instance, never reset;
   - domain failure that re-hydrated an entity already managed (`refresh()`, a proxy initialised inside the run):
     cleared;
-  - otherwise (a refusal): only the entities the run loaded are detached, since they may hold rows or values the
-    rollback undid (QA-TD11-M1: a row inserted or a value updated through DBAL, then found, stayed in the identity
-    map); the host's other entities stay managed.
+  - otherwise (a refusal): every entity that entered the identity map during the run is detached, since it may hold
+    rows or values the rollback undid (QA-TD11-M1: a row inserted or a value updated through DBAL, then found, stayed
+    in the identity map), including `getReference()` proxies and deferred query-cache hydrations that fire no
+    `postLoad` (QA-TD11-L4); the host's other entities stay managed. When a detach
+    cascades (`cascade: ['detach']`) into a caller's entity, the manager is cleared instead of leaving that entity
+    silently detached (QA-TD11-L3).
   The run is watched by a per-run `postFlush` / `postLoad` listener (removed in `finally`) and an identity-map
   snapshot taken when the run starts.
 - The pending-change check looks at the scheduled insertions, deletions and collection changes first and calls

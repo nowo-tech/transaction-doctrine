@@ -26,11 +26,12 @@ After **any** failure it leaves neither a poisoned connection nor pending change
   | Storage failure (a DBAL / driver error in the chain), or the ORM closed the manager | Closed and reset through the registry; cleared when no registry is given (its state cannot be trusted) |
   | Domain failure after the operation flushed inside the runner's transaction, or re-hydrated an entity that was already managed (`refresh()`, a proxy initialised) | **Cleared** (same instance): the identity map holds rolled-back data |
   | Domain failure that left changes pending (persist, remove, a changed entity) | **Cleared** (same instance) |
-  | Domain failure otherwise (a refusal) | Only the entities **the run loaded** are **detached** (they may hold rows or values the rollback undid); the caller's other entities stay managed |
+  | Domain failure otherwise (a refusal) | Every entity that **entered the identity map during the run** (loaded, or a `getReference()` proxy) is **detached**, since it may hold rows or values the rollback undid; the caller's other entities stay managed. If that detach cascades (`cascade: ['detach']`) into a caller's entity, the manager is **cleared** instead, so no caller entity silently drops out alone |
 
   The runner watches the run through a `postFlush` / `postLoad` listener attached for that run only (removed in
-  `finally`), and snapshots the identity map's object ids when the run starts (a walk over the identity map on every
-  `run()` of the entity manager variant).
+  `finally`), and snapshots the identity map when the run starts (a walk over the identity map on every `run()` of
+  the entity manager variant; about 3 ms for 50,000 managed entities); on a refusal it compares the identity map with
+  that snapshot.
 
   **Pending-change check.** Scheduled insertions, deletions and collection changes are checked first; only when there
   are none does the runner call `UnitOfWork::computeChangeSets()`. That call scans the whole identity map and, through
