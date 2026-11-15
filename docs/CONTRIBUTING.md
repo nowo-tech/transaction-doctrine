@@ -15,6 +15,10 @@ MariaDB 11.4 and PostgreSQL 16 (for example `mysql://root:root@127.0.0.1:3306/dd
 
 ## Quality gates
 
+CI also runs DBAL 3 + ORM 3 and DBAL 3 + ORM 2 legs for the unit and real-database suites: a change must work on
+every supported DBAL / ORM major.
+
+
 - `composer cs-check` / `composer cs-fix` — PHP-CS-Fixer.
 - `composer phpstan` — level 8, empty `ignoreErrors`.
 - `composer test` — PHPUnit; 100% of lines and methods (CI enforces it); the Database suite in CI may not skip.

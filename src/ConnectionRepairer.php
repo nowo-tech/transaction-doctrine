@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine;
 
+use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Throwable;
+
+use function version_compare;
 
 /**
  * Brings a DBAL connection back to a known transaction nesting level after a failure.
@@ -16,16 +19,29 @@ use Throwable;
  * The repairer therefore rolls back first and closes only when that fails: closing loses session state (variables,
  * session-level locks), so it is the last resort.
  *
+ * DBAL 3 without savepoints emulates nesting: an inner rollBack() issues no SQL and only marks the transaction
+ * rollback-only, a flag that survives Connection::close() and makes the next commit fail. With emulated nesting the
+ * repairer never closes a nested leftover: it rolls back level by level (the level-1 ROLLBACK clears the flag), and
+ * when even that real ROLLBACK fails it closes and then begins and rolls back once, to clear the flag.
+ *
  * Stateless: safe as a shared service in a long-running worker.
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
  */
-final class ConnectionRepairer
+final readonly class ConnectionRepairer
 {
     public const ACTION_NONE        = 'none';
     public const ACTION_ROLLED_BACK = 'rolled_back';
     public const ACTION_CLOSED      = 'closed';
+
+    /**
+     * @param bool|null $emulatedNesting Whether nested transactions are emulated (DBAL 3 without savepoints); null = detect per connection
+     */
+    public function __construct(
+        private ?bool $emulatedNesting = null,
+    ) {
+    }
 
     /**
      * Repairs the connection after a failed operation that started at $entryLevel.
@@ -62,7 +78,7 @@ final class ConnectionRepairer
             return self::ACTION_NONE;
         }
 
-        if ($level === $baseline + 1) {
+        if ($level === $baseline + 1 || $this->emulatesNesting($connection)) {
             return $this->rollBackTo($connection, $baseline);
         }
 
@@ -83,7 +99,32 @@ final class ConnectionRepairer
         } catch (Throwable) {
             $connection->close();
 
+            if ($this->emulatesNesting($connection)) {
+                $this->clearRollbackOnly($connection);
+            }
+
             return self::ACTION_CLOSED;
+        }
+    }
+
+    private function emulatesNesting(Connection $connection): bool
+    {
+        if ($this->emulatedNesting !== null) {
+            return $this->emulatedNesting;
+        }
+
+        // Only DBAL 3 can nest without savepoints; DBAL 4's getter is deprecated (and always true), so it is not called.
+        return version_compare((string) InstalledVersions::getVersion('doctrine/dbal'), '4.0.0', '<')
+            && !$connection->getNestTransactionsWithSavepoints();
+    }
+
+    private function clearRollbackOnly(Connection $connection): void
+    {
+        try {
+            $connection->beginTransaction();
+            $connection->rollBack();
+        } catch (Throwable) {
+            // The server is gone: the next transaction reconnects; nothing more can be done here.
         }
     }
 }

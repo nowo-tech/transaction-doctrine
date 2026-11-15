@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Database\Support;
 
+use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Tools\DsnParser;
@@ -18,6 +19,7 @@ use function getenv;
 use function is_string;
 use function str_starts_with;
 use function usleep;
+use function version_compare;
 
 use const PHP_VERSION_ID;
 
@@ -63,11 +65,14 @@ abstract class DatabaseTestCase extends TestCase
 
         $this->url        = $url;
         $this->connection = $this->connect();
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_note');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_counter');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ballast');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_note (id INT NOT NULL PRIMARY KEY, counter_id INT NOT NULL)');
+        $this->connection->executeStatement('INSERT INTO ddrb_note (id, counter_id) VALUES (1, 1)');
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }
@@ -90,7 +95,8 @@ abstract class DatabaseTestCase extends TestCase
         $configuration->setProxyNamespace('TdTestProxies');
         $configuration->setAutoGenerateProxyClasses(true);
 
-        if (PHP_VERSION_ID >= 80400) {
+        // ORM >= 3.4 on PHP >= 8.4: native lazy objects (ORM 2 has no such option).
+        if (PHP_VERSION_ID >= 80400 && version_compare((string) InstalledVersions::getVersion('doctrine/orm'), '3.4.0', '>=')) {
             $configuration->enableNativeLazyObjects(true);
         }
 
