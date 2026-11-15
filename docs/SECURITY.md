@@ -28,5 +28,5 @@ error codes only.
 
 ## Dependencies
 
-`php`, `doctrine/dbal ^4.0` and `nowo-tech/transaction-contract`; `doctrine/orm` and `doctrine/persistence` are
+`php`, `doctrine/dbal ^3.8.2 || ^4.0` and `nowo-tech/transaction-contract`; `doctrine/orm` and `doctrine/persistence` are
 optional. Development tooling is `require-dev` and excluded from the archive by `.gitattributes`.
