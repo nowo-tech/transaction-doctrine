@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Target 1.1.0.
+## [1.1.0] - 2026-11-15
 
 ### Added
 
@@ -62,5 +62,6 @@ Target 1.1.0.
 
 Requires `nowo-tech/transaction-contract ^1.0` and `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.
 
-[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nowo-tech/transaction-doctrine/releases/tag/v1.0.0
