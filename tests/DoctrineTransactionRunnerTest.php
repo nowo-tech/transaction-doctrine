@@ -44,12 +44,13 @@ final class DoctrineTransactionRunnerTest extends TestCase
         self::assertSame(['flush', 'commit'], $order);
     }
 
-    public function testTransientFailureClosesTheConnectionResetsTheManagerAndBecomesTransientStorageFailure(): void
+    public function testTransientFailureRepairsTheConnectionResetsTheManagerAndBecomesTransientStorageFailure(): void
     {
-        $connection = $this->connection([0, 2]);
+        $connection = $this->connection([0, 2, 2]);
+        $connection->expects($this->once())->method('rollBack')->willThrowException(new LogicException('1305 SAVEPOINT DOCTRINE_2 does not exist'));
         $connection->expects($this->once())->method('close');
-        $connection->expects($this->never())->method('rollBack');
-        $manager  = $this->manager($connection, false);
+        $manager = $this->manager($connection, false);
+        $manager->expects($this->once())->method('close');
         $registry = $this->createMock(ManagerRegistry::class);
         $registry->method('getManager')->with('orders')->willReturn($manager);
         $registry->expects($this->once())->method('resetManager')->with('orders');
@@ -67,6 +68,36 @@ final class DoctrineTransactionRunnerTest extends TestCase
         self::assertSame(3, $caught->retryAfterSeconds());
         self::assertSame($deadlock, $caught->getPrevious());
         self::assertSame(TransientStorageFailure::DEFAULT_MESSAGE, $caught->getMessage());
+    }
+
+    public function testADomainFailureRollsBackClearsTheManagerAndKeepsTheConnection(): void
+    {
+        $connection = $this->connection([0, 1, 1]);
+        $connection->expects($this->once())->method('rollBack');
+        $connection->expects($this->never())->method('close');
+        $manager = $this->manager($connection, true);
+        $manager->expects($this->once())->method('clear');
+        $manager->expects($this->never())->method('flush');
+        $bug = new LogicException('validation failed');
+
+        $this->expectExceptionObject($bug);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($bug): never {
+            throw $bug;
+        });
+    }
+
+    public function testAClosedManagerWithoutARegistryIsLeftAsItIs(): void
+    {
+        $manager = $this->manager($this->connection([0, 0]), false);
+        $manager->expects($this->never())->method('clear');
+        $bug = new LogicException('bug');
+
+        $this->expectExceptionObject($bug);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($bug): never {
+            throw $bug;
+        });
     }
 
     public function testInsideACallersTransactionOnlyItsOwnLevelIsRolledBack(): void
