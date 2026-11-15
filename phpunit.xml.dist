@@ -7,8 +7,13 @@
          executionOrder="depends,defects"
 >
     <testsuites>
-        <testsuite name="TransactionDoctrine Test Suite">
+        <testsuite name="Unit">
             <directory>tests</directory>
+            <exclude>tests/Database</exclude>
+        </testsuite>
+        <!-- Real MySQL / MariaDB / PostgreSQL tests: skipped unless TD_*_URL is set. -->
+        <testsuite name="Database">
+            <directory>tests/Database</directory>
         </testsuite>
     </testsuites>
     <source>

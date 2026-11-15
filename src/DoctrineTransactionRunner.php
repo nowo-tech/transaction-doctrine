@@ -18,13 +18,15 @@ use function assert;
  *
  * One attempt, no retry (a host that wants retries aliases the port to a retrying adapter, such as
  * nowo-tech/doctrine-deadlock-retry-bundle's). The runner opens a transaction, runs the operation, flushes the entity
- * manager when it has one, and commits. After a failure it never leaves a poisoned connection behind:
+ * manager when it has one, and commits. After any failure it leaves neither a poisoned connection nor pending changes:
  *
- * - at nesting level 0, a transaction still active is closed (Connection::close()), not rolled back: after a
- *   MySQL / MariaDB deadlock in a nested transaction the rollback fails with 1305 and the nesting level would stay up;
- * - inside a caller's transaction, the levels the runner opened are rolled back, and the connection closed if that
- *   fails;
- * - a closed entity manager is reset through the ManagerRegistry when one is given.
+ * - the levels the runner opened are rolled back to the entry level; the connection is closed only when that
+ *   rollback fails (after a MySQL / MariaDB deadlock in a nested transaction the server dropped the savepoints and
+ *   ROLLBACK TO SAVEPOINT fails with 1305). An ordinary failure therefore keeps session state: variables, GET_LOCK()
+ *   and PostgreSQL advisory locks survive;
+ * - the entity manager is closed and reset through the ManagerRegistry when one is given, and cleared otherwise, so
+ *   nothing the failed operation persisted or changed is committed by a later flush, run() or request. Inside a
+ *   caller's transaction that also discards the caller's pending changes, as EntityManager::wrapInTransaction() does.
  *
  * Transient failures (deadlock, lock wait timeout, serialization failure, lost savepoint) are rethrown as
  * TransientStorageFailure with the storage error as previous; anything else is rethrown unchanged.
@@ -60,8 +62,8 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * Runs ORM units of work: flushes the manager before the commit and resets it through the registry when a failure
-     * closed it. With a registry the manager is fetched from it on every call.
+     * Runs ORM units of work: flushes the manager before the commit. After a failure the manager is closed and reset
+     * through the registry (fetched from it on every call), or cleared when no registry is given.
      */
     public static function forEntityManager(
         EntityManagerInterface $entityManager,
@@ -89,8 +91,8 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         } catch (Throwable $throwable) {
             $this->repairer->afterFailure($connection, $entryLevel);
 
-            if ($manager instanceof EntityManagerInterface && !$manager->isOpen()) {
-                $this->registry?->resetManager($this->managerName);
+            if ($manager instanceof EntityManagerInterface) {
+                $this->discardPendingChanges($manager);
             }
 
             if ($throwable instanceof TransientStorageFailure || !$this->classifier->isTransient($throwable)) {
@@ -98,6 +100,20 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
             }
 
             throw TransientStorageFailure::fromPrevious($throwable, $this->retryAfterSeconds);
+        }
+    }
+
+    private function discardPendingChanges(EntityManagerInterface $manager): void
+    {
+        if ($this->registry instanceof ManagerRegistry) {
+            $manager->close();
+            $this->registry->resetManager($this->managerName);
+
+            return;
+        }
+
+        if ($manager->isOpen()) {
+            $manager->clear();
         }
     }
 
