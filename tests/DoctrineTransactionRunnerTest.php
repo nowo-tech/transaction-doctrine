@@ -22,6 +22,7 @@ use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\RunObserver;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use SplObjectStorage;
 use stdClass;
 
 final class DoctrineTransactionRunnerTest extends TestCase
@@ -260,10 +261,13 @@ final class DoctrineTransactionRunnerTest extends TestCase
         $loaded     = new stdClass();
         $observers  = [];
         $events     = $this->capturingEvents($observers);
-        $unitOfWork = $this->unitOfWork(identityMap: ['App\\Thing' => [1 => $caller]]);
+        $unitOfWork = $this->unitOfWork(['App\\Thing' => [1 => $caller]], ['App\\Thing' => [1 => $caller, 2 => $loaded]]);
         $manager    = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork, events: $events);
-        $manager->method('contains')->willReturnCallback(static fn (object $entity): bool => $entity === $loaded);
-        $manager->expects($this->once())->method('detach')->with($loaded);
+        $detached   = new SplObjectStorage();
+        $manager->method('contains')->willReturnCallback(static fn (object $entity): bool => !$detached->contains($entity));
+        $manager->expects($this->once())->method('detach')->with($loaded)->willReturnCallback(static function (object $entity) use ($detached): void {
+            $detached->attach($entity);
+        });
         $manager->expects($this->never())->method('clear');
         $refusal = new DomainException('refused');
 
@@ -276,12 +280,49 @@ final class DoctrineTransactionRunnerTest extends TestCase
         });
     }
 
+    public function testAReferenceTheRunCreatedIsDetachedToo(): void
+    {
+        $proxy      = new stdClass();   // getReference(): no postLoad
+        $unitOfWork = $this->unitOfWork([], ['App\\Thing' => [9 => $proxy]]);
+        $manager    = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork);
+        $manager->method('contains')->willReturn(true);
+        $manager->expects($this->once())->method('detach')->with($proxy);
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($refusal): never {
+            throw $refusal;
+        });
+    }
+
+    public function testADetachThatCascadedIntoACallersEntityClears(): void
+    {
+        $caller     = new stdClass();
+        $loaded     = new stdClass();
+        $unitOfWork = $this->unitOfWork(['App\\Thing' => [1 => $caller]], ['App\\Thing' => [1 => $caller], 'App\\Note' => [1 => $loaded]]);
+        $manager    = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork);
+        $detached   = new SplObjectStorage();
+        $manager->method('contains')->willReturnCallback(static fn (object $entity): bool => !$detached->contains($entity));
+        $manager->method('detach')->willReturnCallback(static function () use ($detached, $caller): void {
+            $detached->attach($caller);   // cascade: detach reached the caller's entity
+        });
+        $manager->expects($this->once())->method('clear');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($refusal): never {
+            throw $refusal;
+        });
+    }
+
     public function testARefusalAfterReHydratingACallersEntityClears(): void
     {
         $caller     = new stdClass();
         $observers  = [];
         $events     = $this->capturingEvents($observers);
-        $unitOfWork = $this->unitOfWork(identityMap: ['App\\Thing' => [1 => $caller]]);
+        $unitOfWork = $this->unitOfWork(['App\\Thing' => [1 => $caller]]);
         $manager    = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork, events: $events);
         $manager->expects($this->once())->method('clear');
         $manager->expects($this->never())->method('detach');
@@ -340,13 +381,14 @@ final class DoctrineTransactionRunnerTest extends TestCase
     }
 
     /**
-     * @param array<string, array<mixed, object>> $identityMap
+     * @param array<string, array<mixed, object>> $before Identity map when the run starts
+     * @param array<string, array<mixed, object>>|null $after Identity map after the failure (null = same as before)
      * @param list<object> $insertions
      */
-    private function unitOfWork(array $identityMap = [], array $insertions = []): UnitOfWork&MockObject
+    private function unitOfWork(array $before = [], ?array $after = null, array $insertions = []): UnitOfWork&MockObject
     {
         $unitOfWork = $this->createMock(UnitOfWork::class);
-        $unitOfWork->method('getIdentityMap')->willReturn($identityMap);
+        $unitOfWork->method('getIdentityMap')->willReturnOnConsecutiveCalls($before, $after ?? $before, $after ?? $before);
         $unitOfWork->method('getScheduledEntityInsertions')->willReturn($insertions);
         $unitOfWork->method('getScheduledEntityUpdates')->willReturn([]);
         $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);

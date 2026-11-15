@@ -65,11 +65,14 @@ abstract class DatabaseTestCase extends TestCase
 
         $this->url        = $url;
         $this->connection = $this->connect();
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_note');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_counter');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ballast');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_note (id INT NOT NULL PRIMARY KEY, counter_id INT NOT NULL)');
+        $this->connection->executeStatement('INSERT INTO ddrb_note (id, counter_id) VALUES (1, 1)');
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }

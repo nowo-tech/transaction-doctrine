@@ -8,6 +8,7 @@ use DomainException;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Database\Support\Counter;
 use Nowo\TransactionDoctrine\Tests\Database\Support\DatabaseTestCase;
+use Nowo\TransactionDoctrine\Tests\Database\Support\Note;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Throwable;
 
@@ -190,6 +191,60 @@ final class ManagerSemanticsDatabaseTest extends DatabaseTestCase
 
         self::assertTrue(!$outer instanceof Throwable || !$outer instanceof DomainException);
         self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 9'));
+    }
+
+    /**
+     * QA-TD11-L3: detaching a run-loaded entity cascades (cascade: detach) into the caller's entity. The runner then
+     * clears instead of leaving the caller with a silently detached entity whose later edits would be lost.
+     */
+    #[DataProvider('allServers')]
+    public function testACascadeDetachIntoACallersEntityClearsInsteadOfLosingItsEdits(string $server): void
+    {
+        $this->boot($server);
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 1);
+        $other   = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+        self::assertInstanceOf(Counter::class, $other);
+
+        $failure = $this->failure(DoctrineTransactionRunner::forEntityManager($manager, $this->registry), static function () use ($manager): never {
+            self::assertInstanceOf(Note::class, $manager->find(Note::class, 1));   // its counter is the host's entity
+
+            throw new DomainException('refused');
+        });
+
+        self::assertInstanceOf(DomainException::class, $failure);
+        self::assertFalse($manager->contains($host));
+        self::assertFalse($manager->contains($other), 'Cleared, not partially detached: no caller entity silently dropped out alone.');
+        $reloaded = $manager->find(Counter::class, 1);
+        self::assertInstanceOf(Counter::class, $reloaded);
+        $reloaded->value = 42;
+        $manager->flush();
+        self::assertSame(42, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), 'An edit after the refusal is not lost.');
+    }
+
+    /**
+     * QA-TD11-L4: a getReference() proxy to a row the run inserted fires no postLoad; it is still forgotten after the
+     * refusal (everything that entered the identity map during the run is detached).
+     */
+    #[DataProvider('allServers')]
+    public function testARefusalForgetsAReferenceToARowTheRunInserted(string $server): void
+    {
+        $this->boot($server);
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $failure = $this->failure(DoctrineTransactionRunner::forEntityManager($manager, $this->registry), function () use ($manager): never {
+            $this->connection->insert('ddrb_counter', ['id' => 9, 'counter_value' => 9]);
+            $manager->getReference(Counter::class, 9);
+
+            throw new DomainException('refused');
+        });
+
+        self::assertInstanceOf(DomainException::class, $failure);
+        self::assertNull($manager->find(Counter::class, 9), 'No ghost proxy left in the identity map.');
+        self::assertTrue($manager->contains($host), 'The caller\'s entity stays managed.');
     }
 
     /**
