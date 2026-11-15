@@ -26,8 +26,22 @@ Target 1.1.0.
     registry, or cleared without one (as in 1.0.0);
   - domain failure after the operation changed or persisted something, or flushed inside the runner's transaction:
     cleared, same instance, never reset;
-  - domain failure that left nothing pending (a plain refusal): the manager is left untouched, so the host's entities
-    stay managed.
+  - domain failure that re-hydrated an entity already managed (`refresh()`, a proxy initialised inside the run):
+    cleared;
+  - otherwise (a refusal): only the entities the run loaded are detached, since they may hold rows or values the
+    rollback undid (QA-TD11-M1: a row inserted or a value updated through DBAL, then found, stayed in the identity
+    map); the host's other entities stay managed.
+  The run is watched by a per-run `postFlush` / `postLoad` listener (removed in `finally`) and an identity-map
+  snapshot taken when the run starts.
+- The pending-change check looks at the scheduled insertions, deletions and collection changes first and calls
+  `UnitOfWork::computeChangeSets()` only when there are none; its cost (a scan of the identity map) and side effects
+  (cascade-persist runs `prePersist` and may assign generated ids) are documented (QA-TD11-L2).
+- A nested domain failure clears the caller's pending changes too: documented in the README, with the rule not to
+  continue the same unit of work after catching it (QA-TD11-M2).
+- **DBAL 3 emulated nesting** (savepoints off): `ConnectionRepairer` rolls nested leftovers back level by level instead
+  of closing, and after a failed real `ROLLBACK` it closes and then begins and rolls back once, because
+  `Connection::close()` keeps the rollback-only flag and the next commit would fail (QA-TD11-L1). New optional
+  constructor argument `ConnectionRepairer(?bool $emulatedNesting = null)` (null = detect: DBAL 3 without savepoints).
 
 ## [1.0.0] - 2026-11-15
 
