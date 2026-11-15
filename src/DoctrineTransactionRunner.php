@@ -16,6 +16,7 @@ use Nowo\TransactionContract\TransientStorageFailure;
 use PDOException;
 use Throwable;
 
+use function array_diff_key;
 use function array_intersect_key;
 use function assert;
 use function spl_object_id;
@@ -37,8 +38,9 @@ use function spl_object_id;
  *     reset through the ManagerRegistry when one is given, and cleared otherwise (its state cannot be trusted);
  *   - domain failure (any other exception) with the manager open: cleared when the operation flushed inside the
  *     runner's transaction, re-hydrated an entity that was already managed (refresh(), a proxy initialised), or left
- *     changes pending; otherwise only the entities the run loaded are detached (they may hold data the rollback
- *     undid), so a caller's other entities stay managed after a plain refusal. Inside a nested run, "pending" includes
+ *     changes pending; otherwise every entity that entered the identity map during the run (loaded, referenced) is
+ *     detached, since it may hold data the rollback undid, and a caller's other entities stay managed after a plain
+ *     refusal. If that detach cascaded into a caller's entity, the manager is cleared instead. Inside a nested run, "pending" includes
  *     the caller's own pending changes: a nested refusal clears them too.
  *   Clearing or resetting a shared manager also discards the caller's own pending changes, as
  *   EntityManager::wrapInTransaction() does.
@@ -97,7 +99,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         $entryLevel = $connection->getTransactionNestingLevel();
         $observer   = new RunObserver();
         // Entities managed before the run: one the run re-hydrates (refresh(), a proxy initialised) belongs to the caller.
-        $before = $manager instanceof EntityManagerInterface ? $this->managedObjectIds($manager) : [];
+        $before = $manager instanceof EntityManagerInterface ? $this->managedEntities($manager) : [];
         $manager?->getEventManager()->addEventListener([Events::postFlush, Events::postLoad], $observer);
 
         try {
@@ -125,7 +127,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * @param array<int, true> $before spl_object_id of the entities managed when the run started
+     * @param array<int, object> $before The entities managed when the run started, by spl_object_id
      */
     private function discardPendingChanges(EntityManagerInterface $manager, Throwable $failure, RunObserver $observer, array $before): void
     {
@@ -148,10 +150,21 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
             return;
         }
 
-        // Entities the run loaded may hold rolled-back data (a row written through DBAL, then found): forget them.
-        foreach ($observer->loaded as $entity) {
+        // Everything that entered the identity map during the run may hold rolled-back data (a row written through
+        // DBAL, then found or referenced with getReference(), which fires no postLoad): forget it.
+        foreach (array_diff_key($this->managedEntities($manager), $before) as $entity) {
             if ($manager->contains($entity)) {
                 $manager->detach($entity);
+            }
+        }
+
+        // A detach cascades along cascade-detach associations: if it reached a caller's entity, a partial detach would
+        // silently drop that entity alone (its later edits lost), so clear instead. The same when changes are pending.
+        foreach ($before as $entity) {
+            if (!$manager->contains($entity)) {
+                $manager->clear();
+
+                return;
             }
         }
 
@@ -161,19 +174,19 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * @return array<int, true>
+     * @return array<int, object> The managed entities (proxies included), by spl_object_id
      */
-    private function managedObjectIds(EntityManagerInterface $manager): array
+    private function managedEntities(EntityManagerInterface $manager): array
     {
-        $ids = [];
+        $entities = [];
 
-        foreach ($manager->getUnitOfWork()->getIdentityMap() as $entities) {
-            foreach ($entities as $entity) {
-                $ids[spl_object_id($entity)] = true;
+        foreach ($manager->getUnitOfWork()->getIdentityMap() as $byId) {
+            foreach ($byId as $entity) {
+                $entities[spl_object_id($entity)] = $entity;
             }
         }
 
-        return $ids;
+        return $entities;
     }
 
     private function isStorageFailure(Throwable $failure): bool
