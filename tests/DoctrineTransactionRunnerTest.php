@@ -4,18 +4,24 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests;
 
+use Doctrine\Common\EventManager;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
 use Doctrine\DBAL\Exception\DeadlockException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\ManagerRegistry;
 use Doctrine\Persistence\ObjectManager;
+use DomainException;
 use Exception;
 use LogicException;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
+use Nowo\TransactionDoctrine\FlushObserver;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use stdClass;
 
 final class DoctrineTransactionRunnerTest extends TestCase
 {
@@ -70,20 +76,116 @@ final class DoctrineTransactionRunnerTest extends TestCase
         self::assertSame(TransientStorageFailure::DEFAULT_MESSAGE, $caught->getMessage());
     }
 
-    public function testADomainFailureRollsBackClearsTheManagerAndKeepsTheConnection(): void
+    public function testADomainFailureThatLeftChangesPendingClearsTheManagerWithoutResettingIt(): void
     {
         $connection = $this->connection([0, 1, 1]);
         $connection->expects($this->once())->method('rollBack');
         $connection->expects($this->never())->method('close');
-        $manager = $this->manager($connection, true);
+        $manager = $this->manager($connection, true, pending: true);
         $manager->expects($this->once())->method('clear');
+        $manager->expects($this->never())->method('close');
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManager')->willReturn($manager);
+        $registry->expects($this->never())->method('resetManager');
         $manager->expects($this->never())->method('flush');
         $bug = new LogicException('validation failed');
 
         $this->expectExceptionObject($bug);
 
-        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($bug): never {
+        DoctrineTransactionRunner::forEntityManager($manager, $registry)->run(static function () use ($bug): never {
             throw $bug;
+        });
+    }
+
+    public function testADomainRefusalWithNothingPendingLeavesTheHostManagerAlone(): void
+    {
+        $connection = $this->connection([0, 1, 1]);
+        $manager    = $this->manager($connection, true);
+        $manager->expects($this->never())->method('clear');
+        $manager->expects($this->never())->method('close');
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManager')->willReturn($manager);
+        $registry->expects($this->never())->method('resetManager');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager, $registry)->run(static function () use ($refusal): never {
+            throw $refusal;
+        });
+    }
+
+    public function testADomainFailureAfterAFlushInsideTheOperationClears(): void
+    {
+        $connection = $this->connection([0, 1, 1]);
+        /** @var list<FlushObserver> $listeners */
+        $listeners = [];
+        $events    = $this->createMock(EventManager::class);
+        $events->method('addEventListener')->willReturnCallback(static function (array|string $names, object $listener) use (&$listeners): void {
+            if ($listener instanceof FlushObserver) {
+                $listeners[] = $listener;
+            }
+        });
+        $events->expects($this->once())->method('removeEventListener');
+        $manager = $this->manager($connection, true, events: $events);
+        $manager->expects($this->once())->method('clear');
+        $refusal = new DomainException('refused after flushing');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use (&$listeners, $refusal): never {
+            foreach ($listeners as $listener) {
+                $listener->postFlush();   // the operation flushed: its writes are rolled back, the identity map is stale
+            }
+
+            throw $refusal;
+        });
+    }
+
+    public function testAnUnreadableUnitOfWorkCountsAsPending(): void
+    {
+        $connection = $this->connection([0, 1, 1]);
+        $unitOfWork = $this->createMock(UnitOfWork::class);
+        $unitOfWork->method('computeChangeSets')->willThrowException(new LogicException('new entity found through a relationship'));
+        $manager = $this->manager($connection, true, unitOfWork: $unitOfWork);
+        $manager->expects($this->once())->method('clear');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($refusal): never {
+            throw $refusal;
+        });
+    }
+
+    public function testAStorageFailureResetsAnOpenManagerThroughTheRegistry(): void
+    {
+        $connection = $this->connection([0, 1, 1]);
+        $manager    = $this->manager($connection, true);
+        $manager->expects($this->once())->method('close');
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManager')->willReturn($manager);
+        $registry->expects($this->once())->method('resetManager');
+        $duplicate = new UniqueConstraintViolationException($this->driverError(1062, '23000'), null);
+
+        $this->expectExceptionObject($duplicate);
+
+        DoctrineTransactionRunner::forEntityManager($manager, $registry)->run(static function () use ($duplicate): never {
+            throw $duplicate;
+        });
+    }
+
+    public function testAStorageFailureWithoutARegistryClearsAnOpenManager(): void
+    {
+        $connection = $this->connection([0, 1, 1]);
+        $manager    = $this->manager($connection, true);
+        $manager->expects($this->once())->method('clear');
+        $duplicate = new LogicException('wrapper', 0, new UniqueConstraintViolationException($this->driverError(1062, '23000'), null));
+
+        $this->expectExceptionObject($duplicate);
+
+        DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($duplicate): never {
+            throw $duplicate;
         });
     }
 
@@ -147,13 +249,40 @@ final class DoctrineTransactionRunnerTest extends TestCase
         return $connection;
     }
 
-    private function manager(Connection $connection, bool $open): EntityManagerInterface&MockObject
+    private function manager(Connection $connection, bool $open, bool $pending = false, ?UnitOfWork $unitOfWork = null, ?EventManager $events = null): EntityManagerInterface&MockObject
     {
+        if (!$unitOfWork instanceof UnitOfWork) {
+            $unitOfWork = $this->createMock(UnitOfWork::class);
+            $unitOfWork->method('getScheduledEntityInsertions')->willReturn($pending ? [new stdClass()] : []);
+            $unitOfWork->method('getScheduledEntityUpdates')->willReturn([]);
+            $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);
+            $unitOfWork->method('getScheduledCollectionDeletions')->willReturn([]);
+            $unitOfWork->method('getScheduledCollectionUpdates')->willReturn([]);
+        }
+
         $manager = $this->createMock(EntityManagerInterface::class);
         $manager->method('getConnection')->willReturn($connection);
         $manager->method('isOpen')->willReturn($open);
+        $manager->method('getUnitOfWork')->willReturn($unitOfWork);
+        // ORM 2's interface has no native return type here, so the mock would return null.
+        $manager->method('getEventManager')->willReturn($events ?? $this->createMock(EventManager::class));
 
         return $manager;
+    }
+
+    private function driverError(int $code, string $sqlState): DriverExceptionInterface
+    {
+        return new class('driver error', $code, $sqlState) extends Exception implements DriverExceptionInterface {
+            public function __construct(string $message, int $code, private readonly string $sqlState)
+            {
+                parent::__construct($message, $code);
+            }
+
+            public function getSQLState(): string
+            {
+                return $this->sqlState;
+            }
+        };
     }
 
     private function deadlock(): DeadlockException
