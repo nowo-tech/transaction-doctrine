@@ -7,6 +7,18 @@ on:
     branches: [main, master]
 
 jobs:
+  git-hygiene:
+    name: Git history (no AI co-author trailers)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for Cursor / Claude co-author trailers (REQ-GIT-001)
+        run: sh .scripts/check-no-cursor-coauthor.sh HEAD
+
   test:
     name: PHP ${{ matrix.php }}${{ matrix.deps != '' && format(' - {0}', matrix.deps) || '' }}
     runs-on: ubuntu-latest
@@ -151,6 +163,12 @@ jobs:
 
       - name: PHPStan
         run: vendor/bin/phpstan analyse --memory-limit=512M --no-progress
+
+      - name: Rector (dry run)
+        run: composer rector-dry
+
+      - name: Composer audit
+        run: composer audit
 
   code-style:
     name: Code style

@@ -1,0 +1,63 @@
+name: transaction-doctrine
+
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - .:/app
+      - composer-cache:/root/.composer/cache
+      - coverage-data:/app/coverage
+    environment:
+      XDEBUG_MODE: coverage
+      COMPOSER_ALLOW_SUPERUSER: "1"
+      # Real-database suite (make test-with-db); throwaway local credentials only.
+      TD_MYSQL_URL: mysql://root:root@mysql:3306/ddrb
+      TD_MARIADB_URL: mysql://root:root@mariadb:3306/ddrb
+      TD_POSTGRES_URL: pgsql://postgres:root@postgres:5432/ddrb
+    tty: true
+    stdin_open: true
+    command: ["tail", "-f", "/dev/null"]
+
+  # Database services are only started by `make test-with-db` (profile "db"); no host ports are published.
+  mysql:
+    image: mysql:8.4
+    profiles: ["db"]
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ddrb
+    expose: ["3306"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+      interval: 5s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11.4
+    profiles: ["db"]
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: ddrb
+    expose: ["3306"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    environment:
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: ddrb
+    expose: ["5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      retries: 30
+
+volumes:
+  composer-cache:
+  coverage-data:

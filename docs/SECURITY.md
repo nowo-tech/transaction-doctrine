@@ -2,6 +2,16 @@
 
 Security posture of `nowo-tech/transaction-doctrine`.
 
+## Table of contents
+
+- [Reporting a vulnerability](#reporting-a-vulnerability)
+- [Scope and attack surface](#scope-and-attack-surface)
+- [Integrity](#integrity)
+- [Information disclosure](#information-disclosure)
+- [Dependencies](#dependencies)
+- [Logging](#logging)
+- [Release security checklist (12.4.1)](#release-security-checklist-1241)
+
 ## Reporting a vulnerability
 
 Report privately to <hectorfranco@nowo.tech>. Do not open a public issue for an unfixed vulnerability.
@@ -30,3 +40,28 @@ error codes only.
 
 `php`, `doctrine/dbal ^3.8.2 || ^4.0` and `nowo-tech/transaction-contract`; `doctrine/orm` and `doctrine/persistence` are
 optional. Development tooling is `require-dev` and excluded from the archive by `.gitattributes`.
+
+## Logging
+
+The package logs nothing. Failures are rethrown (transient storage failures as `TransientStorageFailure` with a fixed
+message); what the runner did to the connection or the entity manager is documented in the README and USAGE, so a host
+that wants an audit trail logs the exception it catches. Never log the `previous` chain verbatim: it can contain SQL
+and parameters.
+
+## Release security checklist (12.4.1)
+
+Confirm each item before tagging (a note in the release PR is enough).
+
+| Item | Status for this package |
+|------|-------------------------|
+| `docs/SECURITY.md` and `.github/SECURITY.md` current | This file + the GitHub policy template |
+| `.env` ignored | `.gitignore` ignores `.env`, `.env.local`, `.env.*.local`; the package reads no environment (the test suite reads `TD_*_URL`) |
+| No secrets in the repository | Only throwaway local / CI database passwords for test containers |
+| Safe recipe / configuration | No Flex recipe, no configuration |
+| Input / output | Builds no SQL from input; only DBAL transaction statements |
+| Dependencies | `doctrine/dbal ^3.8.2 \|\| ^4.0`, `nowo-tech/transaction-contract`; CI runs `composer audit` |
+| Logs | Nothing logged; storage errors stay in `getPrevious()` |
+| Cryptography | Not applicable |
+| Permissions / exposure | No services, routes, commands or files |
+| Limits / DoS | No retry loop (one attempt); repair is bounded by the nesting level |
+| AI security audit (REQ-SEC-004) | `BUNDLES_SECURITY_ANALYSIS.md` Appendix QA (2026-11-15): Pass for 1.0.0 and 1.1.0 |

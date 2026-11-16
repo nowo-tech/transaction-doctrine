@@ -8,12 +8,11 @@
 >
     <testsuites>
         <testsuite name="Unit">
-            <directory>tests</directory>
-            <exclude>tests/Database</exclude>
+            <directory>tests/Unit</directory>
         </testsuite>
         <!-- Real MySQL / MariaDB / PostgreSQL tests: skipped unless TD_*_URL is set. -->
         <testsuite name="Database">
-            <directory>tests/Database</directory>
+            <directory>tests/Integration/Database</directory>
         </testsuite>
     </testsuites>
     <source>
