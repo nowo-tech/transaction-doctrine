@@ -5,7 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Table of contents
+
+- [[Unreleased]](#unreleased)
+- [[1.1.0] - 2026-11-15](#110---2026-11-15)
+- [[1.0.0] - 2026-11-15](#100---2026-11-15)
+
 ## [Unreleased]
+
+### Changed
+
+- No change under `src/`: repository tooling and documentation aligned with the nowo-tech package requirements
+  (REQ compliance sweep 2026-11-16).
+- Development: Docker image + `docker-compose.yml` (MySQL 8.4, MariaDB 11.4 and PostgreSQL 16 behind the `db`
+  profile), root `Makefile` (`release-check`, `test-with-db`, `setup-hooks`, `igor`, …), git hooks; PHPStan now
+  includes the `nowo-tech/phpstan-frankenphp` classic and worker rulesets; Igor worker-state audit; CI adds Rector,
+  Igor, `composer audit` and a git-history check; tests moved to `tests/Unit/` and `tests/Integration/Database/`.
+- `composer.json`: `archive.exclude`, `support.docs`; `branch-alias` `dev-main` → `1.1.x-dev`.
+
+### Documentation
+
+- `docs/INSTALLATION.md`, `CONFIGURATION.md`, `USAGE.md` (the behaviour reference moved there from the README),
+  `UPGRADING.md`, `RELEASE.md`, `ENGRAM.md`, `PSR.md`, `SPEC-DRIVEN-DEVELOPMENT.md`, `SPEC-KIT.md`; GitHub Spec Kit
+  baseline (`specs/001-baseline/`, 5/5 files mapped); release security checklist (12.4.1) and logging policy in
+  `SECURITY.md`; canonical README.
+- `.github/`: issue / pull request templates, `CODEOWNERS`, `SECURITY.md`, Copilot instructions, Dependabot,
+  release, release-sync, PR-title lint and stale workflows. `.cursor/` rules and Engram MCP config.
 
 ## [1.1.0] - 2026-11-15
 
