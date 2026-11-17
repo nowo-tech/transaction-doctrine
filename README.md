@@ -6,8 +6,10 @@
 
 Safe plain-Doctrine default for [`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract):
 `DoctrineTransactionRunner` implements `TransactionRunnerInterface` with **one attempt and no retry**, for a bundle
-to use when the host wires no adapter. No Symfony; `doctrine/dbal` required, `doctrine/orm` and
-`doctrine/persistence` optional.
+to use when the host wires no adapter. Since 1.3.0 also **write units** that replay a deadlock or lock wait timeout,
+and an **optional Symfony bundle** (`#[AsWriteUnit]`, Messenger middleware, one lock-conflict answer **409 +
+`Retry-After`**, worker connection hygiene). `doctrine/dbal` required; `doctrine/orm`, `doctrine/persistence` and the
+Symfony packages optional.
 
 ![FrankenPHP Friendly Worker Mode](docs/images/frankenphp-friendly.png)
 
@@ -40,6 +42,25 @@ rethrown unchanged. The full behaviour reference (failure table, nested runs, DB
 
 Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as
 `nowo-tech/doctrine-deadlock-retry-bundle` 3.0).
+
+## Write units and the 409 lock-conflict answer (1.3.0)
+
+```php
+// Programmatic: replayed up to 3 times (full jitter) after a deadlock or lock wait timeout, outermost unit only.
+$writeUnit->run(fn (int $attempt) => $runner->run(fn () => $tasks->get($id)->moveTo($column)));
+```
+
+```php
+#[AsWriteUnit]                       // controller: replayed with freshly resolved arguments
+public function move(Task $task): Response { /* ... */ }
+```
+
+With `NowoTransactionDoctrineBundle` registered, a write unit that still conflicts answers **409** (or 503 with
+`conflict_response.status: 503`) with `Retry-After`: JSON `{"error": "concurrency_conflict", "message": …}` or a
+branded *Try again* page (UiKit's error page when installed). Hosts and bundles map their own exceptions with
+`LockConflictExceptionInterface` or a `ConflictExceptionMapperInterface` service, and shape their own answers with a
+`ConflictResponseFormatterInterface` service, never by route name. See [Usage](docs/USAGE.md#write-units-130) and
+[Configuration](docs/CONFIGURATION.md#symfony-bundle).
 
 ## Logging (optional)
 
@@ -94,7 +115,7 @@ is safe in a long-running worker.
 - **Tests:** PHPUnit: unit tests (`tests/Unit`) plus a real-database suite (`tests/Integration/Database`: MySQL 8.4,
   MariaDB 11.4, PostgreSQL 16) that runs when `TD_MYSQL_URL`, `TD_MARIADB_URL` and `TD_POSTGRES_URL` are set
   (`make test-with-db`; the CI job "Real databases" runs it on DBAL 4 + ORM 3, DBAL 3 + ORM 3 and DBAL 3 + ORM 2).
-- **PHP (lines):** **100%** of `src/` (121/121 lines, 23/23 methods; CI gate on PHP 8.2; locally `make test-coverage`).
+- **PHP (lines):** **100%** of `src/` (567/567 lines, 77/77 methods; CI gate on PHP 8.2; locally `make test-coverage`).
 - **TS/JS:** N/A
 - **Python:** N/A
 

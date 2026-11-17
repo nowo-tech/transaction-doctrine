@@ -14,6 +14,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Write units** (Beacon KIT-79, spec 239): `WriteUnit` (`WriteUnitInterface`) replays a unit of work after a lock
+  conflict, a deadlock or a lock wait timeout by default (`TransientFailureClassifier` kinds; `serialization_failure` /
+  `retryable` opt-in), found in the previous chain or inside a Messenger `HandlerFailedException`. Up to 3 attempts
+  with a full-jitter pause (20 ms floor, 100 ms base, 200 ms cap; `WriteUnitPolicy`). Only the outermost unit replays:
+  inside an open transaction the work runs once. Between attempts `DoctrineStateRepairer` rolls back leftover levels
+  (through `ConnectionRepairer`), resets closed entity managers and clears open ones. The last conflict becomes
+  `ConcurrencyConflict`, a contract `TransientStorageFailure` with `attempts`, `kind` and a Retry-After hint.
+- `#[AsWriteUnit]` controller attribute and `LockConflictExceptionInterface` marker.
+- Optional Symfony bundle `Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle` (config root
+  `nowo_transaction_doctrine`; register it in `config/bundles.php`):
+  - `WriteUnitControllerListener`: `#[AsWriteUnit]` controllers and `controller_routes` run as write units, with the
+    arguments resolved again and an entity user reloaded on a replay;
+  - `WriteUnitMiddleware` (service `nowo_transaction_doctrine.write_unit_middleware`): consumed messages run as write
+    units;
+  - `ConcurrencyConflictResponder`: a lock conflict answers **409 + `Retry-After`** (`conflict_response.status`: 409 or
+    503; `retry_after`), JSON `{"error": "concurrency_conflict", "message"}` or a branded HTML page with *Try again*
+    (`@NowoTransactionDoctrine/conflict.html.twig`, overridable, extends UiKit's error page when installed;
+    translations en / es / fr / de);
+  - exception-mapping hook `ConflictExceptionMapperInterface` and response hook `ConflictResponseFormatterInterface`
+    (autoconfigured tags; no route-name matching; TaskBoard API small ask C2), plus the opt-in
+    `map_transient_failures` mapper;
+  - `ConflictResponsePolicy` (service `nowo_transaction_doctrine.conflict_response_policy`): the one status and
+    `Retry-After` every bundle reads;
+  - `WorkerConnectionHygiene` (`worker_hygiene`): closed managers reset per main request; after a DBAL / ORM failure of
+    a request (at kernel.terminate) or a consumed message, leftover levels rolled back and connected connections pinged.
+- Real-database tests for write units (MySQL 8.4, MariaDB 11.4, PostgreSQL 16): a real deadlock and lock wait timeouts
+  replayed, the last one as `ConcurrencyConflict`, the nested-transaction rule and the repairer.
+
+### Changed
+
+- Owner platform decision: one lock-conflict status, **409 + `Retry-After`**. The bundle's default
+  `conflict_response.status` is 409; `503` keeps the 1.2 behaviour of ChatKit, Wiki and TimeTrack (see UPGRADING).
+- `composer.json`: Symfony, Twig and Messenger packages as dev requirements and suggestions; `branch-alias`
+  `dev-main` → `1.3.x-dev`. Runtime requirements are unchanged.
+- Logging stays constant-message with structured context only (class, code, counters, kind, route name, method).
+
 ## [1.2.0] - 2026-11-17
 
 ### Added

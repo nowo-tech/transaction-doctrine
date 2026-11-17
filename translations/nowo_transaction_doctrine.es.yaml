@@ -1,0 +1,5 @@
+conflict:
+    title: 'Otra persona estaba guardando en el mismo momento'
+    lead: 'Tu cambio no se ha guardado porque los mismos datos se estaban modificando a la vez. No se ha perdido nada: inténtalo de nuevo.'
+    hint: 'Si vuelve a ocurrir, espera unos segundos antes de reintentarlo.'
+    retry: 'Reintentar'

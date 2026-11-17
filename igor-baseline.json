@@ -19,6 +19,26 @@
         "message": "Mutation of state 'loaded' in RunObserver::postLoad()",
         "reason": "@internal value object created by each run() call and detached in finally; it is never a shared service, so its state ends with the call."
       }
+    ],
+    "src/Symfony/EventListener/ConcurrencyConflictResponder.php": [
+      {
+        "message": "Mutation detected on a local reference to a shared service ($response). Risk of State Leak in a worker.",
+        "reason": "The response is built per call (by the responder or a formatter) and returned on the event; it is never a shared service. Setting its status and headers changes nothing that outlives the call (tests/Unit/Symfony/ConcurrencyConflictResponderTest.php, testManyAnswersKeepNoState)."
+      },
+      {
+        "message": "Mutation detected on a local reference to a shared service ($response). Risk of State Leak in a worker.",
+        "reason": "The response is built per call (by the responder or a formatter) and returned on the event; it is never a shared service. Setting its status and headers changes nothing that outlives the call (tests/Unit/Symfony/ConcurrencyConflictResponderTest.php, testManyAnswersKeepNoState)."
+      },
+      {
+        "message": "Mutation detected on a local reference to a shared service ($response). Risk of State Leak in a worker.",
+        "reason": "The response is built per call (by the responder or a formatter) and returned on the event; it is never a shared service. Setting its status and headers changes nothing that outlives the call (tests/Unit/Symfony/ConcurrencyConflictResponderTest.php, testManyAnswersKeepNoState)."
+      }
+    ],
+    "src/Symfony/Messenger/WriteUnitMiddleware.php": [
+      {
+        "message": "Potential Memory Leak: Injection of a closure capturing local state into a shared service.",
+        "reason": "The closure is the work passed to WriteUnit::run() and runs synchronously inside that call; WriteUnit is readonly and never stores it, so it ends with handle() (tests/Unit/Symfony/WriteUnitMiddlewareTest.php)."
+      }
     ]
   }
 }

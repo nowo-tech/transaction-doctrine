@@ -1,0 +1,5 @@
+conflict:
+    title: 'Jemand anderes hat im selben Moment gespeichert'
+    lead: 'Deine Änderung wurde nicht gespeichert, weil dieselben Daten gleichzeitig geändert wurden. Nichts ist verloren: Versuche es erneut.'
+    hint: 'Wenn es weiterhin passiert, warte ein paar Sekunden, bevor du es erneut versuchst.'
+    retry: 'Erneut versuchen'

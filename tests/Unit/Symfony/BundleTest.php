@@ -1,0 +1,164 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony;
+
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
+use Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle;
+use Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures\Attempts;
+use Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures\TestKernel;
+use PHPUnit\Framework\TestCase;
+use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+use function dirname;
+use function json_decode;
+use function sys_get_temp_dir;
+
+/**
+ * The bundle in a minimal application: default wiring, a 503 host, everything switched off, invalid config.
+ *
+ * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
+ * @copyright 2026 Nowo.tech
+ */
+final class BundleTest extends TestCase
+{
+    public static function setUpBeforeClass(): void
+    {
+        (new Filesystem())->remove(sys_get_temp_dir() . '/nowo-transaction-doctrine-tests');
+    }
+
+    public function testTheBundleLivesAtThePackageRoot(): void
+    {
+        self::assertSame(dirname(__DIR__, 3), (new NowoTransactionDoctrineBundle())->getPath());
+    }
+
+    public function testAConflictAnswers409WithTheBrandedPageAndJson(): void
+    {
+        $kernel = $this->boot();
+
+        $page = $kernel->handle(Request::create('/conflict'));
+        self::assertSame(409, $page->getStatusCode());
+        self::assertSame('1', $page->headers->get('Retry-After'));
+        self::assertStringContainsString('Someone else was saving at the same moment', (string) $page->getContent());
+        self::assertStringContainsString('data-testid="concurrency-conflict-retry"', (string) $page->getContent());
+
+        $json = $kernel->handle(Request::create('/api/conflict'));
+        self::assertSame(409, $json->getStatusCode());
+        self::assertSame('concurrency_conflict', json_decode((string) $json->getContent(), true)['error']);
+        $kernel->shutdown();
+    }
+
+    public function testAWriteUnitControllerIsReplayed(): void
+    {
+        $kernel   = $this->boot(['backoff' => ['floor_ms' => 0, 'base_ms' => 0, 'cap_ms' => 0]]);
+        $response = $kernel->handle(Request::create('/unit', 'POST'));
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+        self::assertSame('saved after 2', $response->getContent());
+        $kernel->shutdown();
+    }
+
+    public function testAWriteUnitThatAlwaysConflictsAnswersTheConflict(): void
+    {
+        $kernel   = $this->boot(['max_attempts' => 2, 'backoff' => ['floor_ms' => 0, 'base_ms' => 0, 'cap_ms' => 0], 'conflict_response' => ['retry_after' => 3]]);
+        $response = $kernel->handle(Request::create('/always', 'POST', [], [], [], ['HTTP_ACCEPT' => 'application/json']));
+        $attempts = $kernel->getContainer()->get(Attempts::class);
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('3', $response->headers->get('Retry-After'));
+        self::assertInstanceOf(Attempts::class, $attempts);
+        self::assertSame(2, $attempts->count);
+        $kernel->shutdown();
+    }
+
+    public function testAListedRouteIsReplayed(): void
+    {
+        $kernel   = $this->boot(['controller_attribute' => false, 'controller_routes' => ['listed_route'], 'backoff' => ['floor_ms' => 0, 'base_ms' => 0, 'cap_ms' => 0]]);
+        $response = $kernel->handle(Request::create('/listed', 'POST'));
+
+        self::assertSame('saved after 2', $response->getContent());
+        self::assertSame(500, $kernel->handle(Request::create('/unit', 'POST'))->getStatusCode());
+        $kernel->shutdown();
+    }
+
+    public function testAHostThatKeeps503(): void
+    {
+        $kernel   = $this->boot(['conflict_response' => ['status' => 503, 'retry_after' => 5]]);
+        $response = $kernel->handle(Request::create('/conflict'));
+        $policy   = $kernel->getContainer()->get('nowo_transaction_doctrine.conflict_response_policy');
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertSame('5', $response->headers->get('Retry-After'));
+        self::assertInstanceOf(ConflictResponsePolicy::class, $policy);
+        self::assertSame(503, $policy->status);
+        self::assertSame(503, $kernel->getContainer()->getParameter('nowo_transaction_doctrine.conflict_response.status'));
+        self::assertTrue($kernel->getContainer()->has('nowo_transaction_doctrine.write_unit_middleware'));
+        self::assertTrue($kernel->getContainer()->has('nowo_transaction_doctrine.write_unit'));
+        $kernel->shutdown();
+    }
+
+    public function testEverythingCanBeSwitchedOff(): void
+    {
+        $kernel = $this->boot([
+            'controller_attribute' => false,
+            'messenger_middleware' => false,
+            'worker_hygiene'       => false,
+            'conflict_response'    => ['enabled' => false],
+        ]);
+        $container = $this->testContainer($kernel);
+
+        self::assertSame(Response::HTTP_INTERNAL_SERVER_ERROR, $kernel->handle(Request::create('/conflict'))->getStatusCode());
+        self::assertFalse($container->has('nowo_transaction_doctrine.write_unit_middleware'));
+        self::assertFalse($container->has('nowo_transaction_doctrine.worker_connection_hygiene'));
+        self::assertFalse($container->has('nowo_transaction_doctrine.write_unit_controller_listener'));
+        self::assertTrue($container->has('nowo_transaction_doctrine.conflict_response_policy'));
+        $kernel->shutdown();
+    }
+
+    public function testTransientFailuresCanBeMapped(): void
+    {
+        $kernel    = $this->boot(['conflict_response' => ['map_transient_failures' => true]]);
+        $container = $this->testContainer($kernel);
+
+        self::assertTrue($container->has('nowo_transaction_doctrine.transient_failure_conflict_mapper'));
+        $kernel->shutdown();
+    }
+
+    public function testAnInvalidStatusIsRefused(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->boot(['conflict_response' => ['status' => 500]]);
+    }
+
+    public function testAnUnknownReplayKindIsRefused(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->boot(['replay_on' => ['nope']]);
+    }
+
+    private function testContainer(TestKernel $kernel): ContainerInterface
+    {
+        $container = $kernel->getContainer()->get('test.service_container');
+        self::assertInstanceOf(ContainerInterface::class, $container);
+
+        return $container;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function boot(array $config = []): TestKernel
+    {
+        $kernel = new TestKernel($config);
+        $kernel->boot();
+
+        return $kernel;
+    }
+}

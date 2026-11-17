@@ -1,0 +1,32 @@
+{#
+  nowo-tech/transaction-doctrine: the answer to a write that met a database lock conflict on each attempt (409 by
+  default, or 503 with conflict_response.status) — "Someone else was saving at the same moment" with *Try again*.
+  Rendered by Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder.
+
+  Variables: status_code (409 | 503), retry_url (the page itself for a GET, else the same-host referer, else home),
+  retry_after (seconds), ui_kit (whether @NowoUiKit/error/status.html.twig exists).
+
+  Override: templates/bundles/NowoTransactionDoctrineBundle/conflict.html.twig, or conflict_response.template.
+  Texts: translation domain nowo_transaction_doctrine (conflict.title | lead | hint | retry).
+#}
+{% if ui_kit %}
+    {{- include('@NowoTransactionDoctrine/conflict_ui_kit.html.twig') -}}
+{% else %}
+<!DOCTYPE html>
+<html lang="{{ app.request.locale|default('en') }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>{{ status_code }} — {{ 'conflict.title'|trans({}, 'nowo_transaction_doctrine') }}</title>
+</head>
+<body>
+    <main data-testid="concurrency-conflict">
+        <h1>{{ 'conflict.title'|trans({}, 'nowo_transaction_doctrine') }}</h1>
+        <p>{{ 'conflict.lead'|trans({}, 'nowo_transaction_doctrine') }}</p>
+        <p>{{ 'conflict.hint'|trans({}, 'nowo_transaction_doctrine') }}</p>
+        <p><a href="{{ retry_url }}" data-testid="concurrency-conflict-retry">{{ 'conflict.retry'|trans({}, 'nowo_transaction_doctrine') }}</a></p>
+    </main>
+</body>
+</html>
+{% endif %}

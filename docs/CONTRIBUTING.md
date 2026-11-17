@@ -1,7 +1,7 @@
 # Contributing
 
 This package is small on purpose: one runner and the two helpers it needs (classifier, repairer), on top of
-`nowo-tech/transaction-contract`. No Symfony.
+`nowo-tech/transaction-contract`. No runtime Symfony dependency (the bundle in `src/Symfony` is optional).
 
 ## Table of contents
 

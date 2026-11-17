@@ -1,0 +1,5 @@
+conflict:
+    title: 'Quelqu’un d’autre enregistrait au même moment'
+    lead: 'Votre modification n’a pas été enregistrée car les mêmes données étaient modifiées au même moment. Rien n’est perdu : réessayez.'
+    hint: 'Si cela se reproduit, attendez quelques secondes avant de réessayer.'
+    retry: 'Réessayer'

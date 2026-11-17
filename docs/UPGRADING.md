@@ -3,11 +3,80 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [To 1.3.0](#to-130)
+  - [Default lock-conflict status: 409](#default-lock-conflict-status-409)
+  - [Migration notes for ChatKit, Wiki and TimeTrack](#migration-notes-for-chatkit-wiki-and-timetrack)
 - [To 1.2.0](#to-120)
 - [1.0 to 1.1](#10-to-11)
 - [1.0.0](#100)
 
 ## Unreleased
+
+### To 1.3.0
+
+From **1.2.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
+
+The library API is unchanged (runner, classifier, repairer). New, opt-in:
+
+- write units (`WriteUnit`, `WriteUnitInterface`, `WriteUnitPolicy`, `#[AsWriteUnit]`, `ConcurrencyConflict`,
+  `LockConflictExceptionInterface`, `DoctrineStateRepairer`);
+- an optional Symfony bundle, `Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle`. It is **not**
+  registered by itself (the package type stays `library`): add it to `config/bundles.php` to get the `#[AsWriteUnit]`
+  listener, the Messenger middleware service, the lock-conflict responder, worker connection hygiene and the shared
+  `ConflictResponsePolicy`. See [Installation](INSTALLATION.md#symfony-bundle-optional) and
+  [Configuration](CONFIGURATION.md#symfony-bundle).
+
+Without the bundle registered nothing changes in your application.
+
+### Default lock-conflict status: 409
+
+Owner platform decision (Beacon re-audit 2026-11-17, OTHER REQ-SCALE-002): **one lock-conflict status, 409 Conflict +
+`Retry-After`**. With the bundle registered:
+
+- a write unit that still conflicts on its last attempt is answered **409** with `Retry-After: 1`;
+- `ConflictResponsePolicy::$status` (service `nowo_transaction_doctrine.conflict_response_policy`) is **409**, and the
+  bundles that read it (ChatKit, Wiki and TimeTrack from their next minor) move their transient-failure answer from
+  503 to 409 with it.
+
+Clients that already retry on 503 + `Retry-After` must also retry on 409 + `Retry-After`. A host that relies on 503
+keeps it, for the responder and for every bundle that reads the policy:
+
+```yaml
+# config/packages/nowo_transaction_doctrine.yaml
+nowo_transaction_doctrine:
+    conflict_response:
+        status: 503        # 409 (default) or 503
+        retry_after: 1
+```
+
+### Migration notes for ChatKit, Wiki and TimeTrack
+
+Each bundle keeps its JSON field names; only the status changes, read from the shared policy. In each bundle:
+
+1. `composer.json`: `"nowo-tech/transaction-doctrine": "^1.3"`.
+2. Inject `?Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy` into the storage-failure listener
+   (`service('nowo_transaction_doctrine.conflict_response_policy')->nullOnInvalid()`), falling back to
+   `new ConflictResponsePolicy()` (409, 1 s) when the host did not register the bundle.
+3. Replace the hard-coded 503:
+   - JSON: `Response::HTTP_SERVICE_UNAVAILABLE` → `$policy->status`, and `['Retry-After' => (string) $retry]` →
+     `$policy->headers($hint)` (`$hint` = `TransientStorageFailure::retryAfterSeconds()`, or `null` for a bare DBAL
+     `RetryableException`);
+   - HTML: `new ServiceUnavailableHttpException($retry, $message, $failure)` →
+     `$policy->httpException($message, $failure, $hint)`.
+4. UPGRADING of the bundle: "transient storage failures answer 409 + Retry-After (was 503); set
+   `nowo_transaction_doctrine.conflict_response.status: 503` to keep 503", and a minor version bump.
+
+| Bundle | Class | JSON shape kept | 1.2 status → 1.3 default |
+|--------|-------|-----------------|--------------------------|
+| ChatKit | `Http\ChatApiExceptionListener::onStorageFailure()` | `{ok: false, error: "unavailable"}` | 503 → 409 |
+| Wiki | `Transaction\WikiStorageFailureSubscriber` (`onApiException`: `{err, ECODE: "SERVER_002"}`; `onException`: `{error: "unavailable"}`) | both | 503 → 409 |
+| TimeTrack | `EventSubscriber\StorageFailureSubscriber` | `{error: "unavailable", message}` (client API, CORS headers kept) | 503 → 409 |
+
+Their unique-key "conflict" answers (409 without `Retry-After`) are unchanged.
 
 ## To 1.2.0
 

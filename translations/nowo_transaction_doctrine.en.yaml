@@ -1,0 +1,5 @@
+conflict:
+    title: 'Someone else was saving at the same moment'
+    lead: 'Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again.'
+    hint: 'If it keeps happening, wait a few seconds before trying again.'
+    retry: 'Try again'

@@ -1,6 +1,6 @@
 {
     "name": "nowo-tech/transaction-doctrine",
-    "description": "Safe plain-Doctrine default for nowo-tech/transaction-contract: a one-attempt TransactionRunnerInterface that never leaves a poisoned connection (close instead of a failing rollback after a nested deadlock), plus the transient-failure classifier and connection repairer. No Symfony.",
+    "description": "Safe plain-Doctrine default for nowo-tech/transaction-contract: a one-attempt TransactionRunnerInterface that never leaves a poisoned connection (close instead of a failing rollback after a nested deadlock), the transient-failure classifier and connection repairer, and write units that replay a deadlock or lock wait timeout. Optional Symfony bundle: #[AsWriteUnit], Messenger middleware, 409 + Retry-After conflict responder, worker connection hygiene.",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -11,7 +11,9 @@
         "deadlock",
         "savepoint",
         "worker",
-        "frankenphp"
+        "frankenphp",
+        "symfony",
+        "write-unit"
     ],
     "homepage": "https://github.com/nowo-tech/transaction-doctrine",
     "support": {
@@ -47,7 +49,20 @@
         "phpstan/phpstan": "^2.0",
         "phpstan/phpstan-phpunit": "^2.0",
         "phpunit/phpunit": "^10.0 || ^11.0",
-        "rector/rector": "^2.0"
+        "rector/rector": "^2.0",
+        "symfony/clock": "^6.4 || ^7.0 || ^8.0",
+        "symfony/config": "^6.4 || ^7.0 || ^8.0",
+        "symfony/dependency-injection": "^6.4 || ^7.0 || ^8.0",
+        "symfony/event-dispatcher": "^6.4 || ^7.0 || ^8.0",
+        "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
+        "symfony/http-foundation": "^6.4 || ^7.0 || ^8.0",
+        "symfony/http-kernel": "^6.4 || ^7.0 || ^8.0",
+        "symfony/messenger": "^6.4 || ^7.0 || ^8.0",
+        "symfony/security-core": "^6.4 || ^7.0 || ^8.0",
+        "symfony/translation": "^6.4 || ^7.0 || ^8.0",
+        "symfony/twig-bundle": "^6.4 || ^7.0 || ^8.0",
+        "symfony/yaml": "^6.4 || ^7.0 || ^8.0",
+        "twig/twig": "^3.0"
     },
     "autoload": {
         "psr-4": {
@@ -98,12 +113,17 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "1.1.x-dev"
+            "dev-main": "1.3.x-dev"
         }
     },
     "suggest": {
-        "doctrine/orm": "For DoctrineTransactionRunner::forEntityManager()",
-        "doctrine/persistence": "To reset a closed entity manager through a ManagerRegistry"
+        "doctrine/orm": "For DoctrineTransactionRunner::forEntityManager() and write units on entity managers",
+        "doctrine/persistence": "To reset a closed entity manager through a ManagerRegistry (required by WriteUnit)",
+        "symfony/http-kernel": "For the optional NowoTransactionDoctrineBundle (#[AsWriteUnit], 409 conflict responder, worker hygiene)",
+        "symfony/messenger": "For WriteUnitMiddleware (replays a consumed message after a lock conflict)",
+        "symfony/clock": "To pause between write-unit attempts through the Symfony clock (testable)",
+        "twig/twig": "For the branded HTML conflict page (overridable template)",
+        "nowo-tech/ui-kit-bundle": "The conflict page extends UiKit's error page when UiKit is installed"
     },
     "archive": {
         "exclude": [
