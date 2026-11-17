@@ -288,20 +288,26 @@ final class OrganizationContext implements ResetBetweenAttemptsInterface, ResetI
   `priority` attribute on the tag. Reset a memo that others derive from after them (lower priority).
 - **When:** after the failed attempt's managers were cleared or reset and after the pause, right before the next
   attempt; for every entry point (`#[AsWriteUnit]`, `controller_routes`, the Messenger middleware, the programmatic
-  `WriteUnitInterface` service). **Never** before the first attempt, never after the last failure (no replay follows:
-  `kernel.reset` empties the memo after the request), never when the unit runs once (inside a transaction, pending
+  `WriteUnitInterface` service). **Never** before the first attempt, never after the last failure (no replay follows;
+  emptying the memo between requests is your own `ResetInterface` / `kernel.reset`, which does **not** run in a
+  FrankenPHP worker with kernel reset off, so a memo there must be request-scoped some other way), never when the unit runs once (inside a transaction, pending
   changes, an attempt that already committed).
 - **Failure:** an exception thrown by a resetter abandons the replay. The unit gives up with `ConcurrencyConflict`
   (409 + `Retry-After`; for a message, a `HandlerFailedException` the transport retries): its previous exception is
-  the attempt's lock conflict, and `ConcurrencyConflict::$resetFailure` holds the resetter's exception. A warning is
+  the attempt's lock conflict, and `ConcurrencyConflict::$resetFailure` holds the resetter's exception. An error is
   logged. Keep resetters to dropping references; reload lazily on the next read.
+- **Leftovers:** a resetter (or retry listener) that leaves a transaction open or entity changes pending would make the
+  replay run nested (its flush never commits) or write those changes. The unit discards them and gives up the same way,
+  `$resetFailure` being a `LogicException`. Never open transactions, flush or persist in a resetter.
+- A **Generator** passed as `$resetters` (plain PHP) is read once into a list; a Symfony tagged iterator is rewindable.
 - Storing **identifiers** instead of entities needs no hook: the replay loads them again from the current manager.
 
 The unit also dispatches a PSR-14 `WriteUnitRetryEvent` (on `event_dispatcher`, after the resetters, with the same
 timing) for observers (metrics, tracing) or state you cannot tag. It carries `attempt` (the attempt about to run, 2 or
 more), `failure`, `kind` and `unit`: the route name for controllers, the message class for consumed messages, or what
 a programmatic caller passed as the second argument of `WriteUnit::run($work, 'invoice_pay')`. A listener that throws
-abandons the replay like a failing resetter.
+abandons the replay like a failing resetter. Listeners should record only `kind`, `unit`, `attempt` and the exception
+class (`$event->failure::class`), never `$event->failure->getMessage()`: DBAL messages can carry SQL and parameters.
 
 ```php
 #[AsEventListener]

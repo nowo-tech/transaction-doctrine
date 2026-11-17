@@ -8,6 +8,8 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\ManagerRegistry;
+use Generator;
+use LogicException;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
@@ -21,6 +23,7 @@ use Symfony\Component\Messenger\Exception\WrappedExceptionsInterface;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
+use function iterator_to_array;
 use function usleep;
 
 /**
@@ -73,10 +76,14 @@ final readonly class WriteUnit implements WriteUnitInterface
 
     private Randomizer $random;
 
+    /** @var iterable<ResetBetweenAttemptsInterface> */
+    private iterable $resetters;
+
     /**
      * @param ClockInterface|null $clock Pauses through the clock when given (a MockClock in tests), else usleep()
      * @param CommitLedger|null $ledger Commit detection (Dbal\CommitTrackingMiddleware must feed it); null = none
-     * @param iterable<ResetBetweenAttemptsInterface> $resetters Called in order before each replay (read on every replay)
+     * @param iterable<ResetBetweenAttemptsInterface> $resetters Called in order before each replay (read on every
+     *                                                           replay; a Generator is read once into a list)
      * @param EventDispatcherInterface|null $dispatcher Dispatches WriteUnitRetryEvent before each replay; null = none
      */
     public function __construct(
@@ -87,13 +94,15 @@ final readonly class WriteUnit implements WriteUnitInterface
         ?LoggerInterface $logger = null,
         ?Randomizer $random = null,
         private ?CommitLedger $ledger = null,
-        private iterable $resetters = [],
+        iterable $resetters = [],
         private ?EventDispatcherInterface $dispatcher = null,
     ) {
         $this->logger     = $logger ?? new NullLogger();
         $this->classifier = new TransientFailureClassifier();
         $this->repairer   = $repairer ?? new DoctrineStateRepairer($registry, $this->logger);
         $this->random     = $random ?? new Randomizer();
+        // A Generator cannot be traversed twice; a unit with several replays reads the resetters on each one.
+        $this->resetters = $resetters instanceof Generator ? iterator_to_array($resetters, false) : $resetters;
     }
 
     /**
@@ -237,7 +246,9 @@ final readonly class WriteUnit implements WriteUnitInterface
 
     /**
      * Empties request memos before the given attempt (resetters in order, then WriteUnitRetryEvent). A failure of
-     * either abandons the replay: the unit gives up with the attempt's conflict, the reset failure attached.
+     * either abandons the replay: the unit gives up with the attempt's conflict, the reset failure attached. So does a
+     * resetter or listener that left a transaction open or entity changes pending: the replay would run nested (its
+     * flush never committing) or write them; they are discarded first.
      */
     private function prepareReplay(int $next, Throwable $failure, TransientFailureKind $kind, ?string $unit): void
     {
@@ -248,13 +259,23 @@ final readonly class WriteUnit implements WriteUnitInterface
 
             $this->dispatcher?->dispatch(new WriteUnitRetryEvent($next, $failure, $kind, $unit));
         } catch (Throwable $resetFailure) {
-            SafeLog::log($this->logger, 'warning', 'Write unit not replayed: resetting request state between attempts failed.', [
-                'attempts' => $next - 1,
-                'kind'     => $kind->value,
-            ] + SafeLog::throwable($resetFailure));
-
-            throw new ConcurrencyConflict($next - 1, $kind, $this->policy->retryAfterSeconds, $failure, false, $resetFailure);
+            $this->abandonReplay($next - 1, $failure, $kind, $resetFailure);
         }
+
+        if ($this->insideTransaction() || $this->hasPendingChanges()) {
+            $this->repairer->discardUnitOfWork();
+            $this->abandonReplay($next - 1, $failure, $kind, new LogicException('A reset-between-attempts service or retry listener left a transaction or pending changes.'));
+        }
+    }
+
+    private function abandonReplay(int $attempts, Throwable $failure, TransientFailureKind $kind, Throwable $resetFailure): never
+    {
+        SafeLog::log($this->logger, 'error', 'Write unit not replayed: resetting request state between attempts failed.', [
+            'attempts' => $attempts,
+            'kind'     => $kind->value,
+        ] + SafeLog::throwable($resetFailure));
+
+        throw new ConcurrencyConflict($attempts, $kind, $this->policy->retryAfterSeconds, $failure, false, $resetFailure);
     }
 
     private function pause(int $milliseconds): void

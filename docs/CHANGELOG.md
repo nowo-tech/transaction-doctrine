@@ -28,7 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `WriteUnitRetryEvent` (PSR-14, on `event_dispatcher`), dispatched after the resetters: attempt about to run,
     failure, kind and unit name (route name, message class, or the new optional `$unit` argument of `WriteUnit::run()`).
   - A resetter or retry listener that throws abandons the replay: `ConcurrencyConflict` with the attempt's failure as
-    previous and the new `ConcurrencyConflict::$resetFailure`.
+    previous and the new `ConcurrencyConflict::$resetFailure` (logged at `error`). So does one that leaves a
+    transaction open or entity changes pending (discarded first; `$resetFailure` is a `LogicException`), which would
+    otherwise make the replay run nested and return without committing.
+  - A `Generator` passed as `$resetters` is read once into a list, so units with several replays work.
   - `WriteUnit` takes two new optional constructor arguments: `iterable $resetters` and a PSR-14 `$dispatcher`.
 
 ## [1.3.1] - 2026-11-17

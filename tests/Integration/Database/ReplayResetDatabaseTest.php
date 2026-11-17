@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database;
 
 use Doctrine\ORM\ORMInvalidArgumentException;
+use LogicException;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\AddNote;
@@ -13,6 +14,8 @@ use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\CounterMemo;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Note;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\NoteController;
+use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
+use Nowo\TransactionDoctrine\WriteUnit\ResetBetweenAttemptsInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
@@ -112,6 +115,65 @@ final class ReplayResetDatabaseTest extends DatabaseTestCase
         }
 
         self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_note WHERE id = 2'));
+    }
+
+    /**
+     * Audit TA-2: a resetter that opens a transaction (or leaves a persist pending) would make the replay's flush run
+     * nested: run() would return with nothing committed. The unit discards the leftovers and gives up instead.
+     */
+    #[DataProvider('allServers')]
+    public function testAResetterThatLeavesATransactionOrPendingChangesAbandonsTheReplay(string $server): void
+    {
+        foreach (['transaction', 'persist'] as $leftover) {
+            $memo  = $this->prepare($server);
+            $leaky = new class($this, $leftover) implements ResetBetweenAttemptsInterface {
+                public function __construct(private readonly ReplayResetDatabaseTest $test, private readonly string $leftover)
+                {
+                }
+
+                public function resetBetweenAttempts(): void
+                {
+                    $this->test->leaveBehind($this->leftover);
+                }
+            };
+            $unit   = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0), null, null, null, null, null, [$memo, $leaky]);
+            $calls  = 0;
+            $caught = null;
+
+            try {
+                $unit->run(function (int $attempt) use ($memo, &$calls): void {
+                    ++$calls;
+                    $this->addNote($memo, $attempt, 2);
+                });
+            } catch (ConcurrencyConflict $conflict) {
+                $caught = $conflict;
+            } finally {
+                $this->releasePeer();
+            }
+
+            self::assertNotNull($caught, $leftover);
+            self::assertInstanceOf(LogicException::class, $caught->resetFailure, $leftover);
+            self::assertFalse($caught->committed);
+            self::assertSame(1, $calls, $leftover);
+            self::assertSame(0, $this->connection->getTransactionNestingLevel(), $leftover);
+            self::assertSame([], $this->manager()->getUnitOfWork()->getScheduledEntityInsertions(), $leftover);
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 3'), $leftover);
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_note WHERE id = 2'), $leftover);
+            $this->tearDown();
+        }
+    }
+
+    /** What a misbehaving resetter leaves: an open transaction, or a persisted entity never flushed. */
+    public function leaveBehind(string $leftover): void
+    {
+        if ($leftover === 'transaction') {
+            $this->connection->beginTransaction();
+            $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (3, 3)');
+
+            return;
+        }
+
+        $this->manager()->persist(new Counter(3, 3));
     }
 
     /** A peer session holds counter 1 (set to 7) until attempt 2 starts; lock waits are 1 s. */
