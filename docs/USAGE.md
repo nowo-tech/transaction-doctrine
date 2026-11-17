@@ -7,6 +7,14 @@
 - [Wiring in a bundle](#wiring-in-a-bundle)
 - [Standard Symfony host and DDD / hexagonal host](#standard-symfony-host-and-ddd--hexagonal-host)
 - [FrankenPHP worker mode](#frankenphp-worker-mode)
+- [Write units (1.3.0)](#write-units-130)
+  - [Programmatic API](#programmatic-api)
+  - [Controllers: `#[AsWriteUnit]`](#controllers-aswriteunit)
+  - [Messenger middleware](#messenger-middleware)
+- [Lock-conflict answer: 409 + Retry-After](#lock-conflict-answer-409--retry-after)
+  - [Exception-mapping and response hooks](#exception-mapping-and-response-hooks)
+  - [Bundles that answer in their own shape](#bundles-that-answer-in-their-own-shape)
+- [Worker connection hygiene](#worker-connection-hygiene)
 
 ## Run a unit of work
 
@@ -102,3 +110,237 @@ $runner = DoctrineTransactionRunner::forEntityManager($entityManager, $managerRe
 The runner is `readonly` and keeps no state between calls; the per-run observer is attached to the entity manager's
 event manager for one run and removed in `finally`. With kernel reset off the entity manager lives across requests,
 which is why a failed run never leaves pending changes behind (see the table above).
+
+## Write units (1.3.0)
+
+A **write unit** is one host-level unit of work (a controller action, a consumed message, a command step) that is
+**replayed after a lock conflict**: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01) or a lock wait timeout (1205,
+PostgreSQL 55P03) by default. The conflict is found anywhere in the failure's previous chain (a bundle runner's
+`TransientStorageFailure` included) or inside a Messenger `HandlerFailedException`; the kind comes from
+`TransientFailureClassifier`.
+
+- At most `max_attempts` attempts (3), with a **full-jitter** pause between two of them: uniform between `floor_ms`
+  and `min(cap_ms, base_ms × 2^(attempt − 1))` (20–100 ms, then 20–200 ms).
+- Between two attempts the transaction levels the unit left open are rolled back (`ConnectionRepairer`), closed
+  entity managers are reset and open ones cleared (`DoctrineStateRepairer`): an attempt never sees what the failed one
+  loaded.
+- **Outermost unit only:** when any connection of the registry is already inside a transaction (the caller's or an
+  outer unit's), the work runs once and a failure propagates unchanged, because the database may have rolled back the
+  caller's whole transaction. A `ConcurrencyConflict` of an inner unit, even wrapped (in the previous chain or inside
+  a Messenger `HandlerFailedException`), is never replayed again by an outer one.
+- **Pending changes:** when an open entity manager already holds unflushed work before the first attempt (a caller's
+  edits or `persist()` calls), the work runs once without replay: clearing the manager would lose them silently.
+- **A replay detaches everything the caller loaded:** between two attempts the open entity managers are cleared, so
+  entities the caller held before `run()` are no longer managed afterwards. Load again what you change after the unit.
+- **Messenger wrappers:** a `HandlerFailedException` (or `DelayedMessageHandlingException`) is replayed only when
+  **every** wrapped exception is a replayable conflict and no handler already succeeded (`HandledStamp`); a domain
+  error next to a deadlock goes out unchanged, so the failure transport and `ErrorDetailsStamp` keep the real error.
+- The last conflict becomes `ConcurrencyConflict` (a `TransientStorageFailure` of the contract, so existing handlers
+  keep working; `attempts`, `kind`, `retryAfterSeconds()`, the storage error as previous, a constant client-safe
+  message). Any other failure is rethrown unchanged at once.
+- The work must be **replayable**: it loads what it changes itself and keeps side effects (mails, messages, pushes)
+  until after its commit, the same contract as a Messenger retry.
+- **A unit must commit at most once, or be idempotent as a whole.** A replay runs the whole unit again: what an
+  earlier commit of the failed attempt wrote, and the side effects that followed it, would happen twice. With
+  **commit detection** (`commit_detection: true`, the default with the bundle: a DBAL middleware tagged
+  `doctrine.middleware` feeds a `CommitLedger`), a failed attempt that already committed (a `COMMIT`, or a write
+  statement outside a transaction) is **not replayed**: the conflict is rethrown at once as a `ConcurrencyConflict`
+  with `committed: true`. It is still answered **409**, but never as a safe retry: **no `Retry-After`**, the JSON code
+  `concurrency_conflict_partial` (`<json_error>_partial`) and the text "Part of your change may have been saved …
+  Reload before trying again." with a *Reload* link; formatters see `ConflictResponseContext::$committed` and a null
+  `retryAfterSeconds`. In a Messenger worker it goes out wrapped in an `UnrecoverableMessageHandlingException`, so the
+  transport does not retry it and the message lands in the failure transport. Without the bundle, pass a
+  `CommitLedger` to `WriteUnit` and add `new CommitTrackingMiddleware($ledger)` to your DBAL configuration's
+  middlewares, or keep to one commit per unit.
+- **What commit detection sees, and its limits.** Counted: every successful `COMMIT`; outside a transaction, every
+  statement that does not start with `SELECT`, `SHOW`, `SET`, `EXPLAIN` (except `EXPLAIN ANALYZE`, which runs the
+  statement), `DESCRIBE` or `PRAGMA`; any SQL string holding several statements (a `;` before the trailing
+  whitespace); and on MySQL / MariaDB the statements that commit implicitly even inside a transaction (`CREATE`,
+  `ALTER`, `DROP`, `TRUNCATE`, `RENAME`, `LOCK` / `UNLOCK`, `GRANT` / `REVOKE`, `BEGIN`, `START TRANSACTION`,
+  `ANALYZE`, `OPTIMIZE`, `REPAIR`, `FLUSH`…). **Not seen:** a `SELECT` that calls a writing function or stored
+  routine, and anything run through the raw PDO / mysqli handle (`getNativeConnection()`), which bypasses DBAL. Counting
+  too much only cancels a replay; keep writes that the ledger cannot see out of write units.
+- **One retry layer:** use a write unit **or** another retry (for example `nowo-tech/doctrine-deadlock-retry-bundle`'s
+  retry service or its retrying flush), not both nested: the inner retry rethrows the raw deadlock after its own
+  attempts and the outer unit replays it again, multiplying the attempts.
+
+### Programmatic API
+
+```php
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
+
+// Symfony: autowire WriteUnitInterface (service nowo_transaction_doctrine.write_unit).
+// Plain PHP: new WriteUnit($managerRegistry, new WriteUnitPolicy(maxAttempts: 3), null, $clock, $logger, null, $ledger);
+$total = $writeUnit->run(function (int $attempt, ?Throwable $previous) use ($orderId): Money {
+    return $runner->run(fn () => $orders->get($orderId)->recalculate());   // reloads on every attempt
+});
+```
+
+`WriteUnitInterface` has no Doctrine or Symfony type in its signature, so a DDD / hexagonal application service can
+depend on it; `WriteUnit` is the Doctrine adapter behind it.
+
+### Controllers: `#[AsWriteUnit]`
+
+```php
+use Nowo\TransactionDoctrine\WriteUnit\AsWriteUnit;
+
+final class TaskController
+{
+    #[AsWriteUnit]
+    #[Route('/tasks/{id}/move', methods: ['POST'])]
+    public function move(Task $task, Request $request): Response { /* ... */ }
+}
+```
+
+The listener runs after the security attribute listeners and the request payload resolvers
+(kernel.controller_arguments, priority -10100). On a replay:
+
+- only the **top-level Doctrine entity arguments** are reloaded, by identifier, from the cleared or reset manager (an
+  entity that no longer exists answers 404). Entities inside an array or collection argument (a custom resolver) are
+  not reloaded: they stay detached, and writing them into an association fails the replay (a 500, nothing written);
+  an unsaved entity built by a resolver (no identifier) answers 404 on a replay. Every other argument keeps its first-attempt value: `#[MapRequestPayload]` /
+  `#[MapQueryString]` DTOs, `#[MapUploadedFile]` files, the `Request`, values another listener set;
+- a signed-in user that is an entity is reloaded into the token; when it no longer exists the replay **fails closed**
+  (403) instead of running with the stale user;
+- access checks (`#[IsGranted]` and the other attribute listeners) are **not repeated**: they ran once on the
+  first-attempt entities, and the replay acts on the same rows reloaded, whose state may have changed meanwhile (the
+  write that caused the conflict). Put checks that depend on that state inside the action.
+
+For controllers you cannot annotate, list the route names. An entry matches the route name **exactly**; `*` is an
+explicit wildcard (for tenant-prefixed copies of a route):
+
+```yaml
+nowo_transaction_doctrine:
+    controller_routes:
+        - app_invoice_pay                   # exact
+        - '*_app_invoice_pay'               # org_app_invoice_pay, general_app_invoice_pay, …
+```
+
+List only actions you know commit at most once (or are idempotent). Listing **a bundle's route** also needs that
+bundle's `ConflictResponseFormatterInterface`: the responder answers at priority 64 and stops the event, so without a
+formatter the bundle's API clients get this package's JSON shape (`{"error": "concurrency_conflict"}`) instead of the
+bundle's own when the unit gives up. ChatKit, Wiki and TimeTrack ship formatters in their next minor; until then do
+not list their routes.
+
+### Messenger middleware
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        buses:
+            messenger.bus.default:
+                middleware:
+                    - nowo_transaction_doctrine.write_unit_middleware   # before doctrine_transaction
+```
+
+Every message a **worker consumes** (`ConsumedByWorkerStamp`) runs as one write unit: a lock conflict is replayed
+in-process after a few milliseconds instead of waiting for the transport's retry delay. Messages handled synchronously
+inside a web request are left to the request. A message whose other handler already succeeded, or whose failure came
+from messages dispatched after the handler (`DelayedMessageHandlingException`), is not replayed in-process. After the
+last attempt the `ConcurrencyConflict` goes out inside a `HandlerFailedException`, so retry strategies and the failure
+transport see the usual shape.
+
+## Lock-conflict answer: 409 + Retry-After
+
+When the final attempt still conflicts, the bundle's `ConcurrencyConflictResponder` (kernel.exception, priority 64,
+before the bundles' own mappers) answers **409 Conflict** (configurable: `conflict_response.status: 503`) with
+`Retry-After` (`conflict_response.retry_after`, 1 s) and `Cache-Control: no-store, private`:
+
+- **JSON** (XHR, a JSON body, `Accept: application/json`, `_format: json`, or a path under `json_path_prefixes`,
+  default `/api/`):
+
+  ```json
+  {"error": "concurrency_conflict", "message": "Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again."}
+  ```
+
+- **HTML:** a branded page "Someone else was saving at the same moment" with **Try again** (the page itself for a GET,
+  the same-host page the form was sent from after a POST, else home). Template `@NowoTransactionDoctrine/conflict.html.twig`;
+  when `nowo-tech/ui-kit-bundle` is installed it extends UiKit's error page (`@NowoUiKit/error/status.html.twig`).
+  Override it in `templates/bundles/NowoTransactionDoctrineBundle/conflict.html.twig` or with
+  `conflict_response.template`. Without Twig a plain, escaped page is built.
+
+The responder logs one constant warning (`A write gave up after repeated database lock conflicts; answered the conflict
+status.`) with the route name, method, attempts and status; never the URL, SQL or a message.
+
+### Exception-mapping and response hooks
+
+The responder never matches route names. A failure is a conflict when:
+
+1. it (or anything in its previous chain) implements `Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface`
+   (`ConcurrencyConflict` does); or
+2. a service implementing `ConflictExceptionMapperInterface` says so (autoconfigured, tag
+   `nowo_transaction_doctrine.conflict_exception_mapper`):
+
+```php
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
+
+final class BoardLockedMapper implements ConflictExceptionMapperInterface
+{
+    public function isConflict(Throwable $failure): bool
+    {
+        return $failure instanceof BoardLockedException;
+    }
+}
+```
+
+A bundle or host shapes the answer of **its own requests** with a `ConflictResponseFormatterInterface` (tag
+`nowo_transaction_doctrine.conflict_response_formatter`, highest priority first; return `null` to fall through). It
+recognises its requests by its own means (a request attribute its listener set), and the responder still sets the
+policy's status, `Retry-After` and `Cache-Control`:
+
+```php
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseContext;
+use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface;
+
+final class TaskApiConflictFormatter implements ConflictResponseFormatterInterface
+{
+    public function format(Request $request, ConflictResponseContext $context): ?Response
+    {
+        if (!$request->attributes->getBoolean('_task_api')) {
+            return null;
+        }
+
+        return new JsonResponse(['err' => $context->message, 'ECODE' => 'CONFLICT_001']);
+    }
+}
+```
+
+`map_transient_failures: true` registers a mapper that treats **any** transient storage failure reaching the kernel
+as a conflict (not only write-unit conflicts). It runs before the bundles' own mappers, so it replaces their JSON
+shapes: leave it off when you rely on them.
+
+### Bundles that answer in their own shape
+
+ChatKit, Wiki and TimeTrack map a transient storage failure on their own routes in their own JSON shape. They keep
+their field names and read only the **status** from the shared `ConflictResponsePolicy` (service
+`nowo_transaction_doctrine.conflict_response_policy`), so one setting drives the whole application:
+
+```php
+public function __construct(private ?ConflictResponsePolicy $conflictPolicy = null) {}
+
+$policy = $this->conflictPolicy ?? new ConflictResponsePolicy();      // 409 + Retry-After 1 without the bundle
+$response = new JsonResponse(['ok' => false, 'error' => 'unavailable'], $policy->status, $policy->headers($hint));
+// HTML routes: throw $policy->httpException('The service is temporarily unavailable. Retry later.', $failure, $hint);
+```
+
+`headers($hint)` and `retryAfter($hint)` use a failure's own hint (`TransientStorageFailure::retryAfterSeconds()`)
+when it has one, else `conflict_response.retry_after`.
+
+## Worker connection hygiene
+
+With `worker_hygiene: true` (default) a closed `EntityManager` never survives into another request or message, and
+a connection that failed is checked before the next unit (FrankenPHP worker mode with kernel reset off):
+
+| Event | Priority | Action |
+|-------|----------|--------|
+| `kernel.request` (main) | 4096 | Reset closed entity managers (no query) |
+| `kernel.exception` | 4096 | A DBAL, driver, PDO or ORM failure marks the request (never answers) |
+| `kernel.terminate` | -4096 | After the response of a marked request: reset closed managers, roll back leftover levels, ping each **connected** connection (closed when it no longer answers; DBAL reconnects on the next query) |
+| `WorkerMessageFailedEvent` | -4096 | The same repair after a consumed message failed with a database error |
+
+The only SQL it runs is that ping (the platform's dummy select), and only after a database failure. Every service of
+the bundle is stateless: the failure mark lives on the request, the wrapped controller on the event, and nothing of
+a request, user or tenant is kept on a service.

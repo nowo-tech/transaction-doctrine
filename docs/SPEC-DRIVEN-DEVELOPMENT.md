@@ -39,7 +39,7 @@ The sections below state **behavior**; this subsection states **intent** in back
 
 ## Package functional scope
 
-**Goal:** Safe plain-Doctrine default implementation of `nowo-tech/transaction-contract`: a one-attempt `TransactionRunnerInterface` that leaves neither a poisoned connection nor pending entity-manager changes after a failure, plus the transient-failure classifier and the connection repairer. No Symfony.
+**Goal:** Safe plain-Doctrine default implementation of `nowo-tech/transaction-contract`: a one-attempt `TransactionRunnerInterface` that leaves neither a poisoned connection nor pending entity-manager changes after a failure, plus the transient-failure classifier and the connection repairer; since 1.3.0 write units and an optional Symfony bundle (409 + Retry-After lock-conflict answer). No runtime Symfony dependency.
 
 **In scope**
 

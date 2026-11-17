@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
 use Composer\InstalledVersions;
+use Doctrine\DBAL\Configuration as DbalConfiguration;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Tools\DsnParser;
@@ -12,6 +13,8 @@ use Doctrine\ORM\Configuration;
 use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\Driver\AttributeDriver;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use PHPUnit\Framework\TestCase;
 
 use function dirname;
@@ -54,6 +57,9 @@ abstract class DatabaseTestCase extends TestCase
         yield from self::mysqlFamily();
         yield 'PostgreSQL 16' => ['TD_POSTGRES_URL'];
     }
+
+    /** Commit detection: set before boot() to wrap the test's connection in CommitTrackingMiddleware. */
+    protected ?CommitLedger $ledger = null;
 
     protected function boot(string $environmentVariable): void
     {
@@ -149,6 +155,11 @@ abstract class DatabaseTestCase extends TestCase
 
     private function connect(): Connection
     {
-        return DriverManager::getConnection((new DsnParser(['mysql' => 'pdo_mysql', 'pgsql' => 'pdo_pgsql']))->parse($this->url));
+        $configuration = new DbalConfiguration();
+        if ($this->ledger instanceof CommitLedger) {
+            $configuration->setMiddlewares([new CommitTrackingMiddleware($this->ledger)]);
+        }
+
+        return DriverManager::getConnection((new DsnParser(['mysql' => 'pdo_mysql', 'pgsql' => 'pdo_pgsql']))->parse($this->url), $configuration);
     }
 }

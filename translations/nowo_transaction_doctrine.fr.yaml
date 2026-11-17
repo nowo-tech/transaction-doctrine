@@ -1,0 +1,10 @@
+conflict:
+    title: 'Quelqu’un d’autre enregistrait au même moment'
+    lead: 'Votre modification n’a pas été enregistrée car les mêmes données étaient modifiées au même moment. Rien n’est perdu : réessayez.'
+    hint: 'Si cela se reproduit, attendez quelques secondes avant de réessayer.'
+    retry: 'Réessayer'
+    partial:
+        title: 'Une partie de votre modification a peut-être été enregistrée'
+        lead: 'Une partie de votre modification a peut-être été enregistrée avant que les mêmes données soient modifiées au même moment. Rechargez avant de réessayer.'
+        hint: 'Vérifiez d’abord ce qui a été enregistré : renvoyer la même modification pourrait la répéter.'
+        retry: 'Recharger'

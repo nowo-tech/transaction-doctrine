@@ -81,7 +81,7 @@ unchanged.
 ## Explicit non-goals
 
 - Retrying (the retrying Symfony adapter is DoctrineDeadlockRetryBundle 3.0).
-- Any Symfony dependency.
+- A runtime Symfony dependency (the 1.3.0 bundle, spec 002, is optional).
 
 ---
 
