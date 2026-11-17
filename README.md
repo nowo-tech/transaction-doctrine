@@ -57,11 +57,18 @@ $repairer = new ConnectionRepairer(null, $logger);
 | Levels rolled back to the entry level | notice |
 | Rollback failed, connection closed (session state lost) | warning |
 | Entity manager closed and reset through the registry | notice |
-| Entity manager cleared | debug / notice |
+| Entity manager cleared after a storage failure, no registry given | notice |
+| Entity manager cleared after a domain failure | debug |
 
 Context is structured and safe: exception class and code, nesting levels, action, manager name. SQL, parameters and
 exception messages are never logged. A logger that throws is ignored, and the runner stays stateless, so one instance
 is safe in a long-running worker.
+
+- Do not log to the **same database connection** the runner uses (for example a Monolog Doctrine handler on the
+  default connection): the line is written while that connection's transaction is failing or being rolled back, so
+  it is lost. Log to a file, a stream or another connection.
+- `exception_code` is the caught exception's `getCode()`: the driver / SQLSTATE code for a storage failure, but for a
+  domain exception it is whatever your application set (often `0`). Do not read it as a database error code.
 
 ## Documentation
 

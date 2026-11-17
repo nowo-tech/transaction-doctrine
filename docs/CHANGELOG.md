@@ -15,17 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- REQ-OBS-001: optional PSR-3 logging. `DoctrineTransactionRunner::forConnection()` / `forEntityManager()` and `ConnectionRepairer::__construct()` take an optional trailing `LoggerInterface` (default `NullLogger`; BC-safe). Logged with structured context only (exception class and code, levels, action, manager name; never SQL, parameters or exception messages): the failure and its transient classification (notice when transient, debug otherwise), the repair (notice for rolled-back levels, warning when the connection is closed), and the entity manager reset (notice) or clear (debug). A logger that throws never replaces the original failure.
+- REQ-OBS-001: optional PSR-3 logging. `DoctrineTransactionRunner::forConnection()` / `forEntityManager()` and `ConnectionRepairer::__construct()` take an optional trailing `LoggerInterface` (default `NullLogger`; BC-safe). Logged with structured context only (exception class and code, levels, action, manager name; never SQL, parameters or exception messages): the failure and its transient classification (notice when transient, debug otherwise), the repair (notice for rolled-back levels, warning when the connection is closed), and the entity manager reset after a storage failure (notice), clear after a storage failure when no registry is given (notice) or clear after a domain failure (debug). A logger that throws never replaces the original failure.
+- Do not give the runner a logger that writes to the **same database connection**: the failure is logged while that connection's transaction is failing or being rolled back, so the log row is lost (or the write fails). Use a file, stream or another connection.
+- `exception_code` is the caught exception's `getCode()`. For storage failures it is the driver / SQLSTATE code; for a domain exception it is whatever the host application set (often `0`), so do not treat it as a database error code.
 - `psr/log ^1.0 || ^2.0 || ^3.0` is now a direct requirement (already pulled in by `doctrine/dbal`).
 
 ### Changed
 
-- No change under `src/`: repository tooling and documentation aligned with the nowo-tech package requirements
-  (REQ compliance sweep 2026-11-16).
+- Repository tooling and documentation aligned with the nowo-tech package requirements (REQ compliance sweep
+  2026-11-16); the only `src/` change is the optional logger above, and without a logger the behaviour is unchanged.
 - Development: Docker image + `docker-compose.yml` (MySQL 8.4, MariaDB 11.4 and PostgreSQL 16 behind the `db`
   profile), root `Makefile` (`release-check`, `test-with-db`, `setup-hooks`, `igor`, …), git hooks; PHPStan now
-  includes the `nowo-tech/phpstan-frankenphp` classic and worker rulesets; Igor worker-state audit; CI adds Rector,
-  Igor, `composer audit` and a git-history check; tests moved to `tests/Unit/` and `tests/Integration/Database/`.
+  includes the `nowo-tech/phpstan-frankenphp` classic and worker rulesets; Igor worker-state audit (`composer igor`,
+  `make igor`, `make release-check`) with `igor-baseline.json` for the per-run event listener (audit SE-TD-L1);
+  CI adds Rector, Igor, `composer audit` and a git-history check; tests moved to `tests/Unit/` and `tests/Integration/Database/`.
 - `composer.json`: `archive.exclude`, `support.docs`; `branch-alias` `dev-main` → `1.1.x-dev`.
 
 ### Documentation

@@ -21,7 +21,7 @@ This document records which [PHP-FIG PSRs](https://www.php-fig.org/psr/) apply t
 
 | PSR | Decision | Notes |
 | --- | -------- | ----- |
-| PSR-3 Logger | **Under evaluation** | Nothing is logged today; failures are rethrown. An optional `?LoggerInterface` for the repair path (connection closed, manager reset) is tracked as a follow-up (REQ-OBS-001). |
+| PSR-3 Logger | **Adopted** | Optional trailing `?LoggerInterface` on `DoctrineTransactionRunner::forConnection()` / `forEntityManager()` and `ConnectionRepairer` (default `NullLogger`, REQ-OBS-001); structured context only. Levels in the README. |
 | PSR-6 / PSR-16 Cache | **N/A** | No cache. |
 | PSR-7 / PSR-17 / PSR-18 HTTP | **N/A** | No HTTP. |
 | PSR-11 Container | **N/A** | Named constructors; no container. |
@@ -31,7 +31,7 @@ This document records which [PHP-FIG PSRs](https://www.php-fig.org/psr/) apply t
 
 ## Summary
 
-- **Adopted beyond baseline:** none yet; PSR-3 is the only candidate.
+- **Adopted beyond baseline:** PSR-3 (optional logger).
 
 ---
 
