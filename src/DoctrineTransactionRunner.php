@@ -14,6 +14,8 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\TransactionContract\TransactionRunnerInterface;
 use Nowo\TransactionContract\TransientStorageFailure;
 use PDOException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Throwable;
 
 use function array_diff_key;
@@ -50,6 +52,11 @@ use function spl_object_id;
  *
  * Stateless: safe as a shared service in a long-running worker.
  *
+ * An optional PSR-3 logger (default NullLogger, passed as the last factory argument and forwarded to the
+ * ConnectionRepairer) records, with structured context only (exception class and code, levels, action; never SQL,
+ * parameters or exception messages): the failure and whether it was classified transient (debug / notice), the repair
+ * (notice / warning) and the entity manager reset or clear (debug / notice).
+ *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
  */
@@ -65,17 +72,18 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         private ?ManagerRegistry $registry,
         private ?string $managerName,
         private ?int $retryAfterSeconds,
+        private LoggerInterface $logger,
     ) {
         $this->classifier = new TransientFailureClassifier();
-        $this->repairer   = new ConnectionRepairer();
+        $this->repairer   = new ConnectionRepairer(null, $logger);
     }
 
     /**
      * Runs DBAL-only units of work on one connection.
      */
-    public static function forConnection(Connection $connection, ?int $retryAfterSeconds = 1): self
+    public static function forConnection(Connection $connection, ?int $retryAfterSeconds = 1, ?LoggerInterface $logger = null): self
     {
-        return new self($connection, null, null, null, $retryAfterSeconds);
+        return new self($connection, null, null, null, $retryAfterSeconds, $logger ?? new NullLogger());
     }
 
     /**
@@ -87,8 +95,9 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         ?ManagerRegistry $registry = null,
         ?string $managerName = null,
         ?int $retryAfterSeconds = 1,
+        ?LoggerInterface $logger = null,
     ): self {
-        return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds);
+        return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds, $logger ?? new NullLogger());
     }
 
     public function run(callable $operation): mixed
@@ -110,13 +119,21 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
             return $result;
         } catch (Throwable $throwable) {
+            $alreadyTransient = $throwable instanceof TransientStorageFailure;
+            $transient        = $alreadyTransient || $this->classifier->isTransient($throwable);
+            SafeLog::log($this->logger, $transient ? 'notice' : 'debug', 'Transactional operation failed.', [
+                'transient'   => $transient,
+                'entry_level' => $entryLevel,
+                'has_manager' => $manager instanceof EntityManagerInterface,
+            ] + SafeLog::throwable($throwable));
+
             $this->repairer->afterFailure($connection, $entryLevel);
 
             if ($manager instanceof EntityManagerInterface) {
                 $this->discardPendingChanges($manager, $throwable, $observer, $before);
             }
 
-            if ($throwable instanceof TransientStorageFailure || !$this->classifier->isTransient($throwable)) {
+            if ($alreadyTransient || !$transient) {
                 throw $throwable;
             }
 
@@ -133,9 +150,16 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     {
         if (!$manager->isOpen() || $this->isStorageFailure($failure)) {
             if ($this->registry instanceof ManagerRegistry) {
+                SafeLog::log($this->logger, 'notice', 'Closing and resetting the entity manager after a storage failure.', [
+                    'manager'  => $this->managerName,
+                    'was_open' => $manager->isOpen(),
+                ]);
                 $manager->close();
                 $this->registry->resetManager($this->managerName);
             } elseif ($manager->isOpen()) {
+                SafeLog::log($this->logger, 'notice', 'Clearing the entity manager after a storage failure (no registry to reset it).', [
+                    'manager' => $this->managerName,
+                ]);
                 $manager->clear();
             }
 
@@ -145,6 +169,9 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         // Domain failure, manager open. The run's transaction was rolled back, so the identity map must not keep
         // anything it saw: a flush inside the run, or a caller's entity re-hydrated inside it, makes the manager stale.
         if ($observer->flushed || array_intersect_key($observer->loaded, $before) !== []) {
+            SafeLog::log($this->logger, 'debug', 'Clearing the entity manager: the run flushed or re-hydrated a managed entity.', [
+                'flushed' => $observer->flushed,
+            ]);
             $manager->clear();
 
             return;
@@ -162,6 +189,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         // silently drop that entity alone (its later edits lost), so clear instead. The same when changes are pending.
         foreach ($before as $entity) {
             if (!$manager->contains($entity)) {
+                SafeLog::log($this->logger, 'debug', 'Clearing the entity manager: a detach reached a caller entity.', []);
                 $manager->clear();
 
                 return;
@@ -169,6 +197,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         }
 
         if ($this->hasPendingChanges($manager)) {
+            SafeLog::log($this->logger, 'debug', 'Clearing the entity manager: changes were left pending.', []);
             $manager->clear();
         }
     }
