@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- REQ-OBS-001: optional PSR-3 logging. `DoctrineTransactionRunner::forConnection()` / `forEntityManager()` and `ConnectionRepairer::__construct()` take an optional trailing `LoggerInterface` (default `NullLogger`; BC-safe). Logged with structured context only (exception class and code, levels, action, manager name; never SQL, parameters or exception messages): the failure and its transient classification (notice when transient, debug otherwise), the repair (notice for rolled-back levels, warning when the connection is closed), and the entity manager reset (notice) or clear (debug). A logger that throws never replaces the original failure.
+- `psr/log ^1.0 || ^2.0 || ^3.0` is now a direct requirement (already pulled in by `doctrine/dbal`).
+
 ### Changed
 
 - No change under `src/`: repository tooling and documentation aligned with the nowo-tech package requirements

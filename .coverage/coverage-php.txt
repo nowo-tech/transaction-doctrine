@@ -1,0 +1,1955 @@
+The repository at "/app" does not have the correct ownership and git refuses to use it:
+
+fatal: detected dubious ownership in repository at '/app'
+To add an exception for this directory, call:
+
+git config --global --add safe.directory /app
+
+Composer could not detect the root package (nowo-tech/transaction-doctrine) version, defaulting to '1.0.0'. See https://getcomposer.org/root-version
+PHPUnit 11.5.58 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.2.35 with Xdebug 3.5.3
+Configuration: /app/phpunit.xml.dist
+
+..............................................................[31;1mE[0m  63 / 112 ( 56%)
+[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m[31;1mE[0m               112 / 112 (100%)
+
+Time: 03:18.756, Memory: 18.00 MB
+
+There were 50 errors:
+
+1) Nowo\TransactionDoctrine\Tests\Integration\Database\ConnectionRepairerDatabaseTest::testTheRunAfterARepairedNestedLeftoverCommits with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+2) Nowo\TransactionDoctrine\Tests\Integration\Database\ConnectionRepairerDatabaseTest::testTheRunAfterARepairedNestedLeftoverCommits with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+3) Nowo\TransactionDoctrine\Tests\Integration\Database\ConnectionRepairerDatabaseTest::testTheRunAfterARepairedNestedLeftoverCommits with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ConnectionRepairerDatabaseTest.php:26
+
+4) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testAFailedRunLeavesNoPendingChanges with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+5) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testAFailedRunLeavesNoPendingChanges with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+6) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testAFailedRunLeavesNoPendingChanges with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:30
+
+7) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testADomainFailureKeepsSessionStateAndLocks with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+8) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testADomainFailureKeepsSessionStateAndLocks with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+9) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testADomainFailureKeepsSessionStateAndLocks with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:66
+
+10) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testANestedDeadlockBecomesTransientStorageFailureAndLeavesAWorkingConnection with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+11) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testANestedDeadlockBecomesTransientStorageFailureAndLeavesAWorkingConnection with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:100
+
+12) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testALockWaitTimeoutBecomesTransientStorageFailure with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+13) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testALockWaitTimeoutBecomesTransientStorageFailure with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:137
+
+14) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testALostSavepointWithoutADeadlockIsNotTransient with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+15) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testALostSavepointWithoutADeadlockIsNotTransient with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:175
+
+16) Nowo\TransactionDoctrine\Tests\Integration\Database\DoctrineTransactionRunnerDatabaseTest::testAPostgreSqlSerializationFailureBecomesTransientStorageFailure
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:151
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:151
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/DoctrineTransactionRunnerDatabaseTest.php:151
+
+17) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainRefusalKeepsTheHostsEntitiesManaged with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+18) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainRefusalKeepsTheHostsEntitiesManaged with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+19) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainRefusalKeepsTheHostsEntitiesManaged with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:25
+
+20) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainFailureAfterTheOperationChangedAnEntityClearsTheManager with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+21) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainFailureAfterTheOperationChangedAnEntityClearsTheManager with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+22) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainFailureAfterTheOperationChangedAnEntityClearsTheManager with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:47
+
+23) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainFailureAfterAFlushInsideTheOperationClearsTheStaleIdentityMap with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+24) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainFailureAfterAFlushInsideTheOperationClearsTheStaleIdentityMap with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+25) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testADomainFailureAfterAFlushInsideTheOperationClearsTheStaleIdentityMap with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:68
+
+26) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testAStorageFailureResetsTheManager with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+27) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testAStorageFailureResetsTheManager with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+28) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testAStorageFailureResetsTheManager with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:87
+
+29) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsARowTheRunInsertedAndLoaded with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+30) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsARowTheRunInsertedAndLoaded with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+31) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsARowTheRunInsertedAndLoaded with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:107
+
+32) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsAValueTheRunUpdatedAndLoaded with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+33) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsAValueTheRunUpdatedAndLoaded with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+34) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsAValueTheRunUpdatedAndLoaded with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:130
+
+35) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalAfterRefreshingACallersEntityClears with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+36) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalAfterRefreshingACallersEntityClears with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+37) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalAfterRefreshingACallersEntityClears with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:153
+
+38) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testANestedRefusalDiscardsTheCallersPendingChanges with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+39) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testANestedRefusalDiscardsTheCallersPendingChanges with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+40) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testANestedRefusalDiscardsTheCallersPendingChanges with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:179
+
+41) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testACascadeDetachIntoACallersEntityClearsInsteadOfLosingItsEdits with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+42) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testACascadeDetachIntoACallersEntityClearsInsteadOfLosingItsEdits with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+43) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testACascadeDetachIntoACallersEntityClearsInsteadOfLosingItsEdits with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:203
+
+44) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsAReferenceToARowTheRunInserted with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+45) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsAReferenceToARowTheRunInserted with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+46) Nowo\TransactionDoctrine\Tests\Integration\Database\ManagerSemanticsDatabaseTest::testARefusalForgetsAReferenceToARowTheRunInserted with data set "PostgreSQL 16" ('TD_POSTGRES_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/PostgreSQL/ExceptionConverter.php:79
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:55
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+Caused by
+PDOException: SQLSTATE[08006] [7] could not translate host name "postgres" to address: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/PgSQL/Driver.php:48
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/ManagerSemanticsDatabaseTest.php:233
+
+47) Nowo\TransactionDoctrine\Tests\Integration\Database\SavepointBehaviourDatabaseTest::testANestedDeadlockLeavesTheLevelUpUntilTheRepairCloses with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+48) Nowo\TransactionDoctrine\Tests\Integration\Database\SavepointBehaviourDatabaseTest::testANestedDeadlockLeavesTheLevelUpUntilTheRepairCloses with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:28
+
+49) Nowo\TransactionDoctrine\Tests\Integration\Database\SavepointBehaviourDatabaseTest::testTheOrmsFailedRollbackCarriesTheDeadlock with data set "MySQL 8.4" ('TD_MYSQL_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mysql failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+50) Nowo\TransactionDoctrine\Tests\Integration\Database\SavepointBehaviourDatabaseTest::testTheOrmsFailedRollbackCarriesTheDeadlock with data set "MariaDB 11.4" ('TD_MARIADB_URL')
+Doctrine\DBAL\Exception\ConnectionException: An exception occurred in the driver: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:93
+/app/vendor/doctrine/dbal/src/Connection.php:1456
+/app/vendor/doctrine/dbal/src/Connection.php:1398
+/app/vendor/doctrine/dbal/src/Connection.php:225
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+Caused by
+Doctrine\DBAL\Driver\PDO\Exception: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/Exception.php:24
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:52
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+Caused by
+PDOException: SQLSTATE[HY000] [2002] php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+Caused by
+PDOException: PDO::__construct(): php_network_getaddresses: getaddrinfo for mariadb failed: Name does not resolve
+
+/app/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php:25
+/app/vendor/doctrine/dbal/src/Driver/PDO/MySQL/Driver.php:45
+/app/vendor/doctrine/dbal/src/Connection.php:223
+/app/vendor/doctrine/dbal/src/Connection.php:893
+/app/tests/Integration/Database/Support/DatabaseTestCase.php:68
+/app/tests/Integration/Database/SavepointBehaviourDatabaseTest.php:67
+
+[37;41mERRORS![0m
+[37;41mTests: 112[0m[37;41m, Assertions: 182[0m[37;41m, Errors: 50[0m[37;41m.[0m
+
+Generating code coverage report in Clover XML format ... done [00:00.007]
+
+
+[1;37;40mCode Coverage Report:       [0m
+[1;37;40m  2026-11-17 05:25:12       [0m
+[1;37;40m                            [0m
+[1;37;40m Summary:                   [0m
+[30;42m  Classes: 100.00% (5/5)    [0m
+[30;42m  Methods: 100.00% (25/25)  [0m
+[30;42m  Lines:   100.00% (161/161)[0m
+
+Nowo\TransactionDoctrine\ConnectionRepairer
+  [30;42mMethods: 100.00% ( 6/ 6)[0m   [30;42mLines: 100.00% ( 43/ 43)[0m
+Nowo\TransactionDoctrine\DoctrineTransactionRunner
+  [30;42mMethods: 100.00% (10/10)[0m   [30;42mLines: 100.00% ( 87/ 87)[0m
+Nowo\TransactionDoctrine\RunObserver
+  [30;42mMethods: 100.00% ( 2/ 2)[0m   [30;42mLines: 100.00% (  3/  3)[0m
+Nowo\TransactionDoctrine\SafeLog
+  [30;42mMethods: 100.00% ( 2/ 2)[0m   [30;42mLines: 100.00% (  3/  3)[0m
+Nowo\TransactionDoctrine\TransientFailureClassifier
+  [30;42mMethods: 100.00% ( 5/ 5)[0m   [30;42mLines: 100.00% ( 25/ 25)[0m
+Script XDEBUG_MODE=coverage vendor/bin/phpunit --colors=always --coverage-text --coverage-clover coverage.xml handling the test-coverage event returned with error code 2

@@ -41,6 +41,28 @@ rethrown unchanged. The full behaviour reference (failure table, nested runs, DB
 Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as
 `nowo-tech/doctrine-deadlock-retry-bundle` 3.0).
 
+## Logging (optional)
+
+Pass a PSR-3 logger as the last argument; the default is a `NullLogger`, so nothing changes when you do not:
+
+```php
+$runner = DoctrineTransactionRunner::forEntityManager($entityManager, $managerRegistry, 'default', 1, $logger);
+$repairer = new ConnectionRepairer(null, $logger);
+```
+
+| Event | Level |
+| --- | --- |
+| Operation failed, classified transient (deadlock, lock wait, ...) | notice |
+| Operation failed, not transient | debug |
+| Levels rolled back to the entry level | notice |
+| Rollback failed, connection closed (session state lost) | warning |
+| Entity manager closed and reset through the registry | notice |
+| Entity manager cleared | debug / notice |
+
+Context is structured and safe: exception class and code, nesting levels, action, manager name. SQL, parameters and
+exception messages are never logged. A logger that throws is ignored, and the runner stays stateless, so one instance
+is safe in a long-running worker.
+
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md)

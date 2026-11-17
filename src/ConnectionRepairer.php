@@ -6,6 +6,8 @@ namespace Nowo\TransactionDoctrine;
 
 use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Throwable;
 
 use function version_compare;
@@ -24,7 +26,9 @@ use function version_compare;
  * repairer never closes a nested leftover: it rolls back level by level (the level-1 ROLLBACK clears the flag), and
  * when even that real ROLLBACK fails it closes and then begins and rolls back once, to clear the flag.
  *
- * Stateless: safe as a shared service in a long-running worker.
+ * Stateless: safe as a shared service in a long-running worker. An optional PSR-3 logger (default NullLogger) receives
+ * the repair actions (notice: levels rolled back; warning: connection closed) with structured context only: levels,
+ * action and the failure's class and code. Never SQL, parameters or messages.
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
@@ -40,6 +44,7 @@ final readonly class ConnectionRepairer
      */
     public function __construct(
         private ?bool $emulatedNesting = null,
+        private LoggerInterface $logger = new NullLogger(),
     ) {
     }
 
@@ -82,6 +87,11 @@ final readonly class ConnectionRepairer
             return $this->rollBackTo($connection, $baseline);
         }
 
+        SafeLog::log($this->logger, 'warning', 'Closing a connection left inside a transaction between requests.', [
+            'nesting_level' => $level,
+            'baseline'      => $baseline,
+            'action'        => self::ACTION_CLOSED,
+        ]);
         $connection->close();
 
         return self::ACTION_CLOSED;
@@ -89,14 +99,28 @@ final readonly class ConnectionRepairer
 
     private function rollBackTo(Connection $connection, int $level): string
     {
+        // Read once, before the try: also the level reported if the rollback fails.
+        $from = $connection->getTransactionNestingLevel();
+
         try {
             // Bounded: with auto-commit disabled DBAL opens a new transaction after the outermost rollback.
-            for ($remaining = $connection->getTransactionNestingLevel() - $level; $remaining > 0; --$remaining) {
+            for ($remaining = $from - $level; $remaining > 0; --$remaining) {
                 $connection->rollBack();
             }
 
+            SafeLog::log($this->logger, 'notice', 'Rolled back transaction levels left open by a failure.', [
+                'from_level' => $from,
+                'to_level'   => $level,
+                'action'     => self::ACTION_ROLLED_BACK,
+            ]);
+
             return self::ACTION_ROLLED_BACK;
-        } catch (Throwable) {
+        } catch (Throwable $failure) {
+            SafeLog::log($this->logger, 'warning', 'Rollback failed; closing the connection (session state is lost).', [
+                'from_level' => $from,
+                'to_level'   => $level,
+                'action'     => self::ACTION_CLOSED,
+            ] + SafeLog::throwable($failure));
             $connection->close();
 
             if ($this->emulatesNesting($connection)) {
@@ -123,7 +147,8 @@ final readonly class ConnectionRepairer
         try {
             $connection->beginTransaction();
             $connection->rollBack();
-        } catch (Throwable) {
+        } catch (Throwable $failure) {
+            SafeLog::log($this->logger, 'debug', 'Could not clear the rollback-only flag after closing.', SafeLog::throwable($failure));
             // The server is gone: the next transaction reconnects; nothing more can be done here.
         }
     }
