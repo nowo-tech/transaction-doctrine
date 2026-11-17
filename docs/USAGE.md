@@ -145,8 +145,21 @@ PostgreSQL 55P03) by default. The conflict is found anywhere in the failure's pr
   **commit detection** (`commit_detection: true`, the default with the bundle: a DBAL middleware tagged
   `doctrine.middleware` feeds a `CommitLedger`), a failed attempt that already committed (a `COMMIT`, or a write
   statement outside a transaction) is **not replayed**: the conflict is rethrown at once as a `ConcurrencyConflict`
-  with `committed: true`, answered 409 like any other. Without the bundle, pass a `CommitLedger` to `WriteUnit` and add
-  `new CommitTrackingMiddleware($ledger)` to your DBAL configuration's middlewares, or keep to one commit per unit.
+  with `committed: true`. It is still answered **409**, but never as a safe retry: **no `Retry-After`**, the JSON code
+  `concurrency_conflict_partial` (`<json_error>_partial`) and the text "Part of your change may have been saved …
+  Reload before trying again." with a *Reload* link; formatters see `ConflictResponseContext::$committed` and a null
+  `retryAfterSeconds`. In a Messenger worker it goes out wrapped in an `UnrecoverableMessageHandlingException`, so the
+  transport does not retry it and the message lands in the failure transport. Without the bundle, pass a
+  `CommitLedger` to `WriteUnit` and add `new CommitTrackingMiddleware($ledger)` to your DBAL configuration's
+  middlewares, or keep to one commit per unit.
+- **What commit detection sees, and its limits.** Counted: every successful `COMMIT`; outside a transaction, every
+  statement that does not start with `SELECT`, `SHOW`, `SET`, `EXPLAIN` (except `EXPLAIN ANALYZE`, which runs the
+  statement), `DESCRIBE` or `PRAGMA`; any SQL string holding several statements (a `;` before the trailing
+  whitespace); and on MySQL / MariaDB the statements that commit implicitly even inside a transaction (`CREATE`,
+  `ALTER`, `DROP`, `TRUNCATE`, `RENAME`, `LOCK` / `UNLOCK`, `GRANT` / `REVOKE`, `BEGIN`, `START TRANSACTION`,
+  `ANALYZE`, `OPTIMIZE`, `REPAIR`, `FLUSH`…). **Not seen:** a `SELECT` that calls a writing function or stored
+  routine, and anything run through the raw PDO / mysqli handle (`getNativeConnection()`), which bypasses DBAL. Counting
+  too much only cancels a replay; keep writes that the ledger cannot see out of write units.
 - **One retry layer:** use a write unit **or** another retry (for example `nowo-tech/doctrine-deadlock-retry-bundle`'s
   retry service or its retrying flush), not both nested: the inner retry rethrows the raw deadlock after its own
   attempts and the outer unit replays it again, multiplying the attempts.
@@ -184,8 +197,10 @@ final class TaskController
 The listener runs after the security attribute listeners and the request payload resolvers
 (kernel.controller_arguments, priority -10100). On a replay:
 
-- only the **Doctrine entity arguments** are reloaded, by identifier, from the cleared or reset manager (an entity
-  that no longer exists answers 404). Every other argument keeps its first-attempt value: `#[MapRequestPayload]` /
+- only the **top-level Doctrine entity arguments** are reloaded, by identifier, from the cleared or reset manager (an
+  entity that no longer exists answers 404). Entities inside an array or collection argument (a custom resolver) are
+  not reloaded: they stay detached, and writing them into an association fails the replay (a 500, nothing written);
+  an unsaved entity built by a resolver (no identifier) answers 404 on a replay. Every other argument keeps its first-attempt value: `#[MapRequestPayload]` /
   `#[MapQueryString]` DTOs, `#[MapUploadedFile]` files, the `Request`, values another listener set;
 - a signed-in user that is an entity is reloaded into the token; when it no longer exists the replay **fails closed**
   (403) instead of running with the stale user;

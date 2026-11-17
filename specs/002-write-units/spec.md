@@ -59,7 +59,10 @@ unit; closed managers are reset at every main request.
   never replayed again (SL-L1); run once when an open entity manager has pending changes (SL-M2); stateless.
   **A unit must commit at most once, or be idempotent as a whole.**
 - **FR-WU-005**: `CommitLedger` + `Dbal\CommitTrackingMiddleware` — count successful COMMITs and write statements
-  outside a transaction; a failed attempt that committed is not replayed (`ConcurrencyConflict::$committed`; SL-M1).
+  outside a transaction, multi-statement strings, `EXPLAIN ANALYZE`, MySQL implicit commits inside a transaction
+  (SL-D-L1); a failed attempt that committed is not replayed (`ConcurrencyConflict::$committed`; SL-M1). Such a
+  conflict is answered 409 without `Retry-After`, code `<json_error>_partial`, "reload before trying again" texts,
+  and is unrecoverable for Messenger (SL-D-M1).
 - **FR-WU-002**: `WriteUnitPolicy` — attempts, full-jitter bounds, replay kinds, Retry-After hint; validated.
 - **FR-WU-003**: `DoctrineStateRepairer` — reset closed managers; discard a unit of work (rollback through
   `ConnectionRepairer`, clear / reset); after a database failure ping connected connections only.

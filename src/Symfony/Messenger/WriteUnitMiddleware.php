@@ -9,6 +9,7 @@ use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\DelayedMessageHandlingException;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
+use Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
 use Symfony\Component\Messenger\Stamp\ConsumedByWorkerStamp;
@@ -24,7 +25,9 @@ use Throwable;
  * request are left alone: the request owns that unit.
  *
  * After the last attempt the ConcurrencyConflict goes out inside a HandlerFailedException with the attempt's envelope,
- * so the transport's retry strategy and the failure transport see the usual shape.
+ * so the transport's retry strategy and the failure transport see the usual shape. When part of the unit was already
+ * committed (ConcurrencyConflict::$committed), it is wrapped in an UnrecoverableMessageHandlingException: the
+ * transport does not retry it (a retry would repeat the committed part) and the message goes to the failure transport.
  *
  * Add it to a bus before `doctrine_transaction` (service id `nowo_transaction_doctrine.write_unit_middleware`).
  * Stateless (FrankenPHP worker): the closure lives for one handle() call.
@@ -68,7 +71,8 @@ final readonly class WriteUnitMiddleware implements MiddlewareInterface
         } catch (ConcurrencyConflict $conflict) {
             $last = $conflict->getPrevious();
 
-            throw new HandlerFailedException($last instanceof HandlerFailedException ? $last->getEnvelope() : $envelope, [$conflict]);
+            // Part of the unit committed: a transport retry would repeat it, so the failure is unrecoverable.
+            throw new HandlerFailedException($last instanceof HandlerFailedException ? $last->getEnvelope() : $envelope, [$conflict->committed ? new UnrecoverableMessageHandlingException(ConcurrencyConflict::MESSAGE, 0, $conflict) : $conflict]);
         } catch (UnreplayableDispatch $unreplayable) {
             throw $unreplayable->failure;
         }

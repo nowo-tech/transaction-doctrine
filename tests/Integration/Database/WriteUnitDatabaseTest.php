@@ -262,6 +262,42 @@ final class WriteUnitDatabaseTest extends DatabaseTestCase
         self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 3'));
     }
 
+    /**
+     * Audit SL-D-L1: a MySQL / MariaDB implicit commit inside a transaction, and PostgreSQL EXPLAIN ANALYZE of a write,
+     * are counted as durable writes; DDL inside a PostgreSQL transaction is not (it is transactional).
+     */
+    #[DataProvider('allServers')]
+    public function testCommitDetectionSeesImplicitCommitsAndExplainAnalyze(string $server): void
+    {
+        $ledger       = new CommitLedger();
+        $this->ledger = $ledger;
+        $this->boot($server);
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_implicit');
+        $before = $ledger->count();
+
+        $this->connection->beginTransaction();
+        $this->connection->executeStatement('UPDATE ddrb_counter SET counter_value = 4242 WHERE id = 1');
+        $this->connection->executeStatement('CREATE TABLE ddrb_implicit (id INT)');
+
+        try {
+            $this->connection->rollBack();
+        } catch (Throwable) {
+            // MySQL / MariaDB: the CREATE TABLE already committed, so there is no transaction left to roll back.
+            $this->connection->close();
+        }
+
+        if ($this->isPostgreSql()) {
+            self::assertSame($before, $ledger->count());
+            $this->connection->executeStatement('EXPLAIN ANALYZE UPDATE ddrb_counter SET counter_value = counter_value + 5 WHERE id = 2');
+            self::assertSame($before + 1, $ledger->count());
+        } else {
+            self::assertSame($before + 1, $ledger->count());
+            self::assertSame(4242, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
+        }
+
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_implicit');
+    }
+
     private function shortLockWait(): void
     {
         $this->connection->executeStatement($this->isPostgreSql() ? "SET lock_timeout = '1s'" : 'SET SESSION innodb_lock_wait_timeout = 1');

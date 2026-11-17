@@ -3,3 +3,8 @@ conflict:
     lead: 'Deine Änderung wurde nicht gespeichert, weil dieselben Daten gleichzeitig geändert wurden. Nichts ist verloren: Versuche es erneut.'
     hint: 'Wenn es weiterhin passiert, warte ein paar Sekunden, bevor du es erneut versuchst.'
     retry: 'Erneut versuchen'
+    partial:
+        title: 'Ein Teil deiner Änderung wurde möglicherweise gespeichert'
+        lead: 'Ein Teil deiner Änderung wurde möglicherweise gespeichert, bevor dieselben Daten gleichzeitig geändert wurden. Lade die Seite neu, bevor du es erneut versuchst.'
+        hint: 'Prüfe zuerst, was gespeichert wurde: dieselbe Änderung erneut zu senden, könnte sie wiederholen.'
+        retry: 'Neu laden'

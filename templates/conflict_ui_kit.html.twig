@@ -3,13 +3,14 @@
   illustration and "Home" action, plus *Try again* to retry_url. Variables: see conflict.html.twig.
 #}
 {% extends '@NowoUiKit/error/status.html.twig' %}
-{% block title %}{{ status_code }} — {{ 'conflict.title'|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
-{% block error_title %}{{ 'conflict.title'|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
-{% block error_lead %}{{ 'conflict.lead'|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
-{% block error_hint %}{{ 'conflict.hint'|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
+{% set _p = partial|default(false) ? 'conflict.partial.' : 'conflict.' %}
+{% block title %}{{ status_code }} — {{ (_p ~ 'title')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
+{% block error_title %}{{ (_p ~ 'title')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
+{% block error_lead %}{{ (_p ~ 'lead')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
+{% block error_hint %}{{ (_p ~ 'hint')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
 {% block error_actions %}
     <a class="{{ nowo_ui_class('error_home') }}"{{ nowo_ui_attrs('error_home') }} href="{{ error.homeHref }}" data-testid="error-home">{{ nowo_ui_error_text('home', error_code) }}</a>
-    <a class="{{ nowo_ui_class('error_action') }}"{{ nowo_ui_attrs('error_action') }} href="{{ retry_url }}" data-testid="concurrency-conflict-retry">{{ 'conflict.retry'|trans({}, 'nowo_transaction_doctrine') }}</a>
+    <a class="{{ nowo_ui_class('error_action') }}"{{ nowo_ui_attrs('error_action') }} href="{{ retry_url }}" data-testid="concurrency-conflict-retry">{{ (_p ~ 'retry')|trans({}, 'nowo_transaction_doctrine') }}</a>
 {% endblock %}
 {% block error_extra %}
     <span hidden data-testid="concurrency-conflict"></span>

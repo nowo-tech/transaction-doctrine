@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
@@ -17,6 +18,7 @@ use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\DelayedMessageHandlingException;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
+use Symfony\Component\Messenger\Exception\UnrecoverableExceptionInterface;
 use Symfony\Component\Messenger\Handler\HandlerDescriptor;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 use Symfony\Component\Messenger\Middleware\StackInterface;
@@ -119,6 +121,41 @@ final class WriteUnitMiddlewareTest extends TestCase
             self::assertSame(1, $handler->calls);
             self::assertCount(2, $failure->getWrappedExceptions());
             self::assertInstanceOf(RuntimeException::class, $failure->getWrappedExceptions()[0]);
+        }
+    }
+
+    /**
+     * Audit SL-D-M1: a conflict after a commit is unrecoverable, so the transport does not retry the message.
+     */
+    public function testAPartiallyCommittedConflictIsUnrecoverable(): void
+    {
+        $ledger  = new CommitLedger();
+        $handler = new class($ledger) implements MiddlewareInterface {
+            public int $calls = 0;
+
+            public function __construct(private readonly CommitLedger $ledger)
+            {
+            }
+
+            public function handle(Envelope $envelope, StackInterface $stack): Envelope
+            {
+                ++$this->calls;
+                $this->ledger->record();
+
+                throw new HandlerFailedException($envelope, [FakeDriverException::deadlock()]);
+            }
+        };
+        $middleware = new WriteUnitMiddleware(new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock(), null, null, $ledger));
+
+        try {
+            $middleware->handle($this->consumed(), new StackMiddleware([$middleware, $handler]));
+            self::fail('No failure.');
+        } catch (HandlerFailedException $failure) {
+            $wrapped = $failure->getWrappedExceptions()[0] ?? null;
+            self::assertSame(1, $handler->calls);
+            self::assertInstanceOf(UnrecoverableExceptionInterface::class, $wrapped);
+            self::assertInstanceOf(ConcurrencyConflict::class, $wrapped->getPrevious());
+            self::assertTrue($wrapped->getPrevious()->committed);
         }
     }
 

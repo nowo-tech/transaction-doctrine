@@ -3,3 +3,8 @@ conflict:
     lead: 'Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again.'
     hint: 'If it keeps happening, wait a few seconds before trying again.'
     retry: 'Try again'
+    partial:
+        title: 'Part of your change may have been saved'
+        lead: 'Part of your change may have been saved before the same data was changed at the same time. Reload before trying again.'
+        hint: 'Check what was saved first: sending the same change again could repeat it.'
+        retry: 'Reload'

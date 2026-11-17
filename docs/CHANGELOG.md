@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed is never replayed and becomes `ConcurrencyConflict` with `committed: true`. Bundle option
   `commit_detection` (default true, tag `doctrine.middleware`). Rule documented: a unit commits at most once, or is
   idempotent as a whole.
+- A conflict after a commit (`committed: true`, audit SL-D-M1) is answered 409 **without `Retry-After`**, with the JSON
+  code `concurrency_conflict_partial` and a "part of your change may have been saved; reload before trying again" text
+  and *Reload* link (en / es / fr / de, keys `conflict.partial.*`); `ConflictResponseContext` gains `committed` and a
+  nullable `retryAfterSeconds`. `WriteUnitMiddleware` wraps it in an `UnrecoverableMessageHandlingException`, so the
+  transport does not retry the message.
+- Commit detection also counts multi-statement SQL strings, `EXPLAIN ANALYZE`, and MySQL / MariaDB implicit-commit
+  statements inside a transaction (SL-D-L1); its limits are documented in USAGE.
 - Write units run once (no replay, no clear) when an open entity manager has pending changes before the first attempt
   (SL-M2); a Messenger wrapper is replayed only when every wrapped exception is a replayable conflict and no handler
   succeeded (SL-M4); a wrapped inner `ConcurrencyConflict` is never replayed again (SL-L1).

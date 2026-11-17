@@ -8,14 +8,21 @@ use Doctrine\DBAL\Driver\Connection;
 use Doctrine\DBAL\Driver\Middleware\AbstractConnectionMiddleware;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
+use mysqli;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use PDO;
 
 use function ltrim;
 use function preg_match;
+use function rtrim;
+use function str_contains;
 
 /**
  * One driver connection: knows whether a real (driver-level) transaction is open, and records a successful COMMIT,
- * or a successful write statement outside a transaction, in the ledger. Savepoints are plain SQL inside the open
+ * or a successful write statement outside a transaction, in the ledger. Also counted: any SQL string with several
+ * statements, `EXPLAIN ANALYZE`, and on MySQL / MariaDB the statements that commit implicitly inside a transaction
+ * (DDL, TRUNCATE, LOCK TABLES, GRANT…). Limits (documented in USAGE): a SELECT calling a writing function, and writes
+ * through the native PDO / mysqli handle, are not seen. Savepoints are plain SQL inside the open
  * transaction, so a nested commit is never counted; only the outermost COMMIT is. Its only state is that flag, which
  * belongs to the driver connection (a closed connection is replaced by a new instance).
  *
@@ -32,7 +39,16 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     /** Statements that never write: anything else run outside a transaction counts as a durable write. */
     private const READ_ONLY = '/^(?:SELECT|SHOW|SET|EXPLAIN|DESCRIBE|DESC|PRAGMA)\b/i';
 
+    /** EXPLAIN ANALYZE executes the statement it explains (PostgreSQL, MariaDB ANALYZE): a write. */
+    private const EXPLAIN_ANALYZE = '/^EXPLAIN\s*(?:\(\s*)?ANALY[SZ]E\b/i';
+
+    /** MySQL / MariaDB statements that commit implicitly, even inside a transaction. */
+    private const IMPLICIT_COMMIT = '/^(?:CREATE|ALTER|DROP|TRUNCATE|RENAME|LOCK|UNLOCK|GRANT|REVOKE|BEGIN|START\s+TRANSACTION|ANALYZE|OPTIMIZE|REPAIR|INSTALL|UNINSTALL|FLUSH|LOAD\s+INDEX|CACHE\s+INDEX|SET\s+(?:PASSWORD|AUTOCOMMIT))\b/i';
+
     private bool $inTransaction = false;
+
+    /** Whether the server is MySQL / MariaDB (read from the native connection the first time it matters). */
+    private ?bool $mysql = null;
 
     public function __construct(Connection $connection, private readonly CommitLedger $ledger)
     {
@@ -82,8 +98,29 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     /** A statement of this connection ran successfully. */
     public function executed(string $sql): void
     {
-        if (!$this->inTransaction && preg_match(self::READ_ONLY, ltrim($sql, " \t\n\r(")) !== 1) {
+        $statement = ltrim($sql, " \t\n\r(");
+
+        if ($this->isMultiStatement($sql)
+            || (!$this->inTransaction && (preg_match(self::READ_ONLY, $statement) !== 1 || preg_match(self::EXPLAIN_ANALYZE, $statement) === 1))
+            || ($this->inTransaction && preg_match(self::IMPLICIT_COMMIT, $statement) === 1 && $this->isMySql())) {
             $this->ledger->record();
         }
+    }
+
+    /** Several statements in one string (a `;` before the trailing whitespace): counted, whatever they are. */
+    private function isMultiStatement(string $sql): bool
+    {
+        return str_contains(rtrim($sql, " \t\n\r;"), ';');
+    }
+
+    private function isMySql(): bool
+    {
+        if ($this->mysql === null) {
+            $native      = $this->getNativeConnection();
+            $this->mysql = $native instanceof mysqli // @igor-ignore — fact about this driver connection, not a request
+                || ($native instanceof PDO && $native->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+        }
+
+        return $this->mysql;
     }
 }

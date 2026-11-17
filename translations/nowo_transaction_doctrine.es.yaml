@@ -3,3 +3,8 @@ conflict:
     lead: 'Tu cambio no se ha guardado porque los mismos datos se estaban modificando a la vez. No se ha perdido nada: inténtalo de nuevo.'
     hint: 'Si vuelve a ocurrir, espera unos segundos antes de reintentarlo.'
     retry: 'Reintentar'
+    partial:
+        title: 'Puede que parte de tu cambio se haya guardado'
+        lead: 'Puede que parte de tu cambio se haya guardado antes de que los mismos datos se modificaran a la vez. Recarga antes de volver a intentarlo.'
+        hint: 'Comprueba primero qué se ha guardado: enviar el mismo cambio otra vez podría repetirlo.'
+        retry: 'Recargar'

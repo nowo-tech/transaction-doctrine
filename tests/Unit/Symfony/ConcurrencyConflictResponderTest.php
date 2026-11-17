@@ -62,7 +62,7 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertStringContainsString('href="/board/7" data-testid="concurrency-conflict-retry"', $html);
         self::assertStringContainsString('<title>409 — ', $html);
         self::assertSame('A write gave up after repeated database lock conflicts; answered the conflict status.', $logger->records[0]['message']);
-        self::assertSame(['route' => 'app_board', 'method' => 'GET', 'attempts' => 3, 'status' => 409, 'exception_class' => ConcurrencyConflict::class, 'exception_code' => 0], $logger->records[0]['context']);
+        self::assertSame(['route' => 'app_board', 'method' => 'GET', 'attempts' => 3, 'status' => 409, 'committed' => false, 'exception_class' => ConcurrencyConflict::class, 'exception_code' => 0], $logger->records[0]['context']);
     }
 
     public function testThePageIsTranslated(): void
@@ -242,6 +242,66 @@ final class ConcurrencyConflictResponderTest extends TestCase
 
         self::assertStringContainsString('<h1>Someone else was saving at the same moment</h1>', $html);
         self::assertSame('The conflict page template failed; answered the plain page.', $logger->records[0]['message']);
+    }
+
+    /**
+     * Audit SL-D-M1: when part of the unit committed, no Retry-After and a "reload first" answer, never "try again".
+     */
+    public function testAPartiallyCommittedConflictIsNeverInvitedToRetryBlindly(): void
+    {
+        $partial   = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock(), true);
+        $responder = new ConcurrencyConflictResponder(new ConflictResponsePolicy(409, 3), [], [], $this->twig(), $this->translator('en'));
+
+        $json = $responder->respond(Request::create('/api/x', 'POST'), $partial);
+        self::assertSame(409, $json->getStatusCode());
+        self::assertFalse($json->headers->has('Retry-After'));
+        self::assertSame(
+            ['error' => 'concurrency_conflict_partial', 'message' => 'Part of your change may have been saved before the same data was changed at the same time. Reload before trying again.'],
+            json_decode((string) $json->getContent(), true),
+        );
+
+        $page = $responder->respond(Request::create('https://app.test/save', 'POST', [], [], [], ['HTTP_REFERER' => 'https://app.test/form']), new RuntimeException('wrap', 0, $partial));
+        $html = (string) $page->getContent();
+        self::assertFalse($page->headers->has('Retry-After'));
+        self::assertStringContainsString('Part of your change may have been saved', $html);
+        self::assertStringContainsString('href="https://app.test/form" data-testid="concurrency-conflict-retry">Reload</a>', $html);
+        self::assertStringNotContainsString('Nothing was lost', $html);
+
+        $spanish = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [], $this->twig(null, 'es'), $this->translator('es'));
+        self::assertStringContainsString('Puede que parte de tu cambio se haya guardado', (string) $spanish->respond(Request::create('/x'), $partial)->getContent());
+
+        $plain = (string) (new ConcurrencyConflictResponder(new ConflictResponsePolicy()))->respond(Request::create('/x'), $partial)->getContent();
+        self::assertStringContainsString('<h1>Part of your change may have been saved</h1>', $plain);
+        self::assertStringContainsString('>Reload</a>', $plain);
+
+        $logger = new RecordingLogger();
+        $event  = $this->event(Request::create('/api/x', 'POST'), $partial);
+        (new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [], null, null, $logger))($event);
+        self::assertTrue($logger->records[0]['context']['committed']);
+    }
+
+    public function testAFormatterSeesTheCommittedFlagAndCannotAddRetryAfter(): void
+    {
+        $formatter = new class implements ConflictResponseFormatterInterface {
+            public ?ConflictResponseContext $context = null;
+
+            public function format(Request $request, ConflictResponseContext $context): JsonResponse
+            {
+                $this->context = $context;
+
+                return new JsonResponse(['err' => $context->message], 200, ['Retry-After' => '9']);
+            }
+        };
+        $responder = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [$formatter]);
+
+        $response = $responder->respond(Request::create('/api/x'), new ConcurrencyConflict(1, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock(), true));
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertFalse($response->headers->has('Retry-After'));
+        self::assertNotNull($formatter->context);
+        self::assertTrue($formatter->context->committed);
+        self::assertNull($formatter->context->retryAfterSeconds);
+        self::assertSame('concurrency_conflict_partial', $formatter->context->errorCode);
     }
 
     public function testTheConflictsOwnRetryAfterHintIsUsed(): void

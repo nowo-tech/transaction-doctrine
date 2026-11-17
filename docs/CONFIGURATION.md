@@ -59,7 +59,7 @@ nowo_transaction_doctrine:
         status: 409
         # Retry-After seconds (also the hint of ConcurrencyConflict).
         retry_after: 1
-        # Twig template of the HTML answer. Variables: status_code, retry_url, retry_after, ui_kit.
+        # Twig template of the HTML answer. Variables: status_code, retry_url, retry_after (null after a commit), ui_kit, partial.
         template: '@NowoTransactionDoctrine/conflict.html.twig'
         # The "error" code of the JSON answer {"error": ..., "message": ...}.
         json_error: concurrency_conflict
@@ -83,12 +83,12 @@ nowo_transaction_doctrine:
 | `conflict_response.status` | `409` | `409` or `503` only |
 | `conflict_response.retry_after` | `1` | ≥ 0 |
 | `conflict_response.template` | `@NowoTransactionDoctrine/conflict.html.twig` | Or override the file in `templates/bundles/NowoTransactionDoctrineBundle/` |
-| `conflict_response.json_error` | `concurrency_conflict` | Stable JSON code |
+| `conflict_response.json_error` | `concurrency_conflict` | Stable JSON code; `<json_error>_partial` (no `Retry-After`) when part of the unit committed |
 | `conflict_response.json_path_prefixes` | `['/api/']` | Empty entries are ignored |
 | `conflict_response.map_transient_failures` | `false` | Runs before the bundles' own mappers: turning it on replaces their JSON shapes with this one |
 
 Texts: translation domain `nowo_transaction_doctrine` (`conflict.title`, `conflict.lead`, `conflict.hint`,
-`conflict.retry`), shipped in English, Spanish, French and German; override them in your own
+`conflict.retry`, and `conflict.partial.*` for a conflict after a commit), shipped in English, Spanish, French and German; override them in your own
 `translations/nowo_transaction_doctrine.<locale>.yaml`.
 
 ## Services and tags

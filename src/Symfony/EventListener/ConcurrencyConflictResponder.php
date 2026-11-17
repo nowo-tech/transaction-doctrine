@@ -63,11 +63,18 @@ final readonly class ConcurrencyConflictResponder
 
     /** English fallbacks when no translator is available. */
     private const FALLBACK_TEXTS = [
-        'conflict.title' => 'Someone else was saving at the same moment',
-        'conflict.lead'  => 'Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again.',
-        'conflict.hint'  => 'If it keeps happening, wait a few seconds before trying again.',
-        'conflict.retry' => 'Try again',
+        'conflict.title'         => 'Someone else was saving at the same moment',
+        'conflict.lead'          => 'Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again.',
+        'conflict.hint'          => 'If it keeps happening, wait a few seconds before trying again.',
+        'conflict.retry'         => 'Try again',
+        'conflict.partial.title' => 'Part of your change may have been saved',
+        'conflict.partial.lead'  => 'Part of your change may have been saved before the same data was changed at the same time. Reload before trying again.',
+        'conflict.partial.hint'  => 'Check what was saved first: sending the same change again could repeat it.',
+        'conflict.partial.retry' => 'Reload',
     ];
+
+    /** Suffix of the JSON error code when part of the unit was committed (`concurrency_conflict_partial`). */
+    public const PARTIAL_SUFFIX = '_partial';
 
     private LoggerInterface $logger;
 
@@ -100,10 +107,11 @@ final readonly class ConcurrencyConflictResponder
         $request  = $event->getRequest();
         $attempts = $this->attempts($failure);
         SafeLog::log($this->logger, 'warning', 'A write gave up after repeated database lock conflicts; answered the conflict status.', [
-            'route'    => $this->route($request),
-            'method'   => $request->getMethod(),
-            'attempts' => $attempts,
-            'status'   => $this->policy->status,
+            'route'     => $this->route($request),
+            'method'    => $request->getMethod(),
+            'attempts'  => $attempts,
+            'status'    => $this->policy->status,
+            'committed' => $this->committed($failure),
         ] + SafeLog::throwable($failure));
         $event->setResponse($this->respond($request, $failure));
     }
@@ -127,13 +135,15 @@ final readonly class ConcurrencyConflictResponder
 
     public function respond(Request $request, Throwable $failure): Response
     {
-        $context = new ConflictResponseContext(
+        $committed = $this->committed($failure);
+        $context   = new ConflictResponseContext(
             $this->policy->status,
-            $this->policy->retryAfter($this->hint($failure)),
-            $this->errorCode,
-            $this->text('conflict.lead'),
+            $committed ? null : $this->policy->retryAfter($this->hint($failure)),
+            $this->errorCode . ($committed ? self::PARTIAL_SUFFIX : ''),
+            $this->text($committed ? 'conflict.partial.lead' : 'conflict.lead'),
             $this->attempts($failure),
             $failure,
+            $committed,
         );
 
         $response = null;
@@ -149,7 +159,12 @@ final readonly class ConcurrencyConflictResponder
             : new Response($this->html($request, $context), Response::HTTP_OK, ['Content-Type' => 'text/html; charset=UTF-8']);
 
         $response->setStatusCode($context->status);
-        $response->headers->set('Retry-After', (string) $context->retryAfterSeconds);
+        if ($context->retryAfterSeconds === null) {
+            $response->headers->remove('Retry-After');
+        } else {
+            $response->headers->set('Retry-After', (string) $context->retryAfterSeconds);
+        }
+
         $response->headers->set('Cache-Control', 'no-store, private');
 
         return $response;
@@ -202,6 +217,7 @@ final readonly class ConcurrencyConflictResponder
                     'exception'   => null,
                     'retry_url'   => $retryUrl,
                     'retry_after' => $context->retryAfterSeconds,
+                    'partial'     => $context->committed,
                     'ui_kit'      => $this->twig->getLoader()->exists(self::UI_KIT_TEMPLATE),
                 ]);
             } catch (Throwable $failure) {
@@ -210,17 +226,18 @@ final readonly class ConcurrencyConflictResponder
         }
 
         $escape = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+        $prefix = $context->committed ? 'conflict.partial.' : 'conflict.';
 
         return sprintf(
             '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%d — %s</title></head>'
             . '<body><main data-testid="concurrency-conflict"><h1>%s</h1><p>%s</p><p>%s</p><p><a href="%s" data-testid="concurrency-conflict-retry">%s</a></p></main></body></html>',
             $context->status,
-            $escape($this->text('conflict.title')),
-            $escape($this->text('conflict.title')),
+            $escape($this->text($prefix . 'title')),
+            $escape($this->text($prefix . 'title')),
             $escape($context->message),
-            $escape($this->text('conflict.hint')),
+            $escape($this->text($prefix . 'hint')),
             $escape($retryUrl),
-            $escape($this->text('conflict.retry')),
+            $escape($this->text($prefix . 'retry')),
         );
     }
 
@@ -243,6 +260,18 @@ final readonly class ConcurrencyConflictResponder
         }
 
         return null;
+    }
+
+    /** Whether a ConcurrencyConflict in the chain says part of the unit was already committed. */
+    private function committed(Throwable $failure): bool
+    {
+        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
+            if ($current instanceof ConcurrencyConflict) {
+                return $current->committed;
+            }
+        }
+
+        return false;
     }
 
     private function hint(Throwable $failure): ?int
