@@ -39,6 +39,12 @@
         "message": "Potential Memory Leak: Injection of a closure capturing local state into a shared service.",
         "reason": "The closure is the work passed to WriteUnit::run() and runs synchronously inside that call; WriteUnit is readonly and never stores it, so it ends with handle() (tests/Unit/Symfony/WriteUnitMiddlewareTest.php)."
       }
+    ],
+    "src/WriteUnit/CommitLedger.php": [
+      {
+        "message": "Mutation of state 'writes' in CommitLedger::record()",
+        "reason": "Monotonic per-process counter of durable writes; it holds no request, user or tenant data, and write units only read differences around one attempt (audit SL-M1, tests/Unit/WriteUnit/Dbal/CommitTrackingMiddlewareTest.php)."
+      }
     ]
   }
 }

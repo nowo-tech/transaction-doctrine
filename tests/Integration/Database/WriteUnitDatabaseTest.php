@@ -8,6 +8,7 @@ use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Counter;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
@@ -32,8 +33,9 @@ final class WriteUnitDatabaseTest extends DatabaseTestCase
     #[DataProvider('mysqlFamily')]
     public function testARealDeadlockIsReplayedAndTheReplayCommits(string $server): void
     {
+        $this->ledger = new CommitLedger();
         $this->boot($server);
-        $unit     = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0));
+        $unit     = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0), null, null, null, null, $this->ledger);
         $attempts = [];
 
         $unit->run(function (int $attempt, ?Throwable $previous) use (&$attempts): void {
@@ -174,6 +176,90 @@ final class WriteUnitDatabaseTest extends DatabaseTestCase
         self::assertSame(1, $this->registry->resets);
         self::assertTrue($this->manager()->isOpen());
         self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
+    }
+
+    /**
+     * Audit SL-M1 (probe P1): a unit whose first commit succeeded and whose second deadlocks is not replayed, so the
+     * first write and its side effect happen once; the conflict says it had committed.
+     */
+    #[DataProvider('mysqlFamily')]
+    public function testAUnitThatAlreadyCommittedIsNotReplayed(string $server): void
+    {
+        $this->ledger = new CommitLedger();
+        $this->boot($server);
+        $unit   = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0), null, null, null, null, $this->ledger);
+        $mails  = 0;
+        $caught = null;
+
+        try {
+            $unit->run(function (int $attempt) use (&$mails): void {
+                DoctrineTransactionRunner::forEntityManager($this->manager(), $this->registry)->run(function (): void {
+                    $this->manager()->getConnection()->executeStatement('INSERT INTO ddrb_ballast (id) VALUES (1001)');
+                });
+                ++$mails;
+                DoctrineTransactionRunner::forEntityManager($this->manager(), $this->registry)->run(function () use ($attempt): void {
+                    $connection = $this->manager()->getConnection();
+                    $connection->executeStatement('UPDATE ddrb_counter SET counter_value = counter_value + 1 WHERE id = 1');
+                    if ($attempt === 1) {
+                        $this->startDeadlockingPeer();
+                    }
+                    $connection->executeStatement('UPDATE ddrb_counter SET counter_value = counter_value + 1 WHERE id = 2');
+                });
+            });
+        } catch (ConcurrencyConflict $conflict) {
+            $caught = $conflict;
+        }
+
+        self::assertSame('OK', $this->otherSession()->await());
+        self::assertSame('OK', $this->otherSession()->execute('COMMIT'));
+        self::assertNotNull($caught);
+        self::assertTrue($caught->committed);
+        self::assertSame(1, $caught->attempts);
+        self::assertSame(1, $mails);
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_ballast WHERE id > 1000'));
+    }
+
+    /**
+     * Audit SL-M2 (probe P2): a caller's unflushed changes in the shared manager are never cleared for a replay: the
+     * unit runs once, and the caller's flush afterwards writes its changes.
+     */
+    #[DataProvider('mysqlFamily')]
+    public function testACallersPendingChangesSurviveAConflict(string $server): void
+    {
+        $this->boot($server);
+        $manager = $this->manager();
+        $mine    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $mine);
+        $mine->value = 555;
+        $manager->persist(new Counter(3, 33));
+        $unit   = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0));
+        $calls  = 0;
+        $caught = null;
+
+        try {
+            $unit->run(function () use (&$calls): void {
+                ++$calls;
+                $this->connection->transactional(function (): void {
+                    $this->connection->executeStatement('UPDATE ddrb_counter SET counter_value = counter_value + 1 WHERE id = 1');
+                    $this->startDeadlockingPeer();
+                    $this->connection->executeStatement('UPDATE ddrb_counter SET counter_value = counter_value + 1 WHERE id = 2');
+                });
+            });
+        } catch (Throwable $failure) {
+            $caught = $failure;
+        }
+
+        self::assertNotNull($caught);
+        self::assertNotInstanceOf(ConcurrencyConflict::class, $caught);
+        self::assertSame(1, $calls);
+        self::assertSame('OK', $this->otherSession()->await());
+        self::assertSame('OK', $this->otherSession()->execute('COMMIT'));
+        self::assertTrue($this->manager()->contains($mine));
+
+        $this->manager()->flush();
+
+        self::assertSame(555, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 3'));
     }
 
     private function shortLockWait(): void

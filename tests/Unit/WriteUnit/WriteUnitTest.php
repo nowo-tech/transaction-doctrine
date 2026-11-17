@@ -7,11 +7,13 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\WriteUnit;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\UnitOfWork;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
@@ -23,6 +25,7 @@ use stdClass;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
+use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
 /**
@@ -197,26 +200,174 @@ final class WriteUnitTest extends TestCase
         }
     }
 
-    public function testAConflictInsideAMessengerHandlerFailureIsReplayed(): void
+    public function testAMessengerFailureWhoseWrappedExceptionsAreAllConflictsIsReplayed(): void
     {
         $unit = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(), null, new MockClock());
 
         self::assertSame(2, $unit->run(static function (int $attempt): int {
             if ($attempt === 1) {
-                throw new RuntimeException('wrapper', 0, new HandlerFailedException(new Envelope(new stdClass()), [new RuntimeException('first'), FakeDriverException::deadlock()]));
+                throw new RuntimeException('wrapper', 0, new HandlerFailedException(new Envelope(new stdClass()), [FakeDriverException::lockWaitTimeout(), FakeDriverException::deadlock()]));
             }
 
             return $attempt;
         }));
     }
 
+    /**
+     * Audit SL-M4 (probe P5): a domain error next to a deadlock is never replayed; the failure goes out unchanged.
+     */
+    public function testAMixedMessengerFailureIsRethrownUnchanged(): void
+    {
+        $unit   = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(), null, new MockClock());
+        $mixed  = new HandlerFailedException(new Envelope(new stdClass()), [new RuntimeException('business rule'), new DeadlockException(FakeDriverException::deadlock(), null)]);
+        $calls  = 0;
+        $caught = null;
+
+        try {
+            $unit->run(static function () use (&$calls, $mixed): never {
+                ++$calls;
+
+                throw $mixed;
+            });
+        } catch (HandlerFailedException $failure) {
+            $caught = $failure;
+        }
+
+        self::assertSame($mixed, $caught);
+        self::assertSame(1, $calls);
+    }
+
     public function testConflictKindReadsTheChainAndWrappedExceptions(): void
     {
-        $unit = new WriteUnit(new RecordingRegistry());
+        $unit     = new WriteUnit(new RecordingRegistry());
+        $envelope = new Envelope(new stdClass());
+        $handled  = $envelope->with(new HandledStamp('done', 'other_handler'));
 
         self::assertSame(TransientFailureKind::Deadlock, $unit->conflictKind(new RuntimeException('x', 0, FakeDriverException::deadlock())));
-        self::assertNull($unit->conflictKind(new RuntimeException('x', 0, new HandlerFailedException(new Envelope(new stdClass()), [new RuntimeException('a')]))));
+        self::assertSame(TransientFailureKind::Deadlock, $unit->conflictKind(new HandlerFailedException($envelope, [FakeDriverException::deadlock(), FakeDriverException::lockWaitTimeout()])));
+        self::assertNull($unit->conflictKind(new RuntimeException('x', 0, new HandlerFailedException($envelope, [new RuntimeException('a')]))));
+        self::assertNull($unit->conflictKind(new HandlerFailedException($envelope, [new RuntimeException('a'), FakeDriverException::deadlock()])));
+        self::assertNull($unit->conflictKind(new HandlerFailedException($envelope, [FakeDriverException::serializationFailure()])));
+        self::assertNull($unit->conflictKind(new HandlerFailedException($handled, [FakeDriverException::deadlock()])));
         self::assertNull($unit->conflictKind(new RuntimeException('plain')));
+        self::assertNull($unit->conflictKind(FakeDriverException::serializationFailure()));
+    }
+
+    /**
+     * Audit SL-L1 (probe P3): an inner unit's conflict wrapped by the caller is not replayed again by the outer unit.
+     */
+    public function testAWrappedInnerConflictIsNotReplayedAgain(): void
+    {
+        $outer      = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock());
+        $inner      = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock());
+        $outerCalls = 0;
+        $innerCalls = 0;
+
+        foreach (['handler failure', 'previous'] as $wrapping) {
+            $outerCalls = 0;
+            $innerCalls = 0;
+
+            try {
+                $outer->run(static function () use ($inner, $wrapping, &$outerCalls, &$innerCalls): void {
+                    ++$outerCalls;
+
+                    try {
+                        $inner->run(static function () use (&$innerCalls): never {
+                            ++$innerCalls;
+
+                            throw FakeDriverException::deadlock();
+                        });
+                    } catch (ConcurrencyConflict $conflict) {
+                        throw $wrapping === 'previous' ? new RuntimeException('service', 0, $conflict) : new HandlerFailedException(new Envelope(new stdClass()), [$conflict]);
+                    }
+                });
+            } catch (RuntimeException) {
+            }
+
+            self::assertSame(1, $outerCalls, $wrapping);
+            self::assertSame(3, $innerCalls, $wrapping);
+        }
+    }
+
+    /**
+     * Audit SL-M1 (probe P1): a failed attempt that already committed is never replayed.
+     */
+    public function testAnAttemptThatAlreadyCommittedIsNotReplayed(): void
+    {
+        $ledger = new CommitLedger();
+        $logger = new RecordingLogger();
+        $unit   = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock(), $logger, null, $ledger);
+        $calls  = 0;
+        $caught = null;
+
+        try {
+            $unit->run(static function () use (&$calls, $ledger): never {
+                ++$calls;
+                $ledger->record();
+
+                throw FakeDriverException::deadlock();
+            });
+        } catch (ConcurrencyConflict $conflict) {
+            $caught = $conflict;
+        }
+
+        self::assertSame(1, $calls);
+        self::assertTrue($caught->committed);
+        self::assertSame(1, $caught->attempts);
+        self::assertSame('Write unit not replayed: the failed attempt had already committed.', $logger->records[0]['message']);
+
+        self::assertSame(2, $unit->run(static function (int $attempt) use ($ledger): int {
+            if ($attempt === 1) {
+                throw FakeDriverException::deadlock();
+            }
+            $ledger->record();
+
+            return $attempt;
+        }));
+    }
+
+    /**
+     * Audit SL-M2: a caller's pending changes are never cleared for a replay; the unit runs once.
+     */
+    public function testPendingChangesOfAnOpenManagerMakeTheUnitRunOnce(): void
+    {
+        foreach (['scheduled', 'computed', 'unreadable'] as $case) {
+            $unitOfWork = $this->createMock(UnitOfWork::class);
+            $calls      = 0;
+            if ($case === 'scheduled') {
+                $unitOfWork->method('getScheduledEntityInsertions')->willReturn([new stdClass()]);
+            } elseif ($case === 'computed') {
+                $unitOfWork->method('getScheduledEntityUpdates')->willReturnOnConsecutiveCalls([], [new stdClass()]);
+            } else {
+                $unitOfWork->method('computeChangeSets')->willThrowException(new RuntimeException('broken'));
+            }
+            $manager = $this->createMock(EntityManagerInterface::class);
+            $manager->method('isOpen')->willReturn(true);
+            $manager->method('getUnitOfWork')->willReturn($unitOfWork);
+            $manager->expects($this->never())->method('clear');
+            $unit = new WriteUnit(new RecordingRegistry(['default' => $this->idleConnection()], ['default' => $manager]), new WriteUnitPolicy(), null, new MockClock());
+
+            try {
+                $unit->run(static function () use (&$calls): never {
+                    ++$calls;
+
+                    throw FakeDriverException::deadlock();
+                });
+            } catch (FakeDriverException) {
+            }
+
+            self::assertSame(1, $calls, $case);
+        }
+    }
+
+    public function testAClosedManagerIsNotCheckedForPendingChanges(): void
+    {
+        $closed = $this->createMock(EntityManagerInterface::class);
+        $closed->method('isOpen')->willReturn(false);
+        $closed->expects($this->never())->method('getUnitOfWork');
+        $unit = new WriteUnit(new RecordingRegistry([], ['default' => $closed], ['default' => $this->createMock(EntityManagerInterface::class)]), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock());
+
+        self::assertSame(1, $unit->run(static fn (int $attempt): int => $attempt));
     }
 
     public function testPausesStayWithinTheJitterBounds(): void

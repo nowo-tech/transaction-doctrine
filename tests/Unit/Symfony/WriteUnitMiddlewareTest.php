@@ -105,6 +105,23 @@ final class WriteUnitMiddlewareTest extends TestCase
         }
     }
 
+    /**
+     * Audit SL-M4 (probe P5): a domain error next to a deadlock is not replayed and goes out unchanged.
+     */
+    public function testAMixedHandlerFailureIsNotReplayed(): void
+    {
+        $handler = new ScriptedHandler(['mixed', 'ok']);
+
+        try {
+            $this->dispatch($this->consumed(), $handler);
+            self::fail('No failure.');
+        } catch (HandlerFailedException $failure) {
+            self::assertSame(1, $handler->calls);
+            self::assertCount(2, $failure->getWrappedExceptions());
+            self::assertInstanceOf(RuntimeException::class, $failure->getWrappedExceptions()[0]);
+        }
+    }
+
     public function testAnotherFailureIsRethrownUnchanged(): void
     {
         $this->expectException(RuntimeException::class);
@@ -155,6 +172,7 @@ final class ScriptedHandler implements MiddlewareInterface
             'partial'                     => throw new HandlerFailedException($envelope->with(HandledStamp::fromDescriptor(new HandlerDescriptor(static fn (): null => null), null)), [FakeDriverException::deadlock()]),
             'delayed'                     => throw new DelayedMessageHandlingException([FakeDriverException::deadlock()], $envelope),
             'bug'                         => throw new RuntimeException('bug'),
+            'mixed'                       => throw new HandlerFailedException($envelope, [new RuntimeException('business rule'), FakeDriverException::deadlock()]),
             default                       => $envelope->with(HandledStamp::fromDescriptor(new HandlerDescriptor(static fn (): null => null), 'done')),
         };
     }

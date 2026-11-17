@@ -244,12 +244,23 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertSame('The conflict page template failed; answered the plain page.', $logger->records[0]['message']);
     }
 
+    public function testTheConflictsOwnRetryAfterHintIsUsed(): void
+    {
+        $responder = new ConcurrencyConflictResponder(new ConflictResponsePolicy(409, 1));
+        $conflict  = new ConcurrencyConflict(2, TransientFailureKind::Deadlock, 7, FakeDriverException::deadlock());
+
+        self::assertSame('7', $responder->respond(Request::create('/api/x'), new RuntimeException('wrap', 0, $conflict))->headers->get('Retry-After'));
+        self::assertSame('1', $responder->respond(Request::create('/api/x'), new TransientStorageFailure())->headers->get('Retry-After'));
+    }
+
     public function testRetryUrl(): void
     {
         self::assertSame('/board/7?tab=a', ConcurrencyConflictResponder::retryUrl(Request::create('/board/7?tab=a')));
         self::assertSame('https://APP.test/form', ConcurrencyConflictResponder::retryUrl(Request::create('https://app.test/save', 'POST', [], [], [], ['HTTP_REFERER' => 'https://APP.test/form'])));
         self::assertSame('/', ConcurrencyConflictResponder::retryUrl(Request::create('https://app.test/save', 'POST', [], [], [], ['HTTP_REFERER' => 'https://evil.test/form'])));
         self::assertSame('/', ConcurrencyConflictResponder::retryUrl(Request::create('https://app.test/save', 'POST')));
+        self::assertSame('/', ConcurrencyConflictResponder::retryUrl(Request::create('https://app.test/save', 'POST', [], [], [], ['HTTP_REFERER' => 'javascript://app.test/%0aalert(1)'])));
+        self::assertSame('/', ConcurrencyConflictResponder::retryUrl(Request::create('https://app.test/save', 'POST', [], [], [], ['HTTP_REFERER' => '//app.test/form'])));
     }
 
     public function testManyAnswersKeepNoState(): void
@@ -271,7 +282,7 @@ final class ConcurrencyConflictResponderTest extends TestCase
 
     private function conflict(): ConcurrencyConflict
     {
-        return new ConcurrencyConflict(3, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock());
+        return new ConcurrencyConflict(3, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock());
     }
 
     private function event(Request $request, Throwable $failure): ExceptionEvent

@@ -126,12 +126,30 @@ PostgreSQL 55P03) by default. The conflict is found anywhere in the failure's pr
   loaded.
 - **Outermost unit only:** when any connection of the registry is already inside a transaction (the caller's or an
   outer unit's), the work runs once and a failure propagates unchanged, because the database may have rolled back the
-  caller's whole transaction. A `ConcurrencyConflict` of an inner unit is never replayed again by an outer one.
+  caller's whole transaction. A `ConcurrencyConflict` of an inner unit, even wrapped (in the previous chain or inside
+  a Messenger `HandlerFailedException`), is never replayed again by an outer one.
+- **Pending changes:** when an open entity manager already holds unflushed work before the first attempt (a caller's
+  edits or `persist()` calls), the work runs once without replay: clearing the manager would lose them silently.
+- **A replay detaches everything the caller loaded:** between two attempts the open entity managers are cleared, so
+  entities the caller held before `run()` are no longer managed afterwards. Load again what you change after the unit.
+- **Messenger wrappers:** a `HandlerFailedException` (or `DelayedMessageHandlingException`) is replayed only when
+  **every** wrapped exception is a replayable conflict and no handler already succeeded (`HandledStamp`); a domain
+  error next to a deadlock goes out unchanged, so the failure transport and `ErrorDetailsStamp` keep the real error.
 - The last conflict becomes `ConcurrencyConflict` (a `TransientStorageFailure` of the contract, so existing handlers
   keep working; `attempts`, `kind`, `retryAfterSeconds()`, the storage error as previous, a constant client-safe
   message). Any other failure is rethrown unchanged at once.
 - The work must be **replayable**: it loads what it changes itself and keeps side effects (mails, messages, pushes)
   until after its commit, the same contract as a Messenger retry.
+- **A unit must commit at most once, or be idempotent as a whole.** A replay runs the whole unit again: what an
+  earlier commit of the failed attempt wrote, and the side effects that followed it, would happen twice. With
+  **commit detection** (`commit_detection: true`, the default with the bundle: a DBAL middleware tagged
+  `doctrine.middleware` feeds a `CommitLedger`), a failed attempt that already committed (a `COMMIT`, or a write
+  statement outside a transaction) is **not replayed**: the conflict is rethrown at once as a `ConcurrencyConflict`
+  with `committed: true`, answered 409 like any other. Without the bundle, pass a `CommitLedger` to `WriteUnit` and add
+  `new CommitTrackingMiddleware($ledger)` to your DBAL configuration's middlewares, or keep to one commit per unit.
+- **One retry layer:** use a write unit **or** another retry (for example `nowo-tech/doctrine-deadlock-retry-bundle`'s
+  retry service or its retrying flush), not both nested: the inner retry rethrows the raw deadlock after its own
+  attempts and the outer unit replays it again, multiplying the attempts.
 
 ### Programmatic API
 
@@ -141,7 +159,7 @@ use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
 
 // Symfony: autowire WriteUnitInterface (service nowo_transaction_doctrine.write_unit).
-// Plain PHP: new WriteUnit($managerRegistry, new WriteUnitPolicy(maxAttempts: 3), null, $clock, $logger);
+// Plain PHP: new WriteUnit($managerRegistry, new WriteUnitPolicy(maxAttempts: 3), null, $clock, $logger, null, $ledger);
 $total = $writeUnit->run(function (int $attempt, ?Throwable $previous) use ($orderId): Money {
     return $runner->run(fn () => $orders->get($orderId)->recalculate());   // reloads on every attempt
 });
@@ -163,17 +181,33 @@ final class TaskController
 }
 ```
 
-The listener runs after the security attribute listeners (kernel.controller_arguments, priority -10100), so access
-checks are not repeated. On a replay the controller arguments are resolved again (entities come from the fresh or
-cleared manager) and a signed-in user that is an entity is reloaded into the token. For controllers you cannot
-annotate (bundle routes), list the route names:
+The listener runs after the security attribute listeners and the request payload resolvers
+(kernel.controller_arguments, priority -10100). On a replay:
+
+- only the **Doctrine entity arguments** are reloaded, by identifier, from the cleared or reset manager (an entity
+  that no longer exists answers 404). Every other argument keeps its first-attempt value: `#[MapRequestPayload]` /
+  `#[MapQueryString]` DTOs, `#[MapUploadedFile]` files, the `Request`, values another listener set;
+- a signed-in user that is an entity is reloaded into the token; when it no longer exists the replay **fails closed**
+  (403) instead of running with the stale user;
+- access checks (`#[IsGranted]` and the other attribute listeners) are **not repeated**: they ran once on the
+  first-attempt entities, and the replay acts on the same rows reloaded, whose state may have changed meanwhile (the
+  write that caused the conflict). Put checks that depend on that state inside the action.
+
+For controllers you cannot annotate, list the route names. An entry matches the route name **exactly**; `*` is an
+explicit wildcard (for tenant-prefixed copies of a route):
 
 ```yaml
 nowo_transaction_doctrine:
     controller_routes:
-        - nowo_task_board_task_move        # also matches org_nowo_task_board_task_move, …
-        - nowo_chat_api_read
+        - app_invoice_pay                   # exact
+        - '*_app_invoice_pay'               # org_app_invoice_pay, general_app_invoice_pay, …
 ```
+
+List only actions you know commit at most once (or are idempotent). Listing **a bundle's route** also needs that
+bundle's `ConflictResponseFormatterInterface`: the responder answers at priority 64 and stops the event, so without a
+formatter the bundle's API clients get this package's JSON shape (`{"error": "concurrency_conflict"}`) instead of the
+bundle's own when the unit gives up. ChatKit, Wiki and TimeTrack ship formatters in their next minor; until then do
+not list their routes.
 
 ### Messenger middleware
 

@@ -43,8 +43,12 @@ nowo_transaction_doctrine:
     replay_on: [deadlock, lock_wait_timeout]
     # Run controllers marked #[AsWriteUnit] as write units.
     controller_attribute: true
-    # Route names (or name suffixes after "_") that run as write units: bundle controllers you cannot annotate.
+    # Route names that run as write units (exact; "*" is an explicit wildcard): controllers you cannot annotate.
+    # A bundle's route also needs that bundle's ConflictResponseFormatterInterface (see Usage).
     controller_routes: []
+    # Count commits through a DBAL middleware (tag doctrine.middleware): a failed attempt that already committed is
+    # never replayed (no double write); it answers the conflict at once.
+    commit_detection: true
     # Register nowo_transaction_doctrine.write_unit_middleware (add it to your buses yourself, see Usage).
     messenger_middleware: true
     # Reset closed entity managers per request; repair connections after a DBAL / ORM failure.
@@ -71,7 +75,8 @@ nowo_transaction_doctrine:
 | `backoff.floor_ms` / `base_ms` / `cap_ms` | `20` / `100` / `200` | ≥ 0 |
 | `replay_on` | `[deadlock, lock_wait_timeout]` | `serialization_failure` (PostgreSQL 40001, MariaDB 1020) and `retryable` (any other DBAL `RetryableException`) are opt-in |
 | `controller_attribute` | `true` | `#[AsWriteUnit]` on a controller class or action |
-| `controller_routes` | `[]` | A name matches itself and `<prefix>_<name>` (tenant-prefixed copies) |
+| `controller_routes` | `[]` | Exact route names; `*` is an explicit wildcard (`'*_app_invoice_pay'`) |
+| `commit_detection` | `true` | Registers `CommitTrackingMiddleware` (tag `doctrine.middleware`, all connections) and a `CommitLedger` |
 | `messenger_middleware` | `true` | Only registered when `symfony/messenger` is installed |
 | `worker_hygiene` | `true` | kernel.request / exception / terminate and `WorkerMessageFailedEvent` |
 | `conflict_response.enabled` | `true` | `false` removes the responder; the policy service stays (bundles read it) |
@@ -94,6 +99,8 @@ Texts: translation domain `nowo_transaction_doctrine` (`conflict.title`, `confli
 | `nowo_transaction_doctrine.conflict_response_policy` | `ConflictResponsePolicy` | Status + `Retry-After` every bundle reads |
 | `nowo_transaction_doctrine.write_unit_middleware` | `WriteUnitMiddleware` | Messenger middleware (add it to a bus) |
 | `nowo_transaction_doctrine.state_repairer` (private) | `DoctrineStateRepairer` | Manager reset, rollback, ping |
+| `nowo_transaction_doctrine.commit_ledger` (private) | `CommitLedger` | Durable writes counted by the DBAL middleware |
+| `nowo_transaction_doctrine.commit_tracking_middleware` (private, `doctrine.middleware`) | `CommitTrackingMiddleware` | Feeds the ledger |
 
 | Tag (autoconfigured) | Interface | Purpose |
 |----------------------|-----------|---------|

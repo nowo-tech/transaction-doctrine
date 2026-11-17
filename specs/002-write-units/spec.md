@@ -54,8 +54,12 @@ unit; closed managers are reset at every main request.
 ### Write units
 
 - **FR-WU-001**: `WriteUnit` / `WriteUnitInterface` — `run(callable(int, ?Throwable))`; replay kinds from
-  `TransientFailureClassifier` (chain and Messenger wrapped exceptions); outermost unit only; inner
-  `ConcurrencyConflict` never replayed again; stateless.
+  `TransientFailureClassifier`; a Messenger wrapper only when every wrapped exception is a replayable conflict and no
+  `HandledStamp` (audit SL-M4); outermost unit only; a `ConcurrencyConflict` anywhere in the failure (chain or wrapped)
+  never replayed again (SL-L1); run once when an open entity manager has pending changes (SL-M2); stateless.
+  **A unit must commit at most once, or be idempotent as a whole.**
+- **FR-WU-005**: `CommitLedger` + `Dbal\CommitTrackingMiddleware` — count successful COMMITs and write statements
+  outside a transaction; a failed attempt that committed is not replayed (`ConcurrencyConflict::$committed`; SL-M1).
 - **FR-WU-002**: `WriteUnitPolicy` — attempts, full-jitter bounds, replay kinds, Retry-After hint; validated.
 - **FR-WU-003**: `DoctrineStateRepairer` — reset closed managers; discard a unit of work (rollback through
   `ConnectionRepairer`, clear / reset); after a database failure ping connected connections only.
@@ -67,8 +71,9 @@ unit; closed managers are reset at every main request.
 - **FR-SF-001**: `NowoTransactionDoctrineBundle` — config tree `nowo_transaction_doctrine` (`max_attempts`, `backoff`,
   `replay_on`, `controller_attribute`, `controller_routes`, `messenger_middleware`, `worker_hygiene`,
   `conflict_response.{enabled,status,retry_after,template,json_error,json_path_prefixes,map_transient_failures}`).
-- **FR-SF-002**: `WriteUnitControllerListener` — attribute and listed routes; arguments resolved again and entity user
-  reloaded on a replay.
+- **FR-SF-002**: `WriteUnitControllerListener` — attribute and listed routes (exact names, explicit `*` wildcard;
+  SL-L3); on a replay only Doctrine entity arguments reloaded by identifier, other arguments (request payload DTOs)
+  kept (SL-M3); entity user reloaded, fail closed when gone (SL-I1).
 - **FR-SF-003**: `WriteUnitMiddleware` / `UnreplayableDispatch` — consumed messages only; no in-process replay after a
   partial success or a delayed-dispatch failure; final conflict inside `HandlerFailedException`.
 - **FR-SF-004**: `ConcurrencyConflictResponder` — 409 / 503 + `Retry-After` + `no-store`; JSON / HTML / formatter;
@@ -88,6 +93,8 @@ unit; closed managers are reset at every main request.
   wait timeouts (MySQL, MariaDB, PostgreSQL).
 - **SC-003**: PHPStan level 8 with the FrankenPHP worker ruleset and Igor pass; repeated-run tests show no state or
   memory growth.
+- **SC-004**: audit SL probes P1 (two-commit unit), P2 (shared-manager pending changes), P3 (wrapped inner conflict),
+  P4 (`#[MapRequestPayload]` replay) and P5 (mixed handler failure) are regression tests.
 
 ---
 

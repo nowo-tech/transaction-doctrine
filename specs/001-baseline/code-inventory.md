@@ -41,6 +41,11 @@
 | `WriteUnit/ConcurrencyConflict.php` | Write units | FR-WU-004 |
 | `WriteUnit/LockConflictExceptionInterface.php` | Write units | FR-WU-004 |
 | `WriteUnit/AsWriteUnit.php` | Write units | FR-WU-004 |
+| `WriteUnit/CommitLedger.php` | Write units | FR-WU-005 |
+| `WriteUnit/Dbal/CommitTrackingMiddleware.php` | Write units | FR-WU-005 |
+| `WriteUnit/Dbal/CommitTrackingDriver.php` | Write units | FR-WU-005 |
+| `WriteUnit/Dbal/CommitTrackingConnection.php` | Write units | FR-WU-005 |
+| `WriteUnit/Dbal/CommitTrackingStatement.php` | Write units | FR-WU-005 |
 
 ## Symfony bundle (spec [002-write-units](../002-write-units/spec.md))
 
@@ -67,6 +72,6 @@
 | Repair | 1 | 1 |
 | Classification | 2 | 2 |
 | Observability | 1 | 1 |
-| Write units | 7 | 7 |
+| Write units | 12 | 12 |
 | Symfony bundle | 11 | 11 |
-| **Total production sources** | **24** | **24** |
+| **Total production sources** | **29** | **29** |

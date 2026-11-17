@@ -78,7 +78,7 @@ final class BundleTest extends TestCase
 
     public function testAListedRouteIsReplayed(): void
     {
-        $kernel   = $this->boot(['controller_attribute' => false, 'controller_routes' => ['listed_route'], 'backoff' => ['floor_ms' => 0, 'base_ms' => 0, 'cap_ms' => 0]]);
+        $kernel   = $this->boot(['controller_attribute' => false, 'controller_routes' => ['*_listed_route'], 'backoff' => ['floor_ms' => 0, 'base_ms' => 0, 'cap_ms' => 0]]);
         $response = $kernel->handle(Request::create('/listed', 'POST'));
 
         self::assertSame('saved after 2', $response->getContent());
@@ -99,6 +99,7 @@ final class BundleTest extends TestCase
         self::assertSame(503, $kernel->getContainer()->getParameter('nowo_transaction_doctrine.conflict_response.status'));
         self::assertTrue($kernel->getContainer()->has('nowo_transaction_doctrine.write_unit_middleware'));
         self::assertTrue($kernel->getContainer()->has('nowo_transaction_doctrine.write_unit'));
+        self::assertTrue($this->testContainer($kernel)->has('nowo_transaction_doctrine.commit_ledger'));
         $kernel->shutdown();
     }
 
@@ -108,6 +109,7 @@ final class BundleTest extends TestCase
             'controller_attribute' => false,
             'messenger_middleware' => false,
             'worker_hygiene'       => false,
+            'commit_detection'     => false,
             'conflict_response'    => ['enabled' => false],
         ]);
         $container = $this->testContainer($kernel);
@@ -117,6 +119,7 @@ final class BundleTest extends TestCase
         self::assertFalse($container->has('nowo_transaction_doctrine.worker_connection_hygiene'));
         self::assertFalse($container->has('nowo_transaction_doctrine.write_unit_controller_listener'));
         self::assertTrue($container->has('nowo_transaction_doctrine.conflict_response_policy'));
+        self::assertFalse($container->has('nowo_transaction_doctrine.commit_ledger'));
         $kernel->shutdown();
     }
 

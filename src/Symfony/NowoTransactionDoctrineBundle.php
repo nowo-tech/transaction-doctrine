@@ -13,6 +13,8 @@ use Nowo\TransactionDoctrine\Symfony\EventListener\WorkerConnectionHygiene;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
@@ -37,8 +39,8 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_it
  * Optional Symfony integration of nowo-tech/transaction-doctrine (register it in config/bundles.php). Config root
  * `nowo_transaction_doctrine`:
  *
- * - write units (`max_attempts`, `backoff`, `replay_on`) for #[AsWriteUnit] controllers, `controller_routes`, the
- *   Messenger middleware and the programmatic WriteUnitInterface service;
+ * - write units (`max_attempts`, `backoff`, `replay_on`, `commit_detection`) for #[AsWriteUnit] controllers,
+ *   `controller_routes`, the Messenger middleware and the programmatic WriteUnitInterface service;
  * - `conflict_response`: the 409 (or 503) + `Retry-After` answer of a lock conflict, its template and JSON code, and
  *   the ConflictResponsePolicy service every bundle reads the status from;
  * - `worker_hygiene`: closed entity managers reset and failed connections pinged between requests and messages.
@@ -91,12 +93,14 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                 ->booleanNode('controller_attribute')->defaultTrue()
                     ->info('Run controllers marked #[AsWriteUnit] as write units.')->end()
                 ->arrayNode('controller_routes')
-                    ->info('Route names (or name suffixes after "_") that run as write units, for controllers the host cannot annotate.')
+                    ->info('Route names (exact; "*" is an explicit wildcard) that run as write units, for controllers the host cannot annotate. A bundle route also needs that bundle\'s ConflictResponseFormatterInterface.')
                     ->scalarPrototype()->cannotBeEmpty()->end()
                     ->defaultValue([])
                 ->end()
                 ->booleanNode('messenger_middleware')->defaultTrue()
                     ->info('Register nowo_transaction_doctrine.write_unit_middleware (add it to your buses before doctrine_transaction).')->end()
+                ->booleanNode('commit_detection')->defaultTrue()
+                    ->info('Count commits through a DBAL middleware (doctrine.middleware tag): a failed attempt that already committed is never replayed.')->end()
                 ->booleanNode('worker_hygiene')->defaultTrue()
                     ->info('Reset closed entity managers per request and repair connections after a DBAL / ORM failure.')->end()
                 ->arrayNode('conflict_response')
@@ -132,7 +136,7 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
      */
     public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
     {
-        /** @var array{max_attempts: int, backoff: array{floor_ms: int, base_ms: int, cap_ms: int}, replay_on: list<string>, controller_attribute: bool, controller_routes: list<string>, messenger_middleware: bool, worker_hygiene: bool, conflict_response: array{enabled: bool, status: int, retry_after: int, template: string, json_error: string, json_path_prefixes: list<string>, map_transient_failures: bool}} $config */
+        /** @var array{max_attempts: int, backoff: array{floor_ms: int, base_ms: int, cap_ms: int}, replay_on: list<string>, controller_attribute: bool, controller_routes: list<string>, commit_detection: bool, messenger_middleware: bool, worker_hygiene: bool, conflict_response: array{enabled: bool, status: int, retry_after: int, template: string, json_error: string, json_path_prefixes: list<string>, map_transient_failures: bool}} $config */
         $services = $container->services();
         $prefix   = self::ALIAS . '.';
         $conflict = $config['conflict_response'];
@@ -146,6 +150,13 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
             ->args([service('doctrine'), service('logger')->nullOnInvalid()])
             ->tag('monolog.logger', ['channel' => 'transaction_doctrine']);
         $services->alias(DoctrineStateRepairer::class, $prefix . 'state_repairer');
+
+        if ($config['commit_detection']) {
+            $services->set($prefix . 'commit_ledger', CommitLedger::class);
+            $services->set($prefix . 'commit_tracking_middleware', CommitTrackingMiddleware::class)
+                ->args([service($prefix . 'commit_ledger')])
+                ->tag('doctrine.middleware');
+        }
 
         $services->set($prefix . 'write_unit', WriteUnit::class)
             ->args([
@@ -161,6 +172,8 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                 service($prefix . 'state_repairer'),
                 service('clock')->nullOnInvalid(),
                 service('logger')->nullOnInvalid(),
+                null,
+                $config['commit_detection'] ? service($prefix . 'commit_ledger') : null,
             ])
             ->tag('monolog.logger', ['channel' => 'transaction_doctrine'])
             ->public();
@@ -171,7 +184,6 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
             $services->set($prefix . 'write_unit_controller_listener', WriteUnitControllerListener::class)
                 ->args([
                     service($prefix . 'write_unit'),
-                    service('argument_resolver'),
                     service('doctrine'),
                     service('security.token_storage')->nullOnInvalid(),
                     $config['controller_routes'],

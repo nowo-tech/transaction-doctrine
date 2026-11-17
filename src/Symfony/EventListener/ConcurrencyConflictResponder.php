@@ -22,14 +22,17 @@ use Throwable;
 use Twig\Environment;
 
 use function htmlspecialchars;
+use function in_array;
 use function is_string;
 use function parse_url;
 use function sprintf;
 use function str_starts_with;
 use function strcasecmp;
+use function strtolower;
 
 use const ENT_QUOTES;
 use const PHP_URL_HOST;
+use const PHP_URL_SCHEME;
 
 /**
  * Answers a lock conflict the client may retry with the configured status (409 by default, 503 to keep the 1.2
@@ -126,7 +129,7 @@ final readonly class ConcurrencyConflictResponder
     {
         $context = new ConflictResponseContext(
             $this->policy->status,
-            $this->policy->retryAfter(),
+            $this->policy->retryAfter($this->hint($failure)),
             $this->errorCode,
             $this->text('conflict.lead'),
             $this->attempts($failure),
@@ -171,7 +174,7 @@ final readonly class ConcurrencyConflictResponder
         return false;
     }
 
-    /** Where *Try again* leads: the page itself for a safe method, else the same-host page the form was sent from, else home. */
+    /** Where *Try again* leads: the page itself for a safe method, else the same-host http(s) page the form was sent from, else home. */
     public static function retryUrl(Request $request): string
     {
         if ($request->isMethodSafe()) {
@@ -180,7 +183,8 @@ final readonly class ConcurrencyConflictResponder
 
         $referer = (string) $request->headers->get('referer', '');
         $host    = parse_url($referer, PHP_URL_HOST);
-        if (is_string($host) && strcasecmp($host, $request->getHost()) === 0) {
+        $scheme  = parse_url($referer, PHP_URL_SCHEME);
+        if (is_string($host) && strcasecmp($host, $request->getHost()) === 0 && is_string($scheme) && in_array(strtolower($scheme), ['http', 'https'], true)) {
             return $referer;
         }
 
@@ -235,6 +239,17 @@ final readonly class ConcurrencyConflictResponder
         for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
             if ($current instanceof ConcurrencyConflict) {
                 return $current->attempts;
+            }
+        }
+
+        return null;
+    }
+
+    private function hint(Throwable $failure): ?int
+    {
+        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
+            if ($current instanceof ConcurrencyConflict) {
+                return $current->retryAfterSeconds();
             }
         }
 

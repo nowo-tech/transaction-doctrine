@@ -23,7 +23,7 @@ final readonly class ConflictController
 
     public function conflict(): Response
     {
-        throw new ConcurrencyConflict(3, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock());
+        throw new ConcurrencyConflict(3, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock());
     }
 
     #[AsWriteUnit]

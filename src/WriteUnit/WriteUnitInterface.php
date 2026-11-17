@@ -9,9 +9,9 @@ use Throwable;
 /**
  * Runs one host write unit (a controller, a consumed message, a command step) and replays it after a lock conflict.
  *
- * The work must be replayable: it loads what it changes itself and keeps side effects until after its commit (the same
- * contract as a Messenger retry). It receives the attempt number (1-based) and the previous attempt's failure, so it
- * can rebuild its inputs on a replay.
+ * The work must be replayable: it loads what it changes itself, keeps side effects until after its commit (the same
+ * contract as a Messenger retry), and **commits at most once, or is idempotent as a whole**. It receives the attempt
+ * number (1-based) and the previous attempt's failure, so it can rebuild its inputs on a replay.
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech

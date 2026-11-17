@@ -17,15 +17,23 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Controller\ArgumentResolverInterface;
+use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
+use Symfony\Component\HttpKernel\Controller\ArgumentResolver;
+use Symfony\Component\HttpKernel\Controller\ArgumentResolver\RequestPayloadValueResolver;
 use Symfony\Component\HttpKernel\Event\ControllerArgumentsEvent;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorage;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 use Symfony\Component\Security\Core\User\UserInterface;
+use Symfony\Component\Serializer\Encoder\JsonEncoder;
+use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
+use Symfony\Component\Serializer\Serializer;
 
 use function count;
+use function in_array;
 
 /**
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -33,116 +41,192 @@ use function count;
  */
 final class WriteUnitControllerListenerTest extends TestCase
 {
-    public function testAMarkedControllerIsReplayedWithFreshArgumentsAndAReloadedUser(): void
+    public function testAReplayReloadsEntityArgumentsAndTheUserAndKeepsTheOthers(): void
     {
         $controller = new MarkedController();
         $user       = new InMemoryUser('ada', null);
         $fresh      = new InMemoryUser('ada', null, ['ROLE_FRESH']);
+        $board      = new BoardEntity(7);
+        $freshBoard = new BoardEntity(7);
         $tokens     = new TokenStorage();
         $tokens->setToken(new UsernamePasswordToken($user, 'main'));
-        $metadata = $this->createMock(ClassMetadata::class);
-        $metadata->method('getIdentifierValues')->with($user)->willReturn(['id' => 'ada']);
-        $manager = $this->createMock(ObjectManager::class);
-        $manager->method('getClassMetadata')->willReturn($metadata);
-        $manager->expects($this->once())->method('find')->with(InMemoryUser::class, ['id' => 'ada'])->willReturn($fresh);
-        $registry = $this->createMock(ManagerRegistry::class);
-        $registry->method('getManagerForClass')->willReturn($manager);
-        $resolver = $this->createMock(ArgumentResolverInterface::class);
-        $resolver->expects($this->once())->method('getArguments')->willReturn(['second']);
-        $listener = new WriteUnitControllerListener($this->writeUnit(), $resolver, $registry, $tokens);
-        $event    = $this->event($controller->save(...), ['first'], Request::create('/save', 'POST'));
+        $manager    = $this->manager([InMemoryUser::class => $fresh, BoardEntity::class => $freshBoard]);
+        $listener   = new WriteUnitControllerListener($this->writeUnit(), $this->registry($manager), $tokens);
+        $request    = Request::create('/save', 'POST');
+        $dto        = new PayloadDto();
+        $dto->title = 'kept';
+        $event      = $this->event($controller->save(...), [$board, $dto, $request], $request);
 
         $listener($event);
         $response = ($event->getController())();
 
         self::assertInstanceOf(Response::class, $response);
-        self::assertSame('second', $response->getContent());
-        self::assertSame(['first', 'second'], $controller->seen);
+        self::assertSame('saved kept', $response->getContent());
+        self::assertSame([$board, $freshBoard], $controller->boards);
+        self::assertSame([$dto, $dto], $controller->payloads);
+        self::assertSame([$request, $request], $controller->requests);
         self::assertSame($fresh, $this->user($tokens));
     }
 
-    public function testAListedRouteRunsAsAUnitAndTenantCopiesMatch(): void
+    /**
+     * Audit SL-M3 (probe P4): a #[MapRequestPayload] DTO resolved by the real resolver survives the replay.
+     */
+    public function testAReplayKeepsAMapRequestPayloadDto(): void
     {
-        $listener = new WriteUnitControllerListener($this->writeUnit(), $this->createMock(ArgumentResolverInterface::class), null, null, ['nowo_task_board_task_move'], false);
+        $payload    = new RequestPayloadValueResolver(new Serializer([new ObjectNormalizer()], [new JsonEncoder()]));
+        $resolver   = new ArgumentResolver(null, [$payload, ...ArgumentResolver::getDefaultArgumentValueResolvers()]);
+        $controller = new PayloadController();
+        $request    = Request::create('/save', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], '{"title":"x"}');
+        $request->attributes->set('_route', 'save');
+        $event = new ControllerArgumentsEvent($this->createMock(HttpKernelInterface::class), $controller->save(...), $resolver->getArguments($request, $controller->save(...)), $request, HttpKernelInterface::MAIN_REQUEST);
+        $payload->onKernelControllerArguments($event);
 
-        foreach (['nowo_task_board_task_move', 'org_nowo_task_board_task_move'] as $route) {
-            $request = Request::create('/move', 'POST');
-            $request->attributes->set('_route', $route);
-            self::assertTrue($listener->listed($request));
-            $event    = $this->event([new PlainController(), 'move'], [], $request);
-            $original = $event->getController();
-            $listener($event);
-            self::assertNotSame($original, $event->getController());
+        (new WriteUnitControllerListener($this->writeUnit(), null, null, ['save']))($event);
+        $response = ($event->getController())(...$event->getArguments());
+
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame('saved x after 2', $response->getContent());
+    }
+
+    public function testScalarArgumentsKeepTheirValue(): void
+    {
+        $request = Request::create('/x', 'POST');
+        $request->attributes->set('_route', 'scalar');
+        $calls = 0;
+        $event = $this->event(static function (int $id, ?string $tag) use (&$calls): Response {
+            if (++$calls === 1) {
+                throw FakeDriverException::deadlock();
+            }
+
+            return new Response($id . '/' . $tag);
+        }, [42, null], $request);
+
+        (new WriteUnitControllerListener($this->writeUnit(), null, null, ['scalar']))($event);
+        $response = ($event->getController())();
+
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame('42/', $response->getContent());
+    }
+
+    public function testAnEntityThatNoLongerExistsAnswers404(): void
+    {
+        $listener = new WriteUnitControllerListener($this->writeUnit(), $this->registry($this->manager([BoardEntity::class => null])));
+        $event    = $this->event([new MarkedController(), 'save'], [new BoardEntity(7), new PayloadDto(), Request::create('/x')], Request::create('/x', 'POST'));
+        $listener($event);
+
+        $this->expectException(NotFoundHttpException::class);
+
+        ($event->getController())();
+    }
+
+    /**
+     * Audit SL-I1: a signed-in user that cannot be reloaded fails closed.
+     */
+    public function testAUserThatNoLongerExistsFailsClosed(): void
+    {
+        $tokens = new TokenStorage();
+        $tokens->setToken(new UsernamePasswordToken(new InMemoryUser('ada', null), 'main'));
+        $listener = new WriteUnitControllerListener($this->writeUnit(), $this->registry($this->manager([InMemoryUser::class => null])), $tokens);
+        $event    = $this->event([new MarkedController(), 'save'], [new BoardEntity(1), new PayloadDto(), Request::create('/x')], Request::create('/x', 'POST'));
+        $listener($event);
+
+        $this->expectException(AccessDeniedHttpException::class);
+
+        ($event->getController())();
+    }
+
+    public function testAUserThatIsNoEntityOrNoTokenIsLeftAlone(): void
+    {
+        $user   = new InMemoryUser('ada', null);
+        $tokens = new TokenStorage();
+        $tokens->setToken(new UsernamePasswordToken($user, 'main'));
+        $noManager = $this->createMock(ManagerRegistry::class);
+        $noManager->method('getManagerForClass')->willReturn(null);
+
+        foreach ([[$noManager, $tokens], [null, $tokens], [$noManager, new TokenStorage()], [$noManager, null]] as [$registry, $storage]) {
+            $controller = new MarkedController();
+            $event      = $this->event($controller->save(...), [new BoardEntity(1), new PayloadDto(), Request::create('/x')], Request::create('/x', 'POST'));
+            (new WriteUnitControllerListener($this->writeUnit(), $registry, $storage))($event);
+            ($event->getController())();
+            self::assertCount(2, $controller->boards);
         }
 
-        $other = Request::create('/x');
-        $other->attributes->set('_route', 'nowo_task_board_task_moved');
-        self::assertFalse($listener->listed($other));
+        self::assertSame($user, $this->user($tokens));
+    }
+
+    /**
+     * Audit SL-L3: exact names, `*` only as an explicit wildcard.
+     */
+    public function testListedRoutesMatchExactlyOrByExplicitWildcard(): void
+    {
+        $listener = new WriteUnitControllerListener($this->writeUnit(), null, null, ['save', '*_nowo_task_board_task_move'], false);
+
+        foreach (['save' => true, 'app_save' => false, 'org_nowo_task_board_task_move' => true, 'nowo_task_board_task_move' => false, 'org_nowo_task_board_task_moved' => false] as $route => $expected) {
+            $request = Request::create('/x', 'POST');
+            $request->attributes->set('_route', $route);
+            self::assertSame($expected, $listener->listed($request), $route);
+        }
+
         self::assertFalse($listener->listed(Request::create('/x')));
+
+        $request = Request::create('/x', 'POST');
+        $request->attributes->set('_route', 'save');
+        $event    = $this->event([new PlainController(), 'move'], [], $request);
+        $original = $event->getController();
+        $listener($event);
+        self::assertNotSame($original, $event->getController());
     }
 
     public function testUnmarkedControllersSubRequestsAndADisabledAttributeAreLeftAlone(): void
     {
-        $resolver = $this->createMock(ArgumentResolverInterface::class);
-        $listener = new WriteUnitControllerListener($this->writeUnit(), $resolver);
+        $listener = new WriteUnitControllerListener($this->writeUnit());
 
         $plain    = $this->event([new PlainController(), 'move'], [], Request::create('/x'));
         $original = $plain->getController();
         $listener($plain);
         self::assertSame($original, $plain->getController());
 
-        $sub      = $this->event([new MarkedController(), 'save'], ['a'], Request::create('/x'), HttpKernelInterface::SUB_REQUEST);
+        $sub      = $this->event([new MarkedController(), 'save'], [], Request::create('/x'), HttpKernelInterface::SUB_REQUEST);
         $original = $sub->getController();
         $listener($sub);
         self::assertSame($original, $sub->getController());
 
-        $off      = new WriteUnitControllerListener($this->writeUnit(), $resolver, null, null, [], false);
-        $event    = $this->event([new MarkedController(), 'save'], ['a'], Request::create('/x'));
+        $off      = new WriteUnitControllerListener($this->writeUnit(), null, null, [], false);
+        $event    = $this->event([new MarkedController(), 'save'], [], Request::create('/x'));
         $original = $event->getController();
         $off($event);
         self::assertSame($original, $event->getController());
     }
 
-    public function testTheUserIsKeptWhenItIsNoEntityOrNotFound(): void
-    {
-        $user   = new InMemoryUser('ada', null);
-        $tokens = new TokenStorage();
-        $tokens->setToken(new UsernamePasswordToken($user, 'main'));
-        $resolver = $this->createMock(ArgumentResolverInterface::class);
-        $resolver->method('getArguments')->willReturn(['again']);
-
-        $noManager = $this->createMock(ManagerRegistry::class);
-        $noManager->method('getManagerForClass')->willReturn(null);
-        $this->replayOnce(new WriteUnitControllerListener($this->writeUnit(), $resolver, $noManager, $tokens));
-        self::assertSame($user, $this->user($tokens));
-
-        $metadata = $this->createMock(ClassMetadata::class);
-        $metadata->method('getIdentifierValues')->willReturn(['id' => 'ada']);
-        $manager = $this->createMock(ObjectManager::class);
-        $manager->method('getClassMetadata')->willReturn($metadata);
-        $manager->method('find')->willReturn(null);
-        $gone = $this->createMock(ManagerRegistry::class);
-        $gone->method('getManagerForClass')->willReturn($manager);
-        $this->replayOnce(new WriteUnitControllerListener($this->writeUnit(), $resolver, $gone, $tokens));
-        self::assertSame($user, $this->user($tokens));
-
-        $this->replayOnce(new WriteUnitControllerListener($this->writeUnit(), $resolver, $gone, new TokenStorage()));
-        $this->replayOnce(new WriteUnitControllerListener($this->writeUnit(), $resolver, null, $tokens));
-        self::assertSame($user, $this->user($tokens));
-    }
-
-    private function replayOnce(WriteUnitControllerListener $listener): void
-    {
-        $controller = new MarkedController();
-        $event      = $this->event($controller->save(...), ['first'], Request::create('/x', 'POST'));
-        $listener($event);
-        ($event->getController())();
-        self::assertSame(['first', 'again'], $controller->seen);
-    }
-
     private function user(TokenStorage $tokens): ?UserInterface
     {
         return $tokens->getToken()?->getUser();
+    }
+
+    /**
+     * @param array<class-string, object|null> $fresh What find() returns per class
+     */
+    private function manager(array $fresh): ObjectManager
+    {
+        $manager = $this->createMock(ObjectManager::class);
+        $manager->method('getClassMetadata')->willReturnCallback(function (string $class): ClassMetadata {
+            $metadata = $this->createMock(ClassMetadata::class);
+            $metadata->method('getName')->willReturn($class);
+            $metadata->method('getIdentifierValues')->willReturn(['id' => 7]);
+
+            return $metadata;
+        });
+        $manager->method('find')->willReturnCallback(static fn (string $class): ?object => $fresh[$class] ?? null);
+
+        return $manager;
+    }
+
+    private function registry(ObjectManager $manager): ManagerRegistry
+    {
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManagerForClass')->willReturnCallback(static fn (string $class): ?ObjectManager => in_array($class, [InMemoryUser::class, BoardEntity::class], true) ? $manager : null);
+
+        return $registry;
     }
 
     private function writeUnit(): WriteUnit
@@ -162,20 +246,63 @@ final class WriteUnitControllerListenerTest extends TestCase
 /**
  * @internal
  */
+final class BoardEntity
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+/**
+ * @internal
+ */
+final class PayloadDto
+{
+    public string $title = '';
+}
+
+/**
+ * @internal
+ */
 final class MarkedController
 {
-    /** @var list<string> */
-    public array $seen = [];
+    /** @var list<BoardEntity> */
+    public array $boards = [];
+
+    /** @var list<PayloadDto> */
+    public array $payloads = [];
+
+    /** @var list<Request> */
+    public array $requests = [];
 
     #[AsWriteUnit]
-    public function save(string $value): Response
+    public function save(BoardEntity $board, PayloadDto $payload, Request $request): Response
     {
-        $this->seen[] = $value;
-        if (count($this->seen) === 1) {
+        $this->boards[]   = $board;
+        $this->payloads[] = $payload;
+        $this->requests[] = $request;
+        if (count($this->boards) === 1) {
             throw FakeDriverException::deadlock();
         }
 
-        return new Response($value);
+        return new Response('saved ' . $payload->title);
+    }
+}
+
+/**
+ * @internal
+ */
+final class PayloadController
+{
+    private int $calls = 0;
+
+    public function save(#[MapRequestPayload] PayloadDto $dto): Response
+    {
+        if (++$this->calls === 1) {
+            throw FakeDriverException::deadlock();
+        }
+
+        return new Response('saved ' . $dto->title . ' after ' . $this->calls);
     }
 }
 

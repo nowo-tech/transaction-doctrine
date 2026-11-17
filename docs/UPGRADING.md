@@ -67,8 +67,14 @@ Each bundle keeps its JSON field names; only the status changes, read from the s
      `RetryableException`);
    - HTML: `new ServiceUnavailableHttpException($retry, $message, $failure)` →
      `$policy->httpException($message, $failure, $hint)`.
-4. UPGRADING of the bundle: "transient storage failures answer 409 + Retry-After (was 503); set
-   `nowo_transaction_doctrine.conflict_response.status: 503` to keep 503", and a minor version bump.
+4. Ship a `ConflictResponseFormatterInterface` (autoconfigured when the interface exists) that answers the bundle's
+   own requests in its own JSON shape. Without it, a host that lists the bundle's routes in `controller_routes` gets
+   this package's `{"error": "concurrency_conflict"}` shape when the unit gives up, because the responder answers
+   first.
+5. UPGRADING of the bundle: "transient storage failures answer 409 + Retry-After (was 503); set
+   `nowo_transaction_doctrine.conflict_response.status: 503` to keep 503". Also say that hosts that never register
+   `NowoTransactionDoctrineBundle` move to 409 too (the fallback policy), and to keep 503 they must register it and set
+   the status. Bump the minor version.
 
 | Bundle | Class | JSON shape kept | 1.2 status → 1.3 default |
 |--------|-------|-----------------|--------------------------|
