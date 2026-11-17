@@ -6,6 +6,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures;
 
 use Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
 use Psr\Log\NullLogger;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
@@ -78,6 +79,10 @@ final class TestKernel extends Kernel
         $services->set('doctrine', RecordingRegistry::class)->public();
         $services->set('logger', NullLogger::class);
         $services->set(Attempts::class)->public();
+        $services->set(ReplayLog::class)->public()
+            ->tag('kernel.event_listener', ['event' => WriteUnitRetryEvent::class, 'method' => 'onRetry']);
+        $services->set(LowResetter::class)->autowire()->autoconfigure();
+        $services->set(HighResetter::class)->autowire()->autoconfigure();
         $services->set(ConflictController::class)->autowire()->autoconfigure()->tag('controller.service_arguments')->public();
     }
 

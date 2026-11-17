@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Symfony\Messenger;
 
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\DelayedMessageHandlingException;
@@ -29,6 +30,9 @@ use Throwable;
  * committed (ConcurrencyConflict::$committed), it is wrapped in an UnrecoverableMessageHandlingException: the
  * transport does not retry it (a retry would repeat the committed part) and the message goes to the failure transport.
  *
+ * Before a replay the write unit empties every ResetBetweenAttemptsInterface service (handler memos holding entities)
+ * and dispatches WriteUnitRetryEvent with the message class as the unit.
+ *
  * Add it to a bus before `doctrine_transaction` (service id `nowo_transaction_doctrine.write_unit_middleware`).
  * Stateless (FrankenPHP worker): the closure lives for one handle() call.
  *
@@ -52,7 +56,7 @@ final readonly class WriteUnitMiddleware implements MiddlewareInterface
         $start = clone $stack;
 
         try {
-            return $this->writeUnit->run(static function (int $attempt, ?Throwable $previous) use ($envelope, $start): Envelope {
+            $work = static function (int $attempt, ?Throwable $previous) use ($envelope, $start): Envelope {
                 $retry        = $previous instanceof HandlerFailedException ? $previous->getEnvelope() : $envelope;
                 $attemptStack = clone $start;
 
@@ -67,7 +71,10 @@ final readonly class WriteUnitMiddleware implements MiddlewareInterface
 
                     throw $failed;
                 }
-            });
+            };
+
+            // WriteUnitInterface::run() takes no unit name before 2.0; the bundle's WriteUnit does.
+            return $this->writeUnit instanceof WriteUnit ? $this->writeUnit->run($work, $envelope->getMessage()::class) : $this->writeUnit->run($work);
         } catch (ConcurrencyConflict $conflict) {
             $last = $conflict->getPrevious();
 

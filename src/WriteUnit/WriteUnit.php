@@ -11,6 +11,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Random\Randomizer;
@@ -44,6 +45,11 @@ use function usleep;
  *   clearing it for a replay would silently lose them.
  *
  * A replay clears the open entity managers: every entity the caller loaded before run() is detached afterwards.
+ * Request memos that keep entities must therefore be emptied before the replay: after the managers are cleared and
+ * the pause, and right before the next attempt, every ResetBetweenAttemptsInterface given (in order) is called, then
+ * a WriteUnitRetryEvent is dispatched when a PSR-14 dispatcher is given. Neither runs before the first attempt nor
+ * after the last failure. When one of them throws, the replay is abandoned: the unit gives up with ConcurrencyConflict
+ * (the attempt's failure as previous, the reset exception as ConcurrencyConflict::$resetFailure).
  *
  * Never replayed either: a ConcurrencyConflict anywhere in the chain or inside wrapped exceptions (an inner unit
  * already replayed), and a Messenger wrapper (HandlerFailedException, DelayedMessageHandlingException) unless every
@@ -70,6 +76,8 @@ final readonly class WriteUnit implements WriteUnitInterface
     /**
      * @param ClockInterface|null $clock Pauses through the clock when given (a MockClock in tests), else usleep()
      * @param CommitLedger|null $ledger Commit detection (Dbal\CommitTrackingMiddleware must feed it); null = none
+     * @param iterable<ResetBetweenAttemptsInterface> $resetters Called in order before each replay (read on every replay)
+     * @param EventDispatcherInterface|null $dispatcher Dispatches WriteUnitRetryEvent before each replay; null = none
      */
     public function __construct(
         private ManagerRegistry $registry,
@@ -79,6 +87,8 @@ final readonly class WriteUnit implements WriteUnitInterface
         ?LoggerInterface $logger = null,
         ?Randomizer $random = null,
         private ?CommitLedger $ledger = null,
+        private iterable $resetters = [],
+        private ?EventDispatcherInterface $dispatcher = null,
     ) {
         $this->logger     = $logger ?? new NullLogger();
         $this->classifier = new TransientFailureClassifier();
@@ -86,7 +96,16 @@ final readonly class WriteUnit implements WriteUnitInterface
         $this->random     = $random ?? new Randomizer();
     }
 
-    public function run(callable $work): mixed
+    /**
+     * @template T
+     *
+     * @param callable(int, ?Throwable): T $work The unit; called with the attempt number and the previous failure
+     * @param string|null $unit A name for the unit, carried by WriteUnitRetryEvent (a route, a message class); the
+     *                          bundle's controller listener and Messenger middleware pass one
+     *
+     * @return T
+     */
+    public function run(callable $work, ?string $unit = null): mixed
     {
         if ($this->insideTransaction()) {
             return $work(1, null);
@@ -142,6 +161,7 @@ final readonly class WriteUnit implements WriteUnitInterface
                 'pause_ms' => $pause,
             ] + SafeLog::throwable($failure));
             $this->pause($pause);
+            $this->prepareReplay($attempt + 1, $failure, $kind, $unit);
         }
     }
 
@@ -213,6 +233,28 @@ final readonly class WriteUnit implements WriteUnitInterface
         }
 
         return false;
+    }
+
+    /**
+     * Empties request memos before the given attempt (resetters in order, then WriteUnitRetryEvent). A failure of
+     * either abandons the replay: the unit gives up with the attempt's conflict, the reset failure attached.
+     */
+    private function prepareReplay(int $next, Throwable $failure, TransientFailureKind $kind, ?string $unit): void
+    {
+        try {
+            foreach ($this->resetters as $resetter) {
+                $resetter->resetBetweenAttempts();
+            }
+
+            $this->dispatcher?->dispatch(new WriteUnitRetryEvent($next, $failure, $kind, $unit));
+        } catch (Throwable $resetFailure) {
+            SafeLog::log($this->logger, 'warning', 'Write unit not replayed: resetting request state between attempts failed.', [
+                'attempts' => $next - 1,
+                'kind'     => $kind->value,
+            ] + SafeLog::throwable($resetFailure));
+
+            throw new ConcurrencyConflict($next - 1, $kind, $this->policy->retryAfterSeconds, $failure, false, $resetFailure);
+        }
     }
 
     private function pause(int $milliseconds): void

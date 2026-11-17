@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Symfony\EventListener;
 use Doctrine\Persistence\ManagerRegistry;
 use Doctrine\Persistence\ObjectManager;
 use Nowo\TransactionDoctrine\WriteUnit\AsWriteUnit;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ControllerArgumentsEvent;
@@ -32,6 +33,9 @@ use function str_replace;
  * `#[MapUploadedFile]` files, the request, values another controller_arguments listener set). An entity that no
  * longer exists answers 404. The signed-in user, when it is an entity, is reloaded into the token; when it no longer
  * exists the replay fails closed (403) instead of running with the stale user.
+ *
+ * Request memos are not arguments: services implementing ResetBetweenAttemptsInterface are emptied by the write unit
+ * before the replay (the WriteUnitRetryEvent carries the route name as the unit).
  *
  * Access checks (#[IsGranted] and the other attribute listeners) run once, before the first attempt, on the
  * first-attempt entities: the replay acts on the same rows reloaded, whose state may have changed meanwhile.
@@ -72,7 +76,9 @@ final readonly class WriteUnitControllerListener
 
         $controller = $event->getController();
         $arguments  = $event->getArguments();
-        $event->setController(fn (): mixed => $this->runAsUnit($controller, $arguments), $event->getAttributes());
+        $route      = $event->getRequest()->attributes->get('_route');
+        $unit       = is_string($route) ? $route : null;
+        $event->setController(fn (): mixed => $this->runAsUnit($controller, $arguments, $unit), $event->getAttributes());
     }
 
     public function listed(Request $request): bool
@@ -99,9 +105,12 @@ final readonly class WriteUnitControllerListener
     /**
      * @param array<array-key, mixed> $arguments The arguments resolved for the first attempt
      */
-    private function runAsUnit(callable $controller, array $arguments): mixed
+    private function runAsUnit(callable $controller, array $arguments, ?string $unit): mixed
     {
-        return $this->writeUnit->run(fn (int $attempt): mixed => $controller(...($attempt === 1 ? $arguments : $this->replayArguments($arguments))));
+        $work = fn (int $attempt): mixed => $controller(...($attempt === 1 ? $arguments : $this->replayArguments($arguments)));
+
+        // WriteUnitInterface::run() takes no unit name before 2.0; the bundle's WriteUnit does.
+        return $this->writeUnit instanceof WriteUnit ? $this->writeUnit->run($work, $unit) : $this->writeUnit->run($work);
     }
 
     /**

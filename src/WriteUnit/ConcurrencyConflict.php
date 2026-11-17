@@ -12,7 +12,8 @@ use Throwable;
  * A write unit still met a lock conflict (deadlock, lock wait timeout, or another replayable kind) on its last attempt.
  * Nothing of it is pending. Unless `committed` is true (the unit gave up early because the failed attempt had already
  * committed, see WriteUnit), nothing of it was committed either, and the client (or Messenger's retry) may simply try
- * again.
+ * again. When the unit gave up because resetting request state between attempts failed, `resetFailure` holds that
+ * exception (a bug to fix: the conflict itself was still replayable).
  *
  * It is a TransientStorageFailure, so code that already handles the contract's transient failure keeps working; the
  * storage error is the previous exception. The message is constant and client-safe (no SQL, no parameters).
@@ -31,6 +32,8 @@ final class ConcurrencyConflict extends TransientStorageFailure implements LockC
      * @param Throwable $previous The last attempt's failure
      * @param bool $committed Whether the failed attempt had already committed part of its writes (not replayed for
      *                        that reason; a client retry may repeat what was committed)
+     * @param Throwable|null $resetFailure What a ResetBetweenAttemptsInterface service (or a WriteUnitRetryEvent
+     *                                     listener) threw before the replay, which was then abandoned; null otherwise
      */
     public function __construct(
         public readonly int $attempts,
@@ -38,6 +41,7 @@ final class ConcurrencyConflict extends TransientStorageFailure implements LockC
         ?int $retryAfterSeconds,
         Throwable $previous,
         public readonly bool $committed = false,
+        public readonly ?Throwable $resetFailure = null,
     ) {
         parent::__construct($retryAfterSeconds, self::MESSAGE, $previous);
     }

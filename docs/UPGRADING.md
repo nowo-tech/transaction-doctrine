@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [Request memos and write-unit replays](#request-memos-and-write-unit-replays)
 - [To 1.3.1](#to-131)
 - [To 1.3.0](#to-130)
   - [To 1.3.0](#to-130-1)
@@ -13,6 +14,24 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+From **1.3.1**: `composer update nowo-tech/transaction-doctrine`. No configuration change; nothing breaks.
+
+### Request memos and write-unit replays
+
+A write unit clears (or resets) the entity managers before replaying its work. **Request memos that hold entities must
+implement `ResetBetweenAttemptsInterface`, or store ids**: otherwise a replay gets the failed attempt's detached
+entities and fails with `ORMInvalidArgumentException` (a 500 instead of the 409) or drops its changes silently. With
+autoconfiguration nothing else is needed; order memos with `#[AsTaggedItem(priority: …)]` when one derives from another
+(see [USAGE](USAGE.md#request-memos-between-attempts-140)). Beacon: LeaveDirectory, LeaveAccess, OrganizationContext and
+RoomChannelAccess.
+
+- `WriteUnit::run()` accepts an optional unit name (`run($work, 'invoice_pay')`), carried by `WriteUnitRetryEvent`.
+  `WriteUnitInterface::run()` keeps its signature in 1.x (adding the argument would break other implementations); it
+  gains `?string $unit = null` in 2.0. The bundle's controller listener and Messenger middleware pass the name only to
+  `WriteUnit`, so a decorator of `WriteUnitInterface` still works (its replays carry no unit name).
+- `ConcurrencyConflict` has a new `$resetFailure` (null unless a resetter or retry listener threw before a replay).
+- Code that builds `WriteUnit` by position keeps working: the new `$resetters` and `$dispatcher` arguments come last.
 
 ## To 1.3.1
 
