@@ -24,7 +24,7 @@ final class TranslationCatalogueTest extends TestCase
     /**
      * @return array<string, string>
      */
-    private static function flatten(string $locale): array
+    private function flatten(string $locale): array
     {
         $file = __DIR__ . '/../../../translations/nowo_transaction_doctrine.' . $locale . '.yaml';
         self::assertFileExists($file, sprintf('Missing translation file for locale "%s".', $locale));
@@ -48,13 +48,13 @@ final class TranslationCatalogueTest extends TestCase
 
     public function testEveryLocaleHasEveryKey(): void
     {
-        $reference = self::flatten('en');
+        $reference = $this->flatten('en');
         $keys      = array_keys($reference);
         sort($keys);
         self::assertGreaterThan(0, count($keys));
 
         foreach (self::LOCALES as $locale) {
-            $catalogue = self::flatten($locale);
+            $catalogue = $this->flatten($locale);
             $found     = array_keys($catalogue);
             sort($found);
             self::assertSame($keys, $found, sprintf('Locale "%s" does not have exactly the English keys.', $locale));
