@@ -63,6 +63,11 @@ unchanged.
   55P03, DBAL `RetryableException`; 1305 only through the deadlock it carries.
 - **FR-CLS-002**: `TransientFailureKind` — enum of the transient kinds.
 
+### Observability
+
+- **FR-OBS-001**: `SafeLog` (internal) — optional PSR-3 logging that never breaks the failure path: a throwing logger
+  is ignored and contexts carry class names, codes and counters only, never SQL, parameters or messages.
+
 ---
 
 ## Success Criteria
