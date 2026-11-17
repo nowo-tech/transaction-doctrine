@@ -98,7 +98,7 @@ final class LoggingTest extends TestCase
         $registry->expects($this->once())->method('resetManager')->with('orders');
         $deadlock = $this->deadlock();
 
-        $caught = $this->failureOf(static fn () => DoctrineTransactionRunner::forEntityManager($manager, $registry, 'orders', 3, $logger)->run(static function () use ($deadlock): never {
+        $caught = $this->failureOf(static fn (): mixed => DoctrineTransactionRunner::forEntityManager($manager, $registry, 'orders', 3, $logger)->run(static function () use ($deadlock): never {
             throw $deadlock;
         }));
 
@@ -118,7 +118,7 @@ final class LoggingTest extends TestCase
         $manager    = $this->manager($connection, true, true);
         $manager->expects($this->once())->method('clear');
 
-        $caught = $this->failureOf(static fn () => DoctrineTransactionRunner::forEntityManager($manager, null, null, 1, $logger)->run(static function (): never {
+        $caught = $this->failureOf(static fn (): mixed => DoctrineTransactionRunner::forEntityManager($manager, null, null, 1, $logger)->run(static function (): never {
             throw new DomainException('refused');
         }));
 
