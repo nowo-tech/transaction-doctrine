@@ -1,0 +1,10 @@
+conflict:
+    title: 'Iemand anders was op hetzelfde moment aan het opslaan'
+    lead: 'Je wijziging is niet opgeslagen omdat dezelfde gegevens tegelijkertijd werden gewijzigd. Er is niets verloren gegaan: probeer het opnieuw.'
+    hint: 'Als het blijft gebeuren, wacht dan een paar seconden voordat je het opnieuw probeert.'
+    retry: 'Opnieuw proberen'
+    partial:
+        title: 'Een deel van je wijziging is mogelijk opgeslagen'
+        lead: 'Een deel van je wijziging is mogelijk opgeslagen voordat dezelfde gegevens tegelijkertijd werden gewijzigd. Laad de pagina opnieuw voordat je het opnieuw probeert.'
+        hint: 'Controleer eerst wat is opgeslagen: dezelfde wijziging opnieuw versturen kan haar herhalen.'
+        retry: 'Opnieuw laden'

@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Missing it/nl/pt translations: the `nowo_transaction_doctrine` catalogue now covers the full house set (en, es, it, fr, pt,
+  de, nl), so the conflict message and page no longer fall back to English; a unit test requires every key in every locale.
+
 ## [1.3.0] - 2026-11-17
 
 ### Added

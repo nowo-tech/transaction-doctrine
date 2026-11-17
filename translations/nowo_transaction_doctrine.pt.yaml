@@ -1,0 +1,10 @@
+conflict:
+    title: 'Outra pessoa estava a guardar ao mesmo tempo'
+    lead: 'A tua alteração não foi guardada porque os mesmos dados estavam a ser alterados em simultâneo. Não se perdeu nada: tenta novamente.'
+    hint: 'Se voltar a acontecer, espera alguns segundos antes de tentar novamente.'
+    retry: 'Tentar novamente'
+    partial:
+        title: 'Parte da tua alteração pode ter sido guardada'
+        lead: 'Parte da tua alteração pode ter sido guardada antes de os mesmos dados serem alterados em simultâneo. Recarrega antes de tentar novamente.'
+        hint: 'Verifica primeiro o que foi guardado: enviar a mesma alteração outra vez pode repeti-la.'
+        retry: 'Recarregar'

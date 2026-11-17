@@ -1,0 +1,10 @@
+conflict:
+    title: 'Qualcun altro stava salvando nello stesso momento'
+    lead: 'La tua modifica non è stata salvata perché gli stessi dati venivano modificati contemporaneamente. Non è andato perso nulla: riprova.'
+    hint: 'Se succede di nuovo, attendi qualche secondo prima di riprovare.'
+    retry: 'Riprova'
+    partial:
+        title: 'Una parte della tua modifica potrebbe essere stata salvata'
+        lead: 'Una parte della tua modifica potrebbe essere stata salvata prima che gli stessi dati venissero modificati contemporaneamente. Ricarica prima di riprovare.'
+        hint: 'Controlla prima cosa è stato salvato: inviare di nuovo la stessa modifica potrebbe ripeterla.'
+        retry: 'Ricarica'
