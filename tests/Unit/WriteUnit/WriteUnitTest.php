@@ -47,6 +47,7 @@ final class WriteUnitTest extends TestCase
     {
         $manager = $this->createMock(EntityManagerInterface::class);
         $manager->method('isOpen')->willReturn(true);
+        $manager->method('getUnitOfWork')->willReturn($this->createStub(UnitOfWork::class)); // ORM 2 declares no return type
         $manager->expects($this->once())->method('clear');
         $clock    = new MockClock('2026-11-17 10:00:00');
         $start    = (float) $clock->now()->format('U.u');
