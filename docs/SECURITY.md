@@ -43,10 +43,12 @@ optional. Development tooling is `require-dev` and excluded from the archive by 
 
 ## Logging
 
-The package logs nothing. Failures are rethrown (transient storage failures as `TransientStorageFailure` with a fixed
-message); what the runner did to the connection or the entity manager is documented in the README and USAGE, so a host
-that wants an audit trail logs the exception it catches. Never log the `previous` chain verbatim: it can contain SQL
-and parameters.
+Logging is optional (PSR-3, REQ-OBS-001; default `NullLogger`). Records carry structured context only: exception
+class and code, nesting levels, action, manager name. SQL, parameters and exception messages are never logged, and a
+logger that throws never replaces the original failure. Levels are listed in the README. Failures are still rethrown
+(transient storage failures as `TransientStorageFailure` with a fixed message). Never log the `previous` chain
+verbatim: it can contain SQL and parameters. Do not log to the same database connection the runner uses (the line is
+lost inside the failed transaction); `exception_code` of a domain exception is host-defined.
 
 ## Release security checklist (12.4.1)
 
@@ -60,7 +62,7 @@ Confirm each item before tagging (a note in the release PR is enough).
 | Safe recipe / configuration | No Flex recipe, no configuration |
 | Input / output | Builds no SQL from input; only DBAL transaction statements |
 | Dependencies | `doctrine/dbal ^3.8.2 \|\| ^4.0`, `nowo-tech/transaction-contract`; CI runs `composer audit` |
-| Logs | Nothing logged; storage errors stay in `getPrevious()` |
+| Logs | Optional PSR-3 logger, structured context only (no SQL, parameters or messages); storage errors stay in `getPrevious()` |
 | Cryptography | Not applicable |
 | Permissions / exposure | No services, routes, commands or files |
 | Limits / DoS | No retry loop (one attempt); repair is bounded by the nesting level |

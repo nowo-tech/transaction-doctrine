@@ -1,0 +1,24 @@
+{
+  "files": {
+    "src/DoctrineTransactionRunner.php": [
+      {
+        "message": "Mutation detected on a local reference to a shared service ($manager). Risk of State Leak in a worker.",
+        "reason": "run() attaches its own per-run RunObserver to the entity manager's event manager and removes it in the finally block of the same try, so the listener never outlives the call, whatever the outcome (tests/Unit/DoctrineTransactionRunnerTest.php; docs/USAGE.md)."
+      },
+      {
+        "message": "Mutation detected on a local reference to a shared service ($manager). Risk of State Leak in a worker.",
+        "reason": "run() attaches its own per-run RunObserver to the entity manager's event manager and removes it in the finally block of the same try, so the listener never outlives the call, whatever the outcome (tests/Unit/DoctrineTransactionRunnerTest.php; docs/USAGE.md)."
+      }
+    ],
+    "src/RunObserver.php": [
+      {
+        "message": "Mutation of state 'flushed' in RunObserver::postFlush()",
+        "reason": "@internal value object created by each run() call and detached in finally; it is never a shared service, so its state ends with the call."
+      },
+      {
+        "message": "Mutation of state 'loaded' in RunObserver::postLoad()",
+        "reason": "@internal value object created by each run() call and detached in finally; it is never a shared service, so its state ends with the call."
+      }
+    ]
+  }
+}

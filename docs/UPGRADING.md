@@ -8,7 +8,10 @@
 
 ## Unreleased
 
-Nothing to do: tooling, documentation and test layout only (no change under `src/`).
+Nothing to do. The logger is optional: `DoctrineTransactionRunner::forConnection()` / `forEntityManager()` and
+`ConnectionRepairer::__construct()` take a trailing `?LoggerInterface` that defaults to a `NullLogger`, so without one
+the behaviour is unchanged. If you pass one, do not log to the same database connection the runner uses (the line is
+lost inside the failed transaction), and note that `exception_code` of a domain exception is whatever your code set.
 
 ## 1.0 to 1.1
 

@@ -20,3 +20,4 @@
 /docker-compose.yml export-ignore
 /Makefile          export-ignore
 /igor.json         export-ignore
+/igor-baseline.json export-ignore
