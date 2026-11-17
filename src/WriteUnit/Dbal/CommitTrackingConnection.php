@@ -13,8 +13,8 @@ use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use PDO;
 use Throwable;
 
-use function ltrim;
 use function preg_match;
+use function preg_replace;
 use function rtrim;
 use function str_contains;
 
@@ -41,10 +41,13 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     private const READ_ONLY = '/^(?:SELECT|SHOW|SET|EXPLAIN|DESCRIBE|DESC|PRAGMA)\b/i';
 
     /** EXPLAIN ANALYZE executes the statement it explains (PostgreSQL, MariaDB ANALYZE): a write. */
-    private const EXPLAIN_ANALYZE = '/^EXPLAIN\s*(?:\(\s*)?ANALY[SZ]E\b/i';
+    private const EXPLAIN_ANALYZE = '/^EXPLAIN\s*(?:ANALY[SZ]E\b|\([^)]*\bANALY[SZ]E\b)/i';
+
+    /** Leading block and line comments, skipped before matching the first keyword. */
+    private const LEADING_COMMENTS = '/^(?:\s|\(|\/\*.*?\*\/|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$))*/s';
 
     /** MySQL / MariaDB statements that commit implicitly, even inside a transaction. */
-    private const IMPLICIT_COMMIT = '/^(?:CREATE|ALTER|DROP|TRUNCATE|RENAME|LOCK|UNLOCK|GRANT|REVOKE|BEGIN|START\s+TRANSACTION|ANALYZE|OPTIMIZE|REPAIR|INSTALL|UNINSTALL|FLUSH|LOAD\s+INDEX|CACHE\s+INDEX|SET\s+(?:PASSWORD|AUTOCOMMIT))\b/i';
+    private const IMPLICIT_COMMIT = '/^(?:CREATE|ALTER|DROP|TRUNCATE|RENAME|LOCK|UNLOCK|GRANT|REVOKE|BEGIN|START\s+TRANSACTION|ANALYZE|OPTIMIZE|REPAIR|INSTALL|UNINSTALL|FLUSH|LOAD\s+INDEX|CACHE\s+INDEX|SET\s+(?:PASSWORD|(?:SESSION\s+|@@(?:SESSION\.)?)?AUTOCOMMIT))\b/i';
 
     private bool $inTransaction = false;
 
@@ -99,7 +102,7 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     /** A statement of this connection ran successfully. */
     public function executed(string $sql): void
     {
-        $statement = ltrim($sql, " \t\n\r(");
+        $statement = (string) preg_replace(self::LEADING_COMMENTS, '', $sql, 1);
 
         if ($this->isMultiStatement($sql)
             || (!$this->inTransaction && (preg_match(self::READ_ONLY, $statement) !== 1 || preg_match(self::EXPLAIN_ANALYZE, $statement) === 1))

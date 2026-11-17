@@ -61,17 +61,21 @@ Each bundle keeps its JSON field names; only the status changes, read from the s
 2. Inject `?Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy` into the storage-failure listener
    (`service('nowo_transaction_doctrine.conflict_response_policy')->nullOnInvalid()`), falling back to
    `new ConflictResponsePolicy()` (409, 1 s) when the host did not register the bundle.
-3. Replace the hard-coded 503:
+3. Never invite a blind retry after a partial commit: when the failure (or its chain) holds a
+   `Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict` with `committed: true`, send **no** `Retry-After`
+   (do not call `$policy->headers()`; its `retryAfterSeconds()` is `null`) and tell the client to reload before trying
+   again. Only conflicts that did not commit get `$policy->headers($hint)`.
+4. Replace the hard-coded 503:
    - JSON: `Response::HTTP_SERVICE_UNAVAILABLE` → `$policy->status`, and `['Retry-After' => (string) $retry]` →
      `$policy->headers($hint)` (`$hint` = `TransientStorageFailure::retryAfterSeconds()`, or `null` for a bare DBAL
      `RetryableException`);
    - HTML: `new ServiceUnavailableHttpException($retry, $message, $failure)` →
      `$policy->httpException($message, $failure, $hint)`.
-4. Ship a `ConflictResponseFormatterInterface` (autoconfigured when the interface exists) that answers the bundle's
+5. Ship a `ConflictResponseFormatterInterface` (autoconfigured when the interface exists) that answers the bundle's
    own requests in its own JSON shape. Without it, a host that lists the bundle's routes in `controller_routes` gets
    this package's `{"error": "concurrency_conflict"}` shape when the unit gives up, because the responder answers
    first.
-5. UPGRADING of the bundle: "transient storage failures answer 409 + Retry-After (was 503); set
+6. UPGRADING of the bundle: "transient storage failures answer 409 + Retry-After (was 503); set
    `nowo_transaction_doctrine.conflict_response.status: 503` to keep 503". Also say that hosts that never register
    `NowoTransactionDoctrineBundle` move to 409 too (the fallback policy), and to keep 503 they must register it and set
    the status. Bump the minor version.

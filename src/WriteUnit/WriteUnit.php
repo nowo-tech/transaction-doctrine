@@ -122,7 +122,8 @@ final readonly class WriteUnit implements WriteUnitInterface
                     'kind'     => $kind->value,
                 ] + SafeLog::throwable($failure));
 
-                throw new ConcurrencyConflict($attempt, $kind, $this->policy->retryAfterSeconds, $failure, true);
+                // No Retry-After hint: part of the unit committed, so a blind retry could repeat it.
+                throw new ConcurrencyConflict($attempt, $kind, null, $failure, true);
             }
 
             if ($attempt >= $this->policy->maxAttempts) {

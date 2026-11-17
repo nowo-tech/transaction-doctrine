@@ -84,6 +84,34 @@ final class CommitTrackingMiddlewareTest extends TestCase
         $connection->rollBack();
     }
 
+    /**
+     * Audit SL-2-L2: leading comments are skipped, ANALYZE anywhere in EXPLAIN's option list, every AUTOCOMMIT form.
+     */
+    public function testCommentsExplainOptionsAndAutocommitForms(): void
+    {
+        $ledger     = new CommitLedger();
+        $connection = $this->connect($ledger, 'mysql');
+
+        $connection->query("/* report */ -- line\n# hash\n  SELECT 1");
+        $connection->exec('EXPLAIN (FORMAT JSON) SELECT 1');
+        self::assertSame(0, $ledger->count());
+
+        $connection->exec('/* a; b */ SELECT 1');
+        $connection->exec("-- note\n/* x */ UPDATE t SET a = 1");
+        $connection->exec('EXPLAIN (VERBOSE, ANALYZE) UPDATE t SET a = 1');
+        $connection->exec('EXPLAIN (BUFFERS true, analyse) DELETE FROM t');
+        self::assertSame(4, $ledger->count());
+
+        $connection->beginTransaction();
+        $connection->exec('SET autocommit = 1');
+        $connection->exec('SET SESSION autocommit = 1');
+        $connection->exec('/* c */ SET @@autocommit = 1');
+        $connection->exec('SET @@SESSION.autocommit = 1');
+        $connection->exec('SET @@session.sql_mode = \'\'');
+        self::assertSame(8, $ledger->count());
+        $connection->rollBack();
+    }
+
     public function testImplicitCommitsAreMySqlOnly(): void
     {
         $servers = ['pgsql' => 0, 'mysql' => 1, 'unknown' => 1] + (class_exists(mysqli::class) ? ['mysqli' => 1] : []);

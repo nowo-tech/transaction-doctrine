@@ -214,6 +214,7 @@ final class WriteUnitDatabaseTest extends DatabaseTestCase
         self::assertSame('OK', $this->otherSession()->execute('COMMIT'));
         self::assertNotNull($caught);
         self::assertTrue($caught->committed);
+        self::assertNull($caught->retryAfterSeconds());
         self::assertSame(1, $caught->attempts);
         self::assertSame(1, $mails);
         self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_ballast WHERE id > 1000'));

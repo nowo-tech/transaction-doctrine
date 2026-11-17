@@ -321,6 +321,7 @@ final class WriteUnitTest extends TestCase
 
         self::assertSame(1, $calls);
         self::assertTrue($caught->committed);
+        self::assertNull($caught->retryAfterSeconds()); // audit SL-2-L1: no hint invites a blind retry
         self::assertSame(1, $caught->attempts);
         self::assertSame('Write unit not replayed: the failed attempt had already committed.', $logger->records[0]['message']);
 
