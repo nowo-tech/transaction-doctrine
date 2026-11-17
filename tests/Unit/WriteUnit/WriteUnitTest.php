@@ -75,8 +75,8 @@ final class WriteUnitTest extends TestCase
         self::assertSame('saved 2', $result);
         self::assertSame([[1, null], [2, $deadlock]], $seen);
         $paused = (float) $clock->now()->format('U.u') - $start;
-        self::assertGreaterThanOrEqual(0.020, $paused);
-        self::assertLessThanOrEqual(0.100, $paused);
+        self::assertGreaterThanOrEqual(0.0199, $paused); // float rounding of the clock
+        self::assertLessThanOrEqual(0.1001, $paused);
         self::assertSame('Write unit met a database lock conflict; replaying it.', $logger->records[0]['message']);
         self::assertSame('deadlock', $logger->records[0]['context']['kind']);
     }
