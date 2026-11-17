@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.3.1](#to-131)
 - [To 1.3.0](#to-130)
   - [To 1.3.0](#to-130-1)
   - [Default lock-conflict status: 409](#default-lock-conflict-status-409)
@@ -12,6 +13,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.3.1
+
+From **1.3.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 ## To 1.3.0
 
