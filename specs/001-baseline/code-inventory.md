@@ -2,7 +2,7 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/transaction-doctrine`  
-**Last audited**: 2026-11-16
+**Last audited**: 2026-11-18
 
 ## Runner
 
@@ -24,6 +24,12 @@
 | `TransientFailureClassifier.php` | Transient classifier | FR-CLS-001 |
 | `TransientFailureKind.php` | Transient kinds | FR-CLS-002 |
 
+## Observability
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `SafeLog.php` | Observability | FR-OBS-001 |
+
 ## Coverage summary
 
 | Category | Files | Mapped |
@@ -31,4 +37,5 @@
 | Runner | 2 | 2 |
 | Repair | 1 | 1 |
 | Classification | 2 | 2 |
-| **Total production sources** | **5** | **5** |
+| Observability | 1 | 1 |
+| **Total production sources** | **6** | **6** |
