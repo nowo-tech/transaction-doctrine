@@ -11,6 +11,7 @@ use Doctrine\DBAL\Driver\Statement;
 use mysqli;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use PDO;
+use Throwable;
 
 use function ltrim;
 use function preg_match;
@@ -116,9 +117,14 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     private function isMySql(): bool
     {
         if ($this->mysql === null) {
-            $native      = $this->getNativeConnection();
-            $this->mysql = $native instanceof mysqli // @igor-ignore — fact about this driver connection, not a request
-                || ($native instanceof PDO && $native->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+            try {
+                $native = $this->getNativeConnection();
+                $mysql  = $native instanceof mysqli || ($native instanceof PDO && $native->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+            } catch (Throwable) {
+                $mysql = true; // unknown server: count (a false positive only cancels a replay)
+            }
+
+            $this->mysql = $mysql; // @igor-ignore — fact about this driver connection, not a request
         }
 
         return $this->mysql;

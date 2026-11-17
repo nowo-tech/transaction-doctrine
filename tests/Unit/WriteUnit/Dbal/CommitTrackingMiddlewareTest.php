@@ -9,6 +9,7 @@ use Doctrine\DBAL\Driver\Connection as DriverConnection;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
 use mysqli;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\NativeAwareDriverConnection;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingConnection;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
@@ -85,7 +86,7 @@ final class CommitTrackingMiddlewareTest extends TestCase
 
     public function testImplicitCommitsAreMySqlOnly(): void
     {
-        $servers = ['pgsql' => 0, 'mysql' => 1] + (class_exists(mysqli::class) ? ['mysqli' => 1] : []);
+        $servers = ['pgsql' => 0, 'mysql' => 1, 'unknown' => 1] + (class_exists(mysqli::class) ? ['mysqli' => 1] : []);
         foreach ($servers as $server => $expected) {
             $ledger     = new CommitLedger();
             $connection = $this->connect($ledger, $server);
@@ -122,11 +123,13 @@ final class CommitTrackingMiddlewareTest extends TestCase
     {
         $statement = $this->createMock(Statement::class);
         $statement->method('execute')->willReturn($this->createMock(Result::class));
-        $inner = $this->createMock(DriverConnection::class);
+        $inner = $this->createMock(NativeAwareDriverConnection::class);
         $inner->method('query')->willReturn($this->createMock(Result::class));
         $inner->method('exec')->willReturn(1);
         $inner->method('prepare')->willReturn($statement);
-        if ($server === 'mysqli') {
+        if ($server === 'unknown') {
+            $inner->method('getNativeConnection')->willThrowException(new RuntimeException('no native connection'));
+        } elseif ($server === 'mysqli') {
             $inner->method('getNativeConnection')->willReturn($this->createStub(mysqli::class));
         } else {
             $pdo = $this->createMock(PDO::class);
