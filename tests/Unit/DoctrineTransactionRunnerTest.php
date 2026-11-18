@@ -379,7 +379,7 @@ final class DoctrineTransactionRunnerTest extends TestCase
     {
         $observers = [];
         $events    = $this->capturingEvents($observers);
-        $manager   = $this->manager($this->connection([0, 1, 1]), true, true, events: $events);
+        $manager   = $this->manager($this->connection([0, 1, 1]), true, events: $events);
         $manager->method('contains')->willReturn(false);
         $manager->expects($this->never())->method('clear');
         $manager->expects($this->never())->method('detach');
@@ -394,6 +394,19 @@ final class DoctrineTransactionRunnerTest extends TestCase
 
             throw $refusal;
         });
+    }
+
+    /** Audit TA3-6: pending changes in the host's manager are refused before any transaction is opened. */
+    public function testTheHostRunnerRefusesAManagerWithPendingChanges(): void
+    {
+        $connection = $this->connection([0]);
+        $connection->expects($this->never())->method('beginTransaction');
+        $manager = $this->manager($connection, true, true);
+        $manager->expects($this->never())->method('flush');
+
+        $this->expectExceptionObject(new LogicException(DoctrineTransactionRunner::HOST_PENDING_MESSAGE));
+
+        DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): never => throw new LogicException('never runs'));
     }
 
     public function testTheHostRunnerReplacesOnlyAClosedManager(): void

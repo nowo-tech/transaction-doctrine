@@ -47,10 +47,10 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
-    public function testTheHostsOwnCollectionChangeStays(string $server): void
+    public function testTheRunsOtherCollectionChangeStays(string $server): void
     {
         $this->boot($server);
-        $this->scenarioTheHostsOwnCollectionChangeStays();
+        $this->scenarioTheRunsOtherCollectionChangeStays();
     }
 
     #[DataProvider('allServers')]
@@ -61,10 +61,10 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
-    public function testNewHostEntities(string $server): void
+    public function testAHostWithPendingChangesIsRefused(string $server): void
     {
         $this->boot($server);
-        $this->scenarioNewHostEntities();
+        $this->scenarioAHostWithPendingChangesIsRefused();
     }
 
     #[DataProvider('allServers')]
@@ -76,7 +76,8 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
 
     /**
      * A storage failure (a duplicate key written through DBAL) with the manager still open: same manager, nothing
-     * cleared, the host's entity and its pending edit kept; the run's persisted and loaded entities are forgotten.
+     * cleared, the host's entity kept (its edit after the failure is flushed); the run's persisted and loaded entities
+     * are forgotten.
      */
     #[DataProvider('allServers')]
     public function testAStorageFailureLeavesTheHostsOpenManagerInPlace(string $server): void
@@ -85,9 +86,8 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
         $manager = $this->manager();
         $host    = $manager->find(Counter::class, 1);
         self::assertInstanceOf(Counter::class, $host);
-        $host->value = 11;   // the host's own pending edit
-        $runner      = DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry);
-        $persisted   = new Counter(40, 4);
+        $runner    = DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry);
+        $persisted = new Counter(40, 4);
 
         $failure = $this->failure($runner, function () use ($manager, $persisted): void {
             $manager->persist($persisted);
@@ -103,6 +103,7 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
         self::assertFalse($manager->contains($persisted), 'The run\'s pending insert is forgotten.');
         self::assertFalse($manager->getUnitOfWork()->tryGetById(2, Counter::class), 'The run\'s loaded entity is forgotten.');
 
+        $host->value = 11;
         $manager->flush();
         self::assertSame(11, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), 'The host\'s edit survives.');
         self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 40'), 'The failed run is not written by the host\'s flush.');

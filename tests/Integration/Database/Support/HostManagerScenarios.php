@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
 use DomainException;
+use LogicException;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use Throwable;
 
 use function array_column;
-use function array_values;
+use function bin2hex;
+use function random_bytes;
 
 /**
  * What forHostEntityManager() leaves in the host's open manager after a failed run (audit TA3-1 to TA3-3). Shared by
@@ -23,16 +25,15 @@ trait HostManagerScenarios
     private const PENDING_NOTICE = 'Entities the host managed before the failed run still have pending changes (the host\'s own or the run\'s); the host decides whether to refresh() or clear().';
 
     /**
-     * TA3-1: the run's new Note and a run-loaded Note both cascade detach into the host's Counter, which has a pending
-     * edit. The Counter stays managed and its edit is flushed; the run's entities are forgotten.
+     * TA3-1: the run's new Note and a run-loaded Note both cascade detach into the host's Counter. The Counter stays
+     * managed, so the host's edit after the failure is flushed; the run's entities are forgotten.
      */
     private function scenarioADetachNeverCascadesIntoTheHostsEntity(): void
     {
         $manager = $this->manager();
         $host    = $manager->find(Counter::class, 1);
         self::assertInstanceOf(Counter::class, $host);
-        $host->value = 11;   // the host's own pending edit
-        $note        = new Note(70, $host);
+        $note = new Note(70, $host);
 
         $failure = $this->hostFailure(function () use ($manager, $note): void {
             $manager->persist($note);
@@ -47,8 +48,9 @@ trait HostManagerScenarios
         self::assertFalse($manager->contains($note));
         self::assertFalse($manager->getUnitOfWork()->tryGetById(1, Note::class));
 
+        $host->value = 11;   // the host goes on with its own entity
         $manager->flush();
-        self::assertSame(11, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), 'The host\'s edit survives.');
+        self::assertSame(11, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), 'The host\'s edit is flushed.');
         self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_note WHERE id = 70'));
     }
 
@@ -98,18 +100,23 @@ trait HostManagerScenarios
         self::assertCount(0, $board->cards, 'Loaded afterwards: nothing.');
     }
 
-    /** TA3-2 / TA3-3: the host's own addition to the same collection stays, and the notice says changes are pending. */
-    private function scenarioTheHostsOwnCollectionChangeStays(): void
+    /**
+     * TA3-2 / TA3-3: the run also removed a loaded element: only the brought one is taken out; the removal stays (the
+     * collection is still dirty) and the notice says so.
+     */
+    private function scenarioTheRunsOtherCollectionChangeStays(): void
     {
+        $this->connection->insert('ddrb_card', ['id' => 1, 'board_id' => 1]);
         $manager = $this->manager();
         $board   = $manager->find(Board::class, 1);
         self::assertInstanceOf(Board::class, $board);
-        $own = new Card(6, $board);
-        $board->cards->add($own);
-        $manager->persist($own);
+        self::assertCount(1, $board->cards);
         $logger = new RecordingLogger();
 
         $this->hostFailure(static function () use ($manager, $board): never {
+            $loaded = $board->cards->first();
+            self::assertInstanceOf(Card::class, $loaded);
+            $board->cards->removeElement($loaded);
             $card = new Card(5, $board);
             $board->cards->add($card);
             $manager->persist($card);
@@ -117,11 +124,8 @@ trait HostManagerScenarios
             throw new DomainException('refused');
         }, $logger);
 
-        self::assertSame([$own], array_values($board->cards->toArray()));
+        self::assertCount(0, $board->cards, 'The brought card left; the run\'s removal stays.');
         self::assertContains(self::PENDING_NOTICE, array_column($logger->records, 'message'));
-        $manager->flush();
-        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 6'));
-        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 5'));
     }
 
     /** TA3-2: a to-one of the host's entity the run pointed at a new entity gets its original value back. */
@@ -149,40 +153,59 @@ trait HostManagerScenarios
     }
 
     /**
-     * A new host entity (scheduled for insertion before the run) holds a plain collection: the run's child leaves it.
-     * A to-one of a new host entity has no original value: it is left (documented) while its target is detached.
+     * TA3-6 (and TA3-7): a host manager with pending changes (an edit, a persist, a remove) is refused before the run:
+     * nothing runs, no transaction is opened, and the host's work is flushed intact afterwards. A failure after a
+     * flush inside the run (or at the commit) can therefore never take the host's work with it.
      */
-    private function scenarioNewHostEntities(): void
+    private function scenarioAHostWithPendingChangesIsRefused(): void
     {
         $manager = $this->manager();
-        $board   = new Board(2);
-        $manager->persist($board);
-        $existing = $manager->find(Board::class, 1);
-        self::assertInstanceOf(Board::class, $existing);
-        $card = new Card(8, $existing);
-        $manager->persist($card);
-        $moved = new Board(3);
+        $edited  = $manager->find(Counter::class, 1);
+        self::assertInstanceOf(Counter::class, $edited);
+        $removed = $manager->find(Note::class, 1);
+        self::assertInstanceOf(Note::class, $removed);
+        $created = new Counter(61, 6);
+        $ran     = 0;
+        $runner  = DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry);
+        $work    = static function () use (&$ran): void {
+            ++$ran;
+        };
 
-        $this->hostFailure(static function () use ($manager, $board, $card, $moved): never {
-            $child = new Card(7, $board);
-            $board->cards->add($child);
-            $manager->persist($child);
-            $manager->persist($moved);
-            $card->board = $moved;
+        foreach ([
+            static function () use ($edited): void {
+                $edited->value = 11;
+            },
+            static function () use ($manager, $created): void {
+                $manager->persist($created);
+            },
+            static function () use ($manager, $removed): void {
+                $manager->remove($removed);
+            },
+        ] as $pending) {
+            $pending();
 
-            throw new DomainException('refused');
-        });
+            $refused = null;
 
-        self::assertCount(0, $board->cards);
-        self::assertTrue($manager->contains($board));
-        self::assertFalse($manager->contains($moved));
-        self::assertSame($moved, $card->board, 'No original value to restore: the caller decides.');
+            try {
+                $runner->run($work);
+            } catch (Throwable $throwable) {
+                $refused = $throwable;
+            }
 
-        $card->board = $existing;
+            self::assertInstanceOf(LogicException::class, $refused, 'A host manager with pending changes was not refused.');
+            self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
+
+            self::assertSame(0, $this->connection->getTransactionNestingLevel());
+        }
+
+        self::assertSame(0, $ran, 'The unit never ran.');
         $manager->flush();
-        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_board WHERE id = 2'));
-        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 7'));
-        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_board WHERE id = 3'));
+        self::assertSame(11, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 61'));
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_note WHERE id = 1'));
+        $token = bin2hex(random_bytes(4));
+        self::assertSame($token, $runner->run(static fn (): string => $token), 'A clean manager runs.');
+        self::assertSame(0, $this->connection->getTransactionNestingLevel());
     }
 
     /** TA3-3: a field the run changed on the host's entity stays (not cleared, not refreshed), with the notice. */

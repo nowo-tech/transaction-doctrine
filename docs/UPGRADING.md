@@ -6,6 +6,7 @@
   - [Request commit watermark](#request-commit-watermark)
   - [X-Conflict-Code header](#x-conflict-code-header)
   - [forHostEntityManager() for the host's entity manager](#forhostentitymanager-for-the-hosts-entity-manager)
+  - [DBAL 3: SQLSTATE codes in driver errors](#dbal-3-sqlstate-codes-in-driver-errors)
 - [To 1.5.0](#to-150)
   - [Conflict codes in conflict answers](#conflict-codes-in-conflict-answers)
 - [To 1.4.0](#to-140)
@@ -56,6 +57,21 @@ manager (the default one, shared with the application) should switch to
 never closed, cleared or reset; a closed one is replaced through the registry; only what the failed run brought in is
 detached. After a failed run the caller's entities keep what the operation changed on them, so do not modify the
 host's entities inside the unit, or `refresh()` them after a failure.
+
+**The host's manager must be clean when `run()` starts.** With pending changes (an edited entity, a `persist()`, a
+`remove()`), `forHostEntityManager()->run()` throws `LogicException` before opening a transaction: a flush inside the
+unit, or the runner's own flush, would carry that work into a transaction that may roll back. Flush (or clear) the
+host's work before calling a bundle that uses this runner, as with `WriteUnit`'s run-once rule. The check costs one
+`UnitOfWork::computeChangeSets()` per `run()`, which scans the identity map and cascade-persists new entities it
+reaches.
+
+### DBAL 3: SQLSTATE codes in driver errors
+
+On DBAL 3, a driver error whose `getCode()` is a SQLSTATE string (DBAL 3's `Driver\PDO\PDOException`, for example a
+PostgreSQL serialization failure or a deferred unique violation at COMMIT) used to raise a `TypeError` in the
+classifier (1.1.0 to 1.5.x). It is now classified like on DBAL 4: a 40001 at COMMIT becomes `TransientStorageFailure`
+and a write unit replays it; any other error is rethrown unchanged. No change is needed; code that caught the
+`TypeError` gets the real failure.
 
 ## To 1.5.0
 

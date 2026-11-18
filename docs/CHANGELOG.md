@@ -47,12 +47,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The brought entities are removed from the host entities' initialized collections, and a host to-one pointing at
     one gets its original value back, so the host's next flush cannot re-insert them (audit TA3-2).
   - A notice is logged when host entities still have pending changes after the failure (audit TA3-3).
+  - `run()` refuses a host manager that already has pending changes (scheduled insertions, updates or deletions,
+    after `UnitOfWork::computeChangeSets()`) with a `LogicException`
+    (`DoctrineTransactionRunner::HOST_PENDING_MESSAGE`) before opening a transaction: a failure after a flush inside
+    the run would otherwise lose the host's work silently (audit TA3-6). A to-one restored on a host entity with no
+    original value is set to `null` (TA3-7).
 
 ### Changed
 
 - Commit detection: `WITH`, `VALUES` and `TABLE` statements outside a transaction are reads and no longer count as a
   commit; a `WITH` naming `INSERT`, `UPDATE`, `DELETE` or `MERGE` (a data-modifying CTE) still counts (audit TA3-4).
   Fewer `CONFLICT_002` answers and refused replays after a plain read.
+
+### Fixed
+
+- **DBAL 3: a driver error whose code is a SQLSTATE string no longer crashes the classifier (audit TA3-5; affected
+  1.1.0 to 1.5.x on DBAL 3).** DBAL 3's `Doctrine\DBAL\Driver\PDO\PDOException` is both a `PDOException` and a driver
+  exception, and its `getCode()` is the SQLSTATE (`'40001'`, `'23505'`). `TransientFailureClassifier` passed it to an
+  `int` parameter under `strict_types`: a `TypeError` replaced the original failure, so the runner's repair and
+  cleanup did not finish and a write unit did not replay. A PostgreSQL serialization failure at COMMIT, for example,
+  answered a 500 instead of being replayed. The classifier now reads the vendor code from `errorInfo[1]` and the
+  SQLSTATE from `errorInfo[0]` (or `getSQLState()`), and treats any non-int code as no vendor code. `WriteUnit`
+  classifies through it, so it is fixed too. DBAL 4 was not affected. No GHSA (owner decision 2026-11-18).
 
 ## [1.5.0] - 2026-11-18
 

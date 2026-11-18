@@ -57,6 +57,46 @@ final class TransientFailureClassifierTest extends TestCase
         yield 'MySQL server gone away 2006' => [new ConnectionLost(self::driver(2006, 'HY000'), null), null];
         yield 'MySQL lost connection 2013' => [new DriverException(self::driver(2013, 'HY000'), null), null];
         yield 'PostgreSQL connection failure 08006' => [new DriverException(self::driver(7, '08006'), null), null];
+        // Audit TA3-5: DBAL 3's Driver\PDO\PDOException (a PDOException and a driver exception, SQLSTATE in getCode()).
+        yield 'DBAL 3 PDO driver 40001 with errorInfo' => [new RuntimeException('wrapper', 0, self::pdoDriver('40001', ['40001', 7], null)), TransientFailureKind::SerializationFailure];
+        yield 'DBAL 3 PDO driver 40P01 without errorInfo' => [self::pdoDriver('40P01', null, null), TransientFailureKind::Deadlock];
+        yield 'DBAL 3 PDO driver without SQLSTATE in its code' => [self::pdoDriver(0, null, '40001'), TransientFailureKind::SerializationFailure];
+        yield 'DBAL 3 PDO driver 1213 errorInfo' => [self::pdoDriver('40001', ['40001', 1213], null), TransientFailureKind::Deadlock];
+        yield 'DBAL 3 PDO driver unique 23505' => [self::pdoDriver('23505', ['23505', 7], null), null];
+        yield 'driver exception with a string code' => [self::stringCodeDriver('40001', '40001'), TransientFailureKind::SerializationFailure];
+    }
+
+    /**
+     * Like DBAL 3's Doctrine\DBAL\Driver\PDO\PDOException: extends PDOException and implements the driver exception.
+     *
+     * @param array<int, mixed>|null $errorInfo
+     */
+    private static function pdoDriver(int|string $code, ?array $errorInfo, ?string $sqlState): DriverExceptionInterface
+    {
+        $exception = new class('SQLSTATE error', $sqlState) extends PDOException implements DriverExceptionInterface {
+            public function __construct(string $message, private readonly ?string $state)
+            {
+                parent::__construct($message);
+            }
+
+            public function getSQLState(): ?string
+            {
+                return $this->state;
+            }
+        };
+        (new ReflectionProperty(PDOException::class, 'code'))->setValue($exception, $code);
+        $exception->errorInfo = $errorInfo;
+
+        return $exception;
+    }
+
+    /** A driver exception (no PDOException) whose getCode() is not an int. */
+    private static function stringCodeDriver(string $code, string $sqlState): DriverExceptionInterface
+    {
+        $exception = self::driver(0, $sqlState);
+        (new ReflectionProperty(Exception::class, 'code'))->setValue($exception, $code);
+
+        return $exception;
     }
 
     /**

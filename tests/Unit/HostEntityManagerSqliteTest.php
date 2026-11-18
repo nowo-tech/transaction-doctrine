@@ -54,9 +54,9 @@ final class HostEntityManagerSqliteTest extends DatabaseTestCase
         $this->scenarioARolledBackChildLeavesAnUninitializedCollection();
     }
 
-    public function testTheHostsOwnCollectionChangeStays(): void
+    public function testTheRunsOtherCollectionChangeStays(): void
     {
-        $this->scenarioTheHostsOwnCollectionChangeStays();
+        $this->scenarioTheRunsOtherCollectionChangeStays();
     }
 
     public function testAToOneGetsItsOriginalValueBack(): void
@@ -64,9 +64,9 @@ final class HostEntityManagerSqliteTest extends DatabaseTestCase
         $this->scenarioAToOneGetsItsOriginalValueBack();
     }
 
-    public function testNewHostEntities(): void
+    public function testAHostWithPendingChangesIsRefused(): void
     {
-        $this->scenarioNewHostEntities();
+        $this->scenarioAHostWithPendingChangesIsRefused();
     }
 
     public function testAFieldTheRunChangedStaysWithANotice(): void

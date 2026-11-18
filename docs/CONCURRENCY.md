@@ -152,6 +152,11 @@ process):
   leaves the host's collection, a to-one gets its original value back, and the host's own changes stay with a
   notice (audit TA3; the same scenarios also run on SQLite in the unit suite);
 - reads (`WITH`, `VALUES`, `TABLE` included) never move the request mark; a data-modifying CTE does;
+- a host manager with pending changes (an edit, a persist, a remove) is refused before the run, and flushed intact
+  afterwards;
+- PostgreSQL COMMITs the server refuses, on every leg (DBAL 3 included, audit TA3-5): a SERIALIZABLE write skew
+  (40001) becomes `TransientStorageFailure` and a write unit replays it; a deferred unique violation (23505) is
+  rethrown unchanged; the connection is back at level 0 each time;
 - a real lost savepoint (`ROLLBACK TO SAVEPOINT` unknown: 1305 / 3B001) answered `CONFLICT_002` with no
   `Retry-After`, also with localized server messages; a real 1305 for a missing function, a real unique violation and a real killed session not mapped;
 - nested deadlocks and failed savepoint rollbacks repaired to nesting level 0;
@@ -166,6 +171,8 @@ process):
 - The request watermark is conservative too: any tracked commit after the mark counts, including one unrelated to
   the failed work (a Doctrine Messenger transport send, an audit row). The client is told to read again; it is never
   invited to repeat work that may be committed.
+- `forHostEntityManager()` refuses a host manager with pending changes before the run (`LogicException`), so the
+  host's own work never rides in a transaction that rolls back. That costs one `computeChangeSets()` per run.
 - `forHostEntityManager()` forgets only what the run brought in (detached without cascading into the caller's
   entities, removed from their collections, to-ones restored): any other change the operation made to the caller's
   entities stays (a changed field, a removed element, a value flushed and rolled back), with a notice in the log. The

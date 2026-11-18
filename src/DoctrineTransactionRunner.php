@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine;
 
 use Closure;
-use Doctrine\Common\Collections\Collection;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
 use Doctrine\DBAL\Exception as DbalException;
@@ -14,6 +13,7 @@ use Doctrine\ORM\Events;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\ManagerRegistry;
+use LogicException;
 use Nowo\TransactionContract\TransactionRunnerInterface;
 use Nowo\TransactionContract\TransientStorageFailure;
 use PDOException;
@@ -72,6 +72,8 @@ use function spl_object_id;
  */
 final readonly class DoctrineTransactionRunner implements TransactionRunnerInterface
 {
+    public const HOST_PENDING_MESSAGE = 'The host entity manager has pending changes (scheduled insertions, updates or deletions): flush or clear them before running a unit of work with forHostEntityManager(); a failed run would otherwise discard them.';
+
     private TransientFailureClassifier $classifier;
 
     private ConnectionRepairer $repairer;
@@ -117,7 +119,14 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
     /**
      * Runs ORM units of work on the host application's manager (REQ-RUNTIME-003 rule 2): flushes it before the commit
-     * like forEntityManager(), but after a failure it never closes, clears or resets an open manager. It only:
+     * like forEntityManager(), but after a failure it never closes, clears or resets an open manager.
+     *
+     * The manager must be clean when run() starts (audit TA3-6): with pending changes (scheduled insertions, updates
+     * or deletions, after UnitOfWork::computeChangeSets(), which scans the identity map and cascade-persists new
+     * entities it reaches) run() throws LogicException before opening a transaction, since a flush inside the run
+     * would carry the host's work into a transaction that may roll back. Flush or clear first.
+     *
+     * After a failure it only:
      *
      * - replaces a closed manager through the registry (resetManager(); without a registry a closed manager is left
      *   for the host, or for WorkerConnectionHygiene at the next request);
@@ -141,18 +150,25 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds, $logger ?? new NullLogger(), true);
     }
 
+    /**
+     * With forHostEntityManager(), throws LogicException (HOST_PENDING_MESSAGE) when the host's manager has pending
+     * changes before the run.
+     */
     public function run(callable $operation): mixed
     {
-        $manager    = $this->manager();
+        $manager = $this->manager();
+        // Audit TA3-6: a flush inside the run (or the runner's own) would carry the host's pending work into a
+        // transaction that may roll back, and forgetting the run's entities would then silently lose it.
+        if ($this->hostManager && $manager instanceof EntityManagerInterface && $this->hasPendingChanges($manager)) {
+            throw new LogicException(self::HOST_PENDING_MESSAGE);
+        }
+
         $connection = $manager?->getConnection() ?? $this->connection;
         assert($connection instanceof Connection);
         $entryLevel = $connection->getTransactionNestingLevel();
         $observer   = new RunObserver();
         // Entities managed before the run: one the run re-hydrates (refresh(), a proxy initialised) belongs to the caller.
         $before = $manager instanceof EntityManagerInterface ? $this->managedEntities($manager) : [];
-        if ($this->hostManager && $manager instanceof EntityManagerInterface) {
-            $before += $manager->getUnitOfWork()->getScheduledEntityInsertions();
-        }
         $manager?->getEventManager()->addEventListener([Events::postFlush, Events::postLoad], $observer);
 
         try {
@@ -322,14 +338,15 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         foreach ($metadata->getAssociationNames() as $field) {
             $value = $metadata->getFieldValue($entity, $field);
 
-            if ($value instanceof Collection) {
+            if ($value instanceof PersistentCollection) {
                 $changed = $this->unlinkFromCollection($value, $brought) || $changed;
 
                 continue;
             }
 
-            if (is_object($value) && isset($brought[spl_object_id($value)]) && array_key_exists($field, $original)) {
-                $metadata->setFieldValue($entity, $field, $value = $original[$field]);
+            // The run started clean (TA3-6), so a managed caller entity has original data; null otherwise (TA3-7).
+            if (is_object($value) && isset($brought[spl_object_id($value)])) {
+                $metadata->setFieldValue($entity, $field, $value = $original[$field] ?? null);
             }
 
             $changed = $changed || (array_key_exists($field, $original) && $value !== $original[$field]);
@@ -343,24 +360,13 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * @param Collection<array-key, mixed> $collection
+     * @param PersistentCollection<array-key, mixed> $collection
      * @param array<int, object> $brought
      *
      * @return bool Whether the collection still has changes to flush
      */
-    private function unlinkFromCollection(Collection $collection, array $brought): bool
+    private function unlinkFromCollection(PersistentCollection $collection, array $brought): bool
     {
-        if (!$collection instanceof PersistentCollection) {
-            // A new caller entity's plain collection: what it holds is persisted with it.
-            foreach ($collection->toArray() as $key => $element) {
-                if (is_object($element) && isset($brought[spl_object_id($element)])) {
-                    $collection->remove($key);
-                }
-            }
-
-            return false;
-        }
-
         // unwrap(): no orphan-removal scheduling of a detached element, and no load of an uninitialized collection
         // (add() on one keeps the new element in the wrapped collection without initializing it).
         $elements = $collection->unwrap();

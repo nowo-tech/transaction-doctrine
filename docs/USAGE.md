@@ -89,7 +89,16 @@ $runner = DoctrineTransactionRunner::forEntityManager($ownManager, $managerRegis
 $runner = DoctrineTransactionRunner::forHostEntityManager($entityManager, $managerRegistry, 'default');
 ```
 
-Both flush the manager before the commit and repair the connection the same way. After a failure
+Both flush the manager before the commit and repair the connection the same way.
+
+**The host's manager must be clean when `run()` starts** (audit TA3-6). If it has pending changes (scheduled
+insertions, updates or deletions, after `UnitOfWork::computeChangeSets()`), `run()` throws `LogicException`
+(`DoctrineTransactionRunner::HOST_PENDING_MESSAGE`) before opening a transaction and the unit never runs: a flush
+inside the unit (or the runner's own) would carry the host's work into a transaction that may roll back, and it would
+be lost with the run. The host flushes or clears its work first. The check costs one `computeChangeSets()` per
+`run()`: it scans the identity map and cascade-persists new entities it reaches, as `flush()` would.
+
+After a failure
 `forHostEntityManager()`:
 
 | Manager after the failure | What the runner does |
@@ -98,8 +107,7 @@ Both flush the manager before the commit and repair the connection the same way.
 | Open, any failure (storage or domain) | **Never closed, cleared or reset.** Only what the failed run brought in is forgotten: entities that entered the identity map during the run (loaded, `getReference()` proxies, flushed and rolled back) and new entities scheduled for insertion during the run. They are detached **without cascading into the caller's entities** (a `cascade: ['detach']` association never detaches a host entity), removed from the caller's initialized collections (a clean collection is clean again), and a caller's to-one pointing at one gets its original value back. A later flush by the host therefore cannot write the rolled-back entities, and the identity map does not serve their rows |
 
 That is all it covers. Entities the caller managed before the run keep **any other change the operation made to
-them** (a field, an element removed from a collection, a value flushed and rolled back), and a to-one of a caller's
-entity that was itself new before the run has no original value to restore. When caller entities still have pending
+them** (a field, an element removed from a collection, a value flushed and rolled back). When caller entities still have pending
 changes after the failure, the runner logs a notice (`entities` = how many); it cannot tell the host's own edits from
 the run's. Write the unit so it does not modify the host's entities, or `refresh()` them after a failure.
 
