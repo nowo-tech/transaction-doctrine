@@ -3,6 +3,9 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [Request commit watermark](#request-commit-watermark)
+  - [X-Conflict-Code header](#x-conflict-code-header)
+  - [forHostEntityManager() for the host's entity manager](#forhostentitymanager-for-the-hosts-entity-manager)
 - [To 1.5.0](#to-150)
   - [Conflict codes in conflict answers](#conflict-codes-in-conflict-answers)
 - [To 1.4.0](#to-140)
@@ -17,6 +20,42 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+`composer update nowo-tech/transaction-doctrine`. No configuration change, and no public signature changed: every
+addition is a new class, method or optional argument.
+
+### Request commit watermark
+
+With `commit_detection: true` (the default) a conflict after a commit **earlier in the same request** now answers
+`CONFLICT_002` (JSON `error` `concurrency_conflict_partial`, the "reload" page, **no `Retry-After`**) where 1.5
+answered `CONFLICT_001` + `Retry-After`. This is the intended fix (audit TH X-1); a test that asserted 1.5's
+`CONFLICT_001` after an earlier commit in the request needs the new code. Requests that commit nothing before the
+conflict answer exactly as before. With `commit_detection: false` nothing changes.
+
+Bundles that build their own conflict answer should move from `ConflictCode::forFailure($failure)` to
+`ConflictCode::forRequest($request, $failure)` to get the same rule; `forFailure()` is unchanged when called with one
+argument. A bundle that kept its own request mark (for example a ledger mark at `kernel.request`) can keep it as a
+fallback: both agree.
+
+### X-Conflict-Code header
+
+Every answer of the responder gains the header `X-Conflict-Code: CONFLICT_001` or `CONFLICT_002`. Additive: the body,
+status, `Retry-After` and `Cache-Control` are unchanged. A formatter's own `X-Conflict-Code` is overwritten with the
+platform value. `ConflictResponsePolicy::headers()` and `httpException()` return what they did in 1.5 (no
+`X-Conflict-Code`, so exact-array assertions keep passing); move to `headersFor($code, $hint)` and
+`httpExceptionFor($code, $message, $previous, $hint)` to send the header and drop `Retry-After` for `CONFLICT_002`.
+Cross-origin APIs should add `X-Conflict-Code` to `Access-Control-Expose-Headers`. Clients should key on `code` or the
+header, never on `error`.
+
+### forHostEntityManager() for the host's entity manager
+
+`DoctrineTransactionRunner::forEntityManager()` behaves as in 1.5 and is for **bundle-owned** entity managers: after a
+storage failure it closes and resets the manager, even when it is still open. A bundle that passes the **host's**
+manager (the default one, shared with the application) should switch to
+`DoctrineTransactionRunner::forHostEntityManager()` (same arguments) to meet REQ-RUNTIME-003 rule 2: an open manager is
+never closed, cleared or reset; a closed one is replaced through the registry; only what the failed run brought in is
+detached. After a failed run the caller's entities keep what the operation changed on them, so do not modify the
+host's entities inside the unit, or `refresh()` them after a failure.
 
 ## To 1.5.0
 

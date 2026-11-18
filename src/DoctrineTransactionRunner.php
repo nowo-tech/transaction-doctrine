@@ -21,6 +21,7 @@ use Throwable;
 use function array_diff_key;
 use function array_intersect_key;
 use function assert;
+use function count;
 use function spl_object_id;
 
 /**
@@ -46,6 +47,9 @@ use function spl_object_id;
  *     the caller's own pending changes: a nested refusal clears them too.
  *   Clearing or resetting a shared manager also discards the caller's own pending changes, as
  *   EntityManager::wrapInTransaction() does.
+ *   That is the contract of forEntityManager(), for managers the bundle owns. With the host application's manager
+ *   use forHostEntityManager(): it never closes, clears or resets an open manager (REQ-RUNTIME-003 rule 2), replaces
+ *   a closed one through the registry, and only detaches what the failed run brought in.
  *
  * Transient failures (deadlock, lock wait timeout, serialization failure, lost savepoint) are rethrown as
  * TransientStorageFailure with the storage error as previous; anything else is rethrown unchanged.
@@ -73,6 +77,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         private ?string $managerName,
         private ?int $retryAfterSeconds,
         private LoggerInterface $logger,
+        private bool $hostManager = false,
     ) {
         $this->classifier = new TransientFailureClassifier();
         $this->repairer   = new ConnectionRepairer(null, $logger);
@@ -87,8 +92,12 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * Runs ORM units of work: flushes the manager before the commit. After a failure the manager is closed and reset
-     * through the registry (fetched from it on every call), or cleared when no registry is given.
+     * Runs ORM units of work on a manager the bundle owns: flushes the manager before the commit. After a failure the
+     * manager is closed and reset through the registry (fetched from it on every call), or cleared when no registry is
+     * given (see the class description).
+     *
+     * For the host application's manager use forHostEntityManager(): this factory may clear or reset an open manager,
+     * which REQ-RUNTIME-003 rule 2 forbids on the host's.
      */
     public static function forEntityManager(
         EntityManagerInterface $entityManager,
@@ -100,6 +109,27 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds, $logger ?? new NullLogger());
     }
 
+    /**
+     * Runs ORM units of work on the host application's manager (REQ-RUNTIME-003 rule 2): flushes it before the commit
+     * like forEntityManager(), but after a failure it never closes, clears or resets an open manager. It only:
+     *
+     * - replaces a closed manager through the registry (resetManager(); without a registry a closed manager is left
+     *   for the host, or for WorkerConnectionHygiene at the next request);
+     * - detaches what the failed run brought into an open manager (entities that entered the identity map or were
+     *   scheduled for insertion during the run), so a later flush by the host can neither write the rolled-back work
+     *   again nor serve its rows from the identity map. Entities the caller managed before the run stay managed,
+     *   with whatever the operation changed on them: the caller decides whether to refresh() or clear().
+     */
+    public static function forHostEntityManager(
+        EntityManagerInterface $entityManager,
+        ?ManagerRegistry $registry = null,
+        ?string $managerName = null,
+        ?int $retryAfterSeconds = 1,
+        ?LoggerInterface $logger = null,
+    ): self {
+        return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds, $logger ?? new NullLogger(), true);
+    }
+
     public function run(callable $operation): mixed
     {
         $manager    = $this->manager();
@@ -109,6 +139,9 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         $observer   = new RunObserver();
         // Entities managed before the run: one the run re-hydrates (refresh(), a proxy initialised) belongs to the caller.
         $before = $manager instanceof EntityManagerInterface ? $this->managedEntities($manager) : [];
+        if ($this->hostManager && $manager instanceof EntityManagerInterface) {
+            $before += $manager->getUnitOfWork()->getScheduledEntityInsertions();
+        }
         $manager?->getEventManager()->addEventListener([Events::postFlush, Events::postLoad], $observer);
 
         try {
@@ -148,6 +181,12 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      */
     private function discardPendingChanges(EntityManagerInterface $manager, Throwable $failure, RunObserver $observer, array $before): void
     {
+        if ($this->hostManager) {
+            $this->releaseHostManager($manager, $before);
+
+            return;
+        }
+
         if (!$manager->isOpen() || $this->isStorageFailure($failure)) {
             if ($this->registry instanceof ManagerRegistry) {
                 SafeLog::log($this->logger, 'notice', 'Closing and resetting the entity manager after a storage failure.', [
@@ -200,6 +239,38 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
             SafeLog::log($this->logger, 'debug', 'Clearing the entity manager: changes were left pending.', []);
             $manager->clear();
         }
+    }
+
+    /**
+     * The host's manager after a failed run: a closed one is replaced, an open one is never closed, cleared or reset;
+     * only what the run brought into it is detached.
+     *
+     * @param array<int, object> $before The entities managed or scheduled for insertion when the run started
+     */
+    private function releaseHostManager(EntityManagerInterface $manager, array $before): void
+    {
+        if (!$manager->isOpen()) {
+            if ($this->registry instanceof ManagerRegistry) {
+                SafeLog::log($this->logger, 'notice', 'Replacing the closed host entity manager.', [
+                    'manager' => $this->managerName,
+                ]);
+                $this->registry->resetManager($this->managerName);
+            }
+
+            return;
+        }
+
+        $brought = array_diff_key($this->managedEntities($manager) + $manager->getUnitOfWork()->getScheduledEntityInsertions(), $before);
+        foreach ($brought as $entity) {
+            if ($manager->contains($entity)) {
+                $manager->detach($entity);
+            }
+        }
+
+        SafeLog::log($this->logger, 'debug', 'Detached what the failed run brought into the host entity manager.', [
+            'manager'  => $this->managerName,
+            'detached' => count($brought),
+        ]);
     }
 
     /**

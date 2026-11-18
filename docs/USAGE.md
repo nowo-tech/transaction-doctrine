@@ -4,6 +4,7 @@
 
 - [Run a unit of work](#run-a-unit-of-work)
 - [Behaviour after a failure](#behaviour-after-a-failure)
+  - [The host's entity manager: forHostEntityManager() (1.6.0)](#the-hosts-entity-manager-forhostentitymanager-160)
 - [Wiring in a bundle](#wiring-in-a-bundle)
 - [Standard Symfony host and DDD / hexagonal host](#standard-symfony-host-and-ddd--hexagonal-host)
 - [FrankenPHP worker mode](#frankenphp-worker-mode)
@@ -16,6 +17,8 @@
   - [Exception-mapping and response hooks](#exception-mapping-and-response-hooks)
   - [Bundles that answer in their own shape](#bundles-that-answer-in-their-own-shape)
   - [Conflict codes: CONFLICT_001 and CONFLICT_002 (1.5.0)](#conflict-codes-conflict_001-and-conflict_002-150)
+  - [Request commit watermark (1.6.0)](#request-commit-watermark-160)
+  - [The X-Conflict-Code header (1.6.0)](#the-x-conflict-code-header-160)
 - [How bundles comply with REQ-RUNTIME-003 using transaction-doctrine](#how-bundles-comply-with-req-runtime-003-using-transaction-doctrine)
 - [Worker connection hygiene](#worker-connection-hygiene)
 
@@ -68,6 +71,38 @@ After **any** failure the runner leaves neither a poisoned connection nor pendin
   entities and discards its own pending changes, as `EntityManager::wrapInTransaction()` does: after a failed `run()`
   keep using the caller's entities only when the failure was a refusal that left nothing pending.
 
+The table above is the contract of `forEntityManager()`, **for entity managers the bundle owns**. With the host
+application's manager use `forHostEntityManager()` (next section).
+
+### The host's entity manager: forHostEntityManager() (1.6.0)
+
+**`forEntityManager()` is for bundle-owned entity managers; use `forHostEntityManager()` for the host's.**
+`forEntityManager()` closes and resets an open manager after any storage failure, and clears it after some domain
+failures. On the host's manager that breaks REQ-RUNTIME-003 rule 2 ("never reset or clear the host's EntityManager"):
+the host's own entities are detached and its pending changes discarded behind its back.
+
+```php
+// The bundle's own manager (a dedicated connection / manager name): may be cleared or reset after a failure.
+$runner = DoctrineTransactionRunner::forEntityManager($ownManager, $managerRegistry, 'my_bundle');
+
+// The host's manager (the default one, shared with the application): never cleared or reset while open.
+$runner = DoctrineTransactionRunner::forHostEntityManager($entityManager, $managerRegistry, 'default');
+```
+
+Both flush the manager before the commit and repair the connection the same way. After a failure
+`forHostEntityManager()`:
+
+| Manager after the failure | What the runner does |
+|---------------------------|----------------------|
+| Closed (the ORM closed it, for example a lock wait timeout in the flush) | Replaced through the registry (`resetManager()`; a closed manager is unusable anyway). Without a registry it is left for the host, and `WorkerConnectionHygiene` resets it at the next request |
+| Open, any failure (storage or domain) | **Never closed, cleared or reset.** Only what the failed run brought in is detached: entities that entered the identity map during the run (loaded, `getReference()` proxies, flushed and rolled back) and new entities scheduled for insertion during the run. A later flush by the host therefore cannot write the rolled-back work, and the identity map does not serve its rows |
+
+What stays the caller's call: entities the caller managed before the run stay managed **with whatever the operation
+changed on them** (a changed property stays pending; a value flushed and rolled back stays in the object). Write the
+unit so it does not modify the host's entities, or `refresh()` them after a failure. A detach follows
+`cascade: ['detach']` mappings, so a run-loaded entity with such an association to a caller's entity detaches that
+entity too.
+
 Transient failures (1213, 1205, MariaDB 1020, SQLSTATE 40001 / 40P01 / 55P03, any DBAL `RetryableException`) become
 `TransientStorageFailure` with the storage error as `previous`; anything else is rethrown unchanged. A 1305 lost
 savepoint is transient only through the deadlock it carries: on its own (an implicit commit dropped the savepoints)
@@ -97,8 +132,11 @@ use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 // DBAL only
 $runner = DoctrineTransactionRunner::forConnection($connection);
 
-// Entity manager; the registry and manager name let the runner reset a closed manager
-$runner = DoctrineTransactionRunner::forEntityManager($entityManager, $managerRegistry, 'default');
+// The bundle's own entity manager; the registry and manager name let the runner reset it after a failure
+$runner = DoctrineTransactionRunner::forEntityManager($ownManager, $managerRegistry, 'my_bundle');
+
+// The host's entity manager (1.6.0): never cleared or reset while open, replaced only when closed
+$runner = DoctrineTransactionRunner::forHostEntityManager($entityManager, $managerRegistry, 'default');
 ```
 
 ## Standard Symfony host and DDD / hexagonal host
@@ -428,9 +466,71 @@ Every conflict answer carries one code (nowo-tech REQ-RUNTIME-003 rule 6). It is
 - JSON: the `code` key, next to the unchanged `error` key.
 - HTML: `data-conflict-code` on the `data-testid="concurrency-conflict"` element.
 - Formatters: `$context->code` (`ConflictResponseContext`).
-- Own answers outside the responder (JSON-RPC, MCP tools, a console command): `ConflictCode::forFailure($failure)`.
+- Own answers outside the responder (JSON-RPC, MCP tools, a console command): `ConflictCode::forFailure($failure)`;
+  inside an HTTP request `ConflictCode::forRequest($request, $failure)` (1.6.0, next section).
 
 The status stays `conflict_response.status` (409 by default, 503 per host).
+
+### Request commit watermark (1.6.0)
+
+"Part committed" covers the **whole request** (REQ-RUNTIME-003 rule 6, request-level detection), not only the unit
+that failed. A controller that commits one thing (a host listener, another bundle, an earlier write unit) and then
+meets a conflict in a write unit that itself committed nothing must not answer `CONFLICT_001` + `Retry-After`: the
+client's retry would repeat the first commit.
+
+With `commit_detection` on (default), `RequestCommitWatermark` takes a `CommitMark` of the `CommitLedger` at
+`kernel.request` (priority 4096, before routing, the firewall and the host's listeners) on the main request, in the
+request attribute `CommitMark::REQUEST_ATTRIBUTE`. A sub-request (a fragment, a forward) carries the main request's
+mark. The responder answers `CONFLICT_002` (no `Retry-After`) when the ledger moved since the mark.
+
+A bundle that answers in its own shape gets the same rule with one call:
+
+```php
+use Nowo\TransactionDoctrine\ConflictCode;
+
+$code = ConflictCode::forRequest($request, $failure);   // CONFLICT_002 when anything committed since the mark
+```
+
+Outside HTTP (a Messenger handler, a console command) take your own mark before the work, from the
+`Nowo\TransactionDoctrine\WriteUnit\CommitLedger` service (`nowo_transaction_doctrine.commit_ledger`, present only with
+`commit_detection`):
+
+```php
+$mark = new CommitMark($ledger);
+// … the work …
+$code = ConflictCode::forFailure($failure, $mark);
+```
+
+Without commit detection there is no mark and the failure alone decides, as in 1.5. A commit before the mark (an
+earlier request of the same worker, a listener with a priority above 4096) does not count. The ledger is a monotonic
+counter and the mark lives on the request, so nothing needs a reset in a FrankenPHP worker. The ledger sees only
+connections wrapped by `CommitTrackingMiddleware` (every DBAL connection of the `doctrine` bundle): writes through
+another channel (a PDO session handler, an HTTP call) are invisible to it. A Doctrine Messenger transport send is a
+write on a tracked connection, so it counts: that is correct, the message is durable.
+
+### The X-Conflict-Code header (1.6.0)
+
+Every conflict answer of the responder carries `X-Conflict-Code: CONFLICT_001` or `X-Conflict-Code: CONFLICT_002`
+(platform convention, REQ-RUNTIME-003 rule 6, audit TH X-2), whatever built the body (JSON, the branded page, a
+formatter). The header holds **only these two values**: a domain conflict (for example a settings-changed 409) puts its
+own code in the body, never in this header.
+
+A bundle that answers itself, or that renders through the host's error page, sends it through the policy:
+
+```php
+$code = ConflictCode::forRequest($request, $failure);
+$response = new JsonResponse(['error' => 'unavailable', 'code' => $code->value], $policy->status, $policy->headersFor($code, $hint));
+// HTML routes rendered by the host's error page: the page carries the code in the header even when its body has none.
+throw $policy->httpExceptionFor($code, 'The change could not be saved. Reload and try again.', $failure, $hint);
+```
+
+`headersFor()` returns `X-Conflict-Code` always and `Retry-After` only for `CONFLICT_001`. `headers()` and
+`httpException()` keep their 1.5 output (`Retry-After` only) for BC; prefer the `…For()` variants.
+
+- **Cross-origin APIs** must list the header in `Access-Control-Expose-Headers` (for example NelmioCorsBundle
+  `expose_headers: ['X-Conflict-Code', 'Retry-After']`), or browsers hide it from scripts.
+- **Clients key on the `code` body key or on `X-Conflict-Code`, never on `error`.** The `error` strings differ between
+  bundles (`concurrency_conflict`, `unavailable`, `conflict`) and are kept only for BC.
 
 ## How bundles comply with REQ-RUNTIME-003 using transaction-doctrine
 
@@ -444,11 +544,15 @@ A bundle that writes inherits most of REQ-RUNTIME-003 from this package:
 3. **409 + code (rule 6):** let `ConcurrencyConflict` reach the kernel; the responder answers 409 + `CONFLICT_001`
    + `Retry-After`, or `CONFLICT_002` without it when the unit already committed (`commit_detection`, on by default).
    A bundle with its own error shape registers a `ConflictResponseFormatterInterface` and copies `$context->code`; a
-   bundle that maps a transient failure itself reads the status from `ConflictResponsePolicy` and the code from
-   `ConflictCode::forFailure()`. Never map unique violations or lost connections to a conflict.
-4. **Safe replays (rule 7):** request memos implement `ResetBetweenAttemptsInterface` (or store ids); side effects
+   bundle that maps a transient failure itself reads the status and headers from `ConflictResponsePolicy`
+   (`headersFor($code)`, `httpExceptionFor($code, …)`: `X-Conflict-Code` + `Retry-After` only for `CONFLICT_001`) and
+   the code from `ConflictCode::forRequest($request, $failure)` (1.6.0: counts commits earlier in the request).
+   Never map unique violations or lost connections to a conflict.
+4. **Never reset or clear the host's entity manager (rule 2):** build the runner with `forHostEntityManager()` when
+   it receives the host's manager; `forEntityManager()` is for the bundle's own.
+5. **Safe replays (rule 7):** request memos implement `ResetBetweenAttemptsInterface` (or store ids); side effects
    run after the commit.
-5. **Prove it:** a real-database CI job (MySQL 8.4, MariaDB 11.x, PostgreSQL 16+, DBAL 3 and 4) with two-connection
+6. **Prove it:** a real-database CI job (MySQL 8.4, MariaDB 11.x, PostgreSQL 16+, DBAL 3 and 4) with two-connection
    race tests asserting the status, the code, `Retry-After`, the stored data and a usable connection; document the
    write paths in the bundle's `docs/CONCURRENCY.md`.
 
@@ -463,7 +567,7 @@ a connection that failed is checked before the next unit (FrankenPHP worker mode
 
 | Event | Priority | Action |
 |-------|----------|--------|
-| `kernel.request` (main) | 4096 | Reset closed entity managers (no query) |
+| `kernel.request` (main) | 4096 | Reset closed entity managers (no query). With `commit_detection`, `RequestCommitWatermark` also takes the request's commit mark at this priority (1.6.0) |
 | `kernel.exception` | 4096 | A DBAL, driver, PDO or ORM failure marks the request (never answers) |
 | `kernel.terminate` | -4096 | After the response of a marked request: reset closed managers, roll back leftover levels, ping each **connected** connection (closed when it no longer answers; DBAL reconnects on the next query) |
 | `WorkerMessageFailedEvent` | -4096 | The same repair after a consumed message failed with a database error |

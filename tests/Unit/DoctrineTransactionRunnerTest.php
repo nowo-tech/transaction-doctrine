@@ -25,6 +25,9 @@ use PHPUnit\Framework\TestCase;
 use SplObjectStorage;
 use stdClass;
 
+use function array_column;
+use function spl_object_id;
+
 use const PHP_INT_MAX;
 
 final class DoctrineTransactionRunnerTest extends TestCase
@@ -357,6 +360,127 @@ final class DoctrineTransactionRunnerTest extends TestCase
 
         DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($refusal): never {
             throw $refusal;
+        });
+    }
+
+    public function testTheHostRunnerFlushesBeforeCommitLikeTheOwnedOne(): void
+    {
+        $connection = $this->connection([0]);
+        $manager    = $this->manager($connection, true);
+        $manager->expects($this->once())->method('flush');
+        $connection->expects($this->once())->method('commit');
+
+        $result = random_int(1, PHP_INT_MAX);
+
+        self::assertSame($result, DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): int => $result));
+    }
+
+    /**
+     * TG delta (REQ-RUNTIME-003 rule 2): a storage failure on the host's open manager never closes, clears or resets
+     * it; only what the run brought in (a loaded entity, a new one scheduled for insertion) is detached, and the
+     * caller's own entities, managed or pending, are kept.
+     */
+    public function testTheHostRunnerNeverClosesClearsOrResetsAnOpenManager(): void
+    {
+        $caller        = new stdClass();
+        $callerPending = new stdClass();
+        $loaded        = new stdClass();
+        $inserted      = new stdClass();
+        $unitOfWork    = $this->createMock(UnitOfWork::class);
+        $unitOfWork->method('getIdentityMap')->willReturnOnConsecutiveCalls(
+            ['App\\Thing' => [1 => $caller]],
+            ['App\\Thing' => [1 => $caller, 2 => $loaded]],
+        );
+        $unitOfWork->method('getScheduledEntityInsertions')->willReturnOnConsecutiveCalls(
+            [spl_object_id($callerPending) => $callerPending],
+            [spl_object_id($callerPending) => $callerPending, spl_object_id($inserted) => $inserted],
+        );
+        $manager = $this->manager($this->connection([0, 1, 1]), true, unitOfWork: $unitOfWork);
+        $manager->method('contains')->willReturn(true);
+        $manager->expects($this->never())->method('close');
+        $manager->expects($this->never())->method('clear');
+        $detached = [];
+        $manager->expects($this->exactly(2))->method('detach')->willReturnCallback(static function (object $entity) use (&$detached): void {
+            $detached[] = $entity;
+        });
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManager')->willReturn($manager);
+        $registry->expects($this->never())->method('resetManager');
+        $logger = new RecordingLogger();
+        $caught = null;
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager, $registry, 'default', 2, $logger)->run(function (): never {
+                throw $this->deadlock();
+            });
+        } catch (TransientStorageFailure $failure) {
+            $caught = $failure;
+        }
+
+        self::assertSame(2, $caught->retryAfterSeconds());
+        self::assertSame([$loaded, $inserted], $detached);
+        self::assertContains(
+            ['level' => 'debug', 'message' => 'Detached what the failed run brought into the host entity manager.', 'context' => ['manager' => 'default', 'detached' => 2]],
+            $logger->records,
+        );
+    }
+
+    /** A domain failure after a flush inside the run: the owned runner clears, the host runner does not. */
+    public function testTheHostRunnerDoesNotClearAfterAFlushedRefusal(): void
+    {
+        $observers = [];
+        $events    = $this->capturingEvents($observers);
+        $manager   = $this->manager($this->connection([0, 1, 1]), true, true, events: $events);
+        $manager->method('contains')->willReturn(false);
+        $manager->expects($this->never())->method('clear');
+        $manager->expects($this->never())->method('detach');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forHostEntityManager($manager)->run(static function () use (&$observers, $refusal): never {
+            foreach ($observers as $observer) {
+                $observer->postFlush();
+            }
+
+            throw $refusal;
+        });
+    }
+
+    public function testTheHostRunnerReplacesOnlyAClosedManager(): void
+    {
+        $manager = $this->manager($this->connection([0, 1, 1]), false);
+        $manager->expects($this->never())->method('close');
+        $manager->expects($this->never())->method('clear');
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManager')->with('orders')->willReturn($manager);
+        $registry->expects($this->once())->method('resetManager')->with('orders');
+        $logger = new RecordingLogger();
+        $bug    = new LogicException('bug');
+
+        $this->expectExceptionObject($bug);
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager, $registry, 'orders', 1, $logger)->run(static function () use ($bug): never {
+                throw $bug;
+            });
+        } finally {
+            self::assertContains('Replacing the closed host entity manager.', array_column($logger->records, 'message'));
+        }
+    }
+
+    public function testTheHostRunnerLeavesAClosedManagerWithoutARegistry(): void
+    {
+        $manager = $this->manager($this->connection([0, 1, 1]), false);
+        $manager->expects($this->never())->method('close');
+        $manager->expects($this->never())->method('clear');
+        $manager->expects($this->never())->method('detach');
+        $bug = new LogicException('bug');
+
+        $this->expectExceptionObject($bug);
+
+        DoctrineTransactionRunner::forHostEntityManager($manager)->run(static function () use ($bug): never {
+            throw $bug;
         });
     }
 

@@ -9,6 +9,7 @@ use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Nowo\TransactionDoctrine\Symfony\Conflict\TransientFailureConflictMapper;
 use Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder;
+use Nowo\TransactionDoctrine\Symfony\EventListener\RequestCommitWatermark;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WorkerConnectionHygiene;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
@@ -42,8 +43,10 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_it
  *
  * - write units (`max_attempts`, `backoff`, `replay_on`, `commit_detection`) for #[AsWriteUnit] controllers,
  *   `controller_routes`, the Messenger middleware and the programmatic WriteUnitInterface service;
- * - `conflict_response`: the 409 (or 503) + `Retry-After` answer of a lock conflict, its template and JSON code, and
- *   the ConflictResponsePolicy service every bundle reads the status from;
+ * - `conflict_response`: the 409 (or 503) + `Retry-After` + `X-Conflict-Code` answer of a lock conflict, its template
+ *   and JSON code, and the ConflictResponsePolicy service every bundle reads the status from;
+ * - with `commit_detection`, the request commit watermark (RequestCommitWatermark at kernel.request): a conflict
+ *   after a commit earlier in the same request answers CONFLICT_002 (ConflictCode::forRequest());
  * - request memos: services implementing ResetBetweenAttemptsInterface are autoconfigured (tag
  *   `nowo_transaction_doctrine.reset_between_attempts`, ordered by priority) and emptied before every replay; a
  *   WriteUnitRetryEvent is dispatched on `event_dispatcher` then;
@@ -104,7 +107,7 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                 ->booleanNode('messenger_middleware')->defaultTrue()
                     ->info('Register nowo_transaction_doctrine.write_unit_middleware (add it to your buses before doctrine_transaction).')->end()
                 ->booleanNode('commit_detection')->defaultTrue()
-                    ->info('Count commits through a DBAL middleware (doctrine.middleware tag): a failed attempt that already committed is never replayed.')->end()
+                    ->info('Count commits through a DBAL middleware (doctrine.middleware tag): a failed attempt that already committed is never replayed, and a conflict after a commit earlier in the same request answers CONFLICT_002 (request watermark taken at kernel.request).')->end()
                 ->booleanNode('worker_hygiene')->defaultTrue()
                     ->info('Reset closed entity managers per request and repair connections after a DBAL / ORM failure.')->end()
                 ->arrayNode('conflict_response')
@@ -157,9 +160,13 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
 
         if ($config['commit_detection']) {
             $services->set($prefix . 'commit_ledger', CommitLedger::class);
+            $services->alias(CommitLedger::class, $prefix . 'commit_ledger');
             $services->set($prefix . 'commit_tracking_middleware', CommitTrackingMiddleware::class)
                 ->args([service($prefix . 'commit_ledger')])
                 ->tag('doctrine.middleware');
+            $services->set($prefix . 'request_commit_watermark', RequestCommitWatermark::class)
+                ->args([service($prefix . 'commit_ledger'), service('request_stack')->nullOnInvalid()])
+                ->tag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onRequest', 'priority' => RequestCommitWatermark::PRIORITY]);
         }
 
         $services->set($prefix . 'write_unit', WriteUnit::class)

@@ -18,6 +18,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Request commit watermark (audit TH X-1, REQ-RUNTIME-003 rule 6 request-level detection):** a conflict after a
+  commit earlier in the same request (the host, another bundle, an earlier unit) answers `CONFLICT_002` without
+  `Retry-After` instead of `CONFLICT_001` + `Retry-After`, which invited a blind retry of committed work.
+  - New `Nowo\TransactionDoctrine\WriteUnit\CommitMark` (a watermark on the `CommitLedger`, `committedSince()`).
+  - New `Nowo\TransactionDoctrine\Symfony\EventListener\RequestCommitWatermark`: with `commit_detection` on, takes the
+    mark at `kernel.request` (priority 4096) on the main request, in the request attribute
+    `CommitMark::REQUEST_ATTRIBUTE`; sub-requests carry the main request's mark.
+  - `ConflictCode::forRequest(Request $request, Throwable $failure)` for bundles answering in their own shape, and an
+    optional `?CommitMark $since` argument on `ConflictCode::forFailure()`.
+  - The responder (answer and log) uses `ConflictCode::forRequest()`.
+  - The `CommitLedger` service is aliased as `Nowo\TransactionDoctrine\WriteUnit\CommitLedger` (with
+    `commit_detection`), so a Messenger handler or command can take its own mark.
+- **`X-Conflict-Code` header (audit TH X-2, platform convention):** every responder answer carries
+  `X-Conflict-Code: CONFLICT_001|CONFLICT_002` (only those two values), whatever built the body.
+  `ConflictResponsePolicy::headersFor(ConflictCode $code, ?int $hint)` (the header, plus `Retry-After` only for
+  `CONFLICT_001`), `ConflictResponsePolicy::httpExceptionFor()` and the `ConflictResponsePolicy::CODE_HEADER` constant
+  let bundles send it too. Documented: cross-origin APIs add it to `Access-Control-Expose-Headers`; clients key on
+  `code` or the header, never on `error`.
+- **`DoctrineTransactionRunner::forHostEntityManager()` (audit TG delta, REQ-RUNTIME-003 rule 2):** a runner for the
+  host application's entity manager. After a failure it never closes, clears or resets an open manager; it replaces a
+  closed one through the registry and detaches only what the failed run brought in (entities that entered the
+  identity map or were scheduled for insertion during the run). `forEntityManager()` is unchanged and now documented
+  as the factory for bundle-owned managers.
+
 ## [1.5.0] - 2026-11-18
 
 ### Added

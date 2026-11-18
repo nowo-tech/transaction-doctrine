@@ -90,6 +90,7 @@ final class TestKernel extends Kernel
     {
         $routes->add('conflict_page', '/conflict')->controller([ConflictController::class, 'conflict']);
         $routes->add('conflict_api', '/api/conflict')->controller([ConflictController::class, 'conflict']);
+        $routes->add('committed_api', '/api/committed')->controller([ConflictController::class, 'committed']);
         $routes->add('unit', '/unit')->controller([ConflictController::class, 'unit'])->methods(['POST']);
         $routes->add('org_listed_route', '/listed')->controller([ConflictController::class, 'listed'])->methods(['POST']);
         $routes->add('always', '/always')->controller([ConflictController::class, 'always'])->methods(['POST']);

@@ -16,6 +16,8 @@ use Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -36,6 +38,7 @@ use Twig\Loader\ChainLoader;
 use Twig\Loader\FilesystemLoader;
 use Twig\TwigFunction;
 
+use function array_intersect_key;
 use function dirname;
 use function json_decode;
 
@@ -383,6 +386,57 @@ final class ConcurrencyConflictResponderTest extends TestCase
 
         self::assertSame('7', $responder->respond(Request::create('/api/x'), new RuntimeException('wrap', 0, $conflict))->headers->get('Retry-After'));
         self::assertSame('1', $responder->respond(Request::create('/api/x'), new TransientStorageFailure())->headers->get('Retry-After'));
+    }
+
+    /** Audit TH X-2: every answer carries X-Conflict-Code, whatever shape built the body. */
+    public function testEveryAnswerCarriesTheConflictCodeHeader(): void
+    {
+        $responder = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [], $this->twig(), $this->translator('en'));
+        $partial   = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
+
+        self::assertSame('CONFLICT_001', $responder->respond(Request::create('/api/x', 'POST'), $this->conflict())->headers->get('X-Conflict-Code'));
+        self::assertSame('CONFLICT_001', $responder->respond(Request::create('/x'), $this->conflict())->headers->get('X-Conflict-Code'));
+        self::assertSame('CONFLICT_002', $responder->respond(Request::create('/api/x', 'POST'), $partial)->headers->get('X-Conflict-Code'));
+        self::assertSame('CONFLICT_002', $responder->respond(Request::create('/x'), $partial)->headers->get('X-Conflict-Code'));
+
+        $formatter = new class implements ConflictResponseFormatterInterface {
+            public function format(Request $request, ConflictResponseContext $context): JsonResponse
+            {
+                return new JsonResponse(['jsonrpc' => '2.0'], 200, ['X-Conflict-Code' => 'SETTINGS_CHANGED']);
+            }
+        };
+        $formatted = (new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [$formatter]))->respond(Request::create('/rpc'), $partial);
+        self::assertSame('CONFLICT_002', $formatted->headers->get('X-Conflict-Code'), 'Only the two platform values, set by the responder.');
+    }
+
+    /**
+     * Audit TH X-1: a conflict after a commit earlier in the same request (since the request's CommitMark) answers
+     * CONFLICT_002 with no Retry-After, even when the failed unit itself committed nothing.
+     */
+    public function testACommitEarlierInTheRequestAnswersConflict002(): void
+    {
+        $ledger    = new CommitLedger();
+        $logger    = new RecordingLogger();
+        $responder = new ConcurrencyConflictResponder(new ConflictResponsePolicy(409, 3), [], [], null, null, $logger);
+        $request   = Request::create('/api/x', 'POST');
+        $request->attributes->set(CommitMark::REQUEST_ATTRIBUTE, new CommitMark($ledger));
+
+        $untouched = $responder->respond($request, $this->conflict());
+        self::assertSame('3', $untouched->headers->get('Retry-After'));
+        self::assertSame('CONFLICT_001', $untouched->headers->get('X-Conflict-Code'));
+
+        $ledger->record();
+        $event = $this->event($request, $this->conflict());
+        $responder($event);
+
+        $response = $event->getResponse();
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame(409, $response->getStatusCode());
+        self::assertFalse($response->headers->has('Retry-After'));
+        self::assertSame('CONFLICT_002', $response->headers->get('X-Conflict-Code'));
+        self::assertSame(['error' => 'concurrency_conflict_partial', 'code' => 'CONFLICT_002'], array_intersect_key((array) json_decode((string) $response->getContent(), true), ['error' => 1, 'code' => 1]));
+        self::assertSame('CONFLICT_002', $logger->records[0]['context']['code']);
+        self::assertTrue($logger->records[0]['context']['committed']);
     }
 
     public function testRetryUrl(): void
