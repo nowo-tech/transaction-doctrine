@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.4.0](#to-140)
   - [Request memos and write-unit replays](#request-memos-and-write-unit-replays)
 - [To 1.3.1](#to-131)
 - [To 1.3.0](#to-130)
@@ -14,6 +15,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.4.0
+
+From **1.3.1**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 From **1.3.1**: `composer update nowo-tech/transaction-doctrine`. No configuration change; nothing breaks.
 
