@@ -6,15 +6,20 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony;
 
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\Journal;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
+use Nowo\TransactionDoctrine\WriteUnit\ResetBetweenAttemptsInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use stdClass;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\DelayedMessageHandlingException;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
@@ -165,6 +170,71 @@ final class WriteUnitMiddlewareTest extends TestCase
         $this->expectExceptionMessage('bug');
 
         $this->dispatch($this->consumed(), new ScriptedHandler(['bug']));
+    }
+
+    public function testAMemoIsResetBeforeTheReplayAndTheEventCarriesTheMessageClass(): void
+    {
+        $log        = new Journal();
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(WriteUnitRetryEvent::class, static function (WriteUnitRetryEvent $event) use ($log): void {
+            $log->add('event ' . $event->attempt . ' ' . $event->unit);
+        });
+        $memo       = $log->resetter('reset');
+        $middleware = new WriteUnitMiddleware(new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock(), null, null, null, [$memo], $dispatcher));
+        $handler    = new ScriptedHandler([HandlerFailedException::class, 'ok']);
+
+        $middleware->handle($this->consumed(), new StackMiddleware([$middleware, $handler]));
+
+        self::assertSame(2, $handler->calls);
+        self::assertSame(['reset', 'event 2 stdClass'], $log->entries);
+    }
+
+    public function testAFailingResetterGoesOutAsTheConflictInsideAHandlerFailedException(): void
+    {
+        $broken = new RuntimeException('memo broken');
+        $memo   = new class($broken) implements ResetBetweenAttemptsInterface {
+            public function __construct(private readonly RuntimeException $broken)
+            {
+            }
+
+            public function resetBetweenAttempts(): void
+            {
+                throw $this->broken;
+            }
+        };
+        $middleware = new WriteUnitMiddleware(new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock(), null, null, null, [$memo]));
+        $handler    = new ScriptedHandler([HandlerFailedException::class, 'ok']);
+
+        try {
+            $middleware->handle($this->consumed(), new StackMiddleware([$middleware, $handler]));
+            self::fail('No failure.');
+        } catch (HandlerFailedException $failure) {
+            $conflict = $failure->getWrappedExceptions()[0] ?? null;
+            self::assertSame(1, $handler->calls);
+            self::assertInstanceOf(ConcurrencyConflict::class, $conflict);
+            self::assertSame($broken, $conflict->resetFailure);
+        }
+    }
+
+    public function testAnotherWriteUnitImplementationRunsWithoutAUnitName(): void
+    {
+        $unit = new class implements WriteUnitInterface {
+            public int $runs = 0;
+
+            public function run(callable $work): mixed
+            {
+                ++$this->runs;
+
+                return $work(1, null);
+            }
+        };
+        $middleware = new WriteUnitMiddleware($unit);
+        $handler    = new ScriptedHandler(['ok']);
+
+        $result = $middleware->handle($this->consumed(), new StackMiddleware([$middleware, $handler]));
+
+        self::assertNotNull($result->last(HandledStamp::class));
+        self::assertSame(1, $unit->runs);
     }
 
     /** As MessageBus does: the stack's first middleware is the one handling the envelope. */

@@ -11,6 +11,7 @@
   - [Programmatic API](#programmatic-api)
   - [Controllers: `#[AsWriteUnit]`](#controllers-aswriteunit)
   - [Messenger middleware](#messenger-middleware)
+  - [Request memos between attempts (1.4.0)](#request-memos-between-attempts-140)
 - [Lock-conflict answer: 409 + Retry-After](#lock-conflict-answer-409--retry-after)
   - [Exception-mapping and response hooks](#exception-mapping-and-response-hooks)
   - [Bundles that answer in their own shape](#bundles-that-answer-in-their-own-shape)
@@ -242,6 +243,81 @@ inside a web request are left to the request. A message whose other handler alre
 from messages dispatched after the handler (`DelayedMessageHandlingException`), is not replayed in-process. After the
 last attempt the `ConcurrencyConflict` goes out inside a `HandlerFailedException`, so retry strategies and the failure
 transport see the usual shape.
+
+### Request memos between attempts (1.4.0)
+
+Between two attempts the unit clears every open entity manager (or resets a closed one): every entity loaded by the
+failed attempt is **detached**. A per-request (or per-message) memo that kept one of them hands the replay a detached
+entity: writing it into an association fails the flush with `ORMInvalidArgumentException` (a 500 instead of the
+conflict answer), and changes made to it are silently never written.
+
+**Request memos that hold entities must implement `ResetBetweenAttemptsInterface`, or store ids.**
+
+```php
+use Nowo\TransactionDoctrine\WriteUnit\ResetBetweenAttemptsInterface;
+use Symfony\Contracts\Service\ResetInterface;
+
+final class OrganizationContext implements ResetBetweenAttemptsInterface, ResetInterface
+{
+    private ?Organization $organization = null;
+
+    public function __construct(private readonly OrganizationRepository $organizations, private readonly RequestStack $requests)
+    {
+    }
+
+    public function current(): Organization
+    {
+        return $this->organization ??= $this->organizations->get($this->requests->getMainRequest()?->attributes->get('org'));
+    }
+
+    public function resetBetweenAttempts(): void   // before a write-unit replay
+    {
+        $this->organization = null;
+    }
+
+    public function reset(): void                  // between requests (kernel.reset)
+    {
+        $this->organization = null;
+    }
+}
+```
+
+- With autoconfiguration the service is tagged `nowo_transaction_doctrine.reset_between_attempts` (constant
+  `ResetBetweenAttemptsInterface::TAG`). Without it, tag the service yourself.
+- **Order:** tag priority, higher first, then registration order: `#[AsTaggedItem(priority: 10)]` on the class, or a
+  `priority` attribute on the tag. Reset a memo that others derive from after them (lower priority).
+- **When:** after the failed attempt's managers were cleared or reset and after the pause, right before the next
+  attempt; for every entry point (`#[AsWriteUnit]`, `controller_routes`, the Messenger middleware, the programmatic
+  `WriteUnitInterface` service). **Never** before the first attempt, never after the last failure (no replay follows;
+  emptying the memo between requests is your own `ResetInterface` / `kernel.reset`, which does **not** run in a
+  FrankenPHP worker with kernel reset off, so a memo there must be request-scoped some other way), never when the unit runs once (inside a transaction, pending
+  changes, an attempt that already committed).
+- **Failure:** an exception thrown by a resetter abandons the replay. The unit gives up with `ConcurrencyConflict`
+  (409 + `Retry-After`; for a message, a `HandlerFailedException` the transport retries): its previous exception is
+  the attempt's lock conflict, and `ConcurrencyConflict::$resetFailure` holds the resetter's exception. An error is
+  logged. Keep resetters to dropping references; reload lazily on the next read.
+- **Leftovers:** a resetter (or retry listener) that leaves a transaction open or entity changes pending would make the
+  replay run nested (its flush never commits) or write those changes. The unit discards them and gives up the same way,
+  `$resetFailure` being a `LogicException`. Never open transactions, flush or persist in a resetter.
+- A **Generator** passed as `$resetters` (plain PHP) is read once into a list; a Symfony tagged iterator is rewindable.
+- Storing **identifiers** instead of entities needs no hook: the replay loads them again from the current manager.
+
+The unit also dispatches a PSR-14 `WriteUnitRetryEvent` (on `event_dispatcher`, after the resetters, with the same
+timing) for observers (metrics, tracing) or state you cannot tag. It carries `attempt` (the attempt about to run, 2 or
+more), `failure`, `kind` and `unit`: the route name for controllers, the message class for consumed messages, or what
+a programmatic caller passed as the second argument of `WriteUnit::run($work, 'invoice_pay')`. A listener that throws
+abandons the replay like a failing resetter. Listeners should record only `kind`, `unit`, `attempt` and the exception
+class (`$event->failure::class`), never `$event->failure->getMessage()`: DBAL messages can carry SQL and parameters.
+
+```php
+#[AsEventListener]
+final class WriteUnitReplayMetrics
+{
+    public function __invoke(WriteUnitRetryEvent $event): void { /* count $event->unit, $event->kind */ }
+}
+```
+
+Plain PHP: `new WriteUnit($registry, $policy, null, $clock, $logger, null, $ledger, [$memo], $dispatcher)`.
 
 ## Lock-conflict answer: 409 + Retry-After
 

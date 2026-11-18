@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle;
 use Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures\Attempts;
+use Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures\ReplayLog;
 use Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures\TestKernel;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
@@ -60,6 +61,7 @@ final class BundleTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
         self::assertSame('saved after 2', $response->getContent());
+        self::assertSame(['high', 'low', 'event 2 unit deadlock'], $this->replayLog($kernel)->entries);
         $kernel->shutdown();
     }
 
@@ -73,6 +75,7 @@ final class BundleTest extends TestCase
         self::assertSame('3', $response->headers->get('Retry-After'));
         self::assertInstanceOf(Attempts::class, $attempts);
         self::assertSame(2, $attempts->count);
+        self::assertSame(['high', 'low', 'event 2 always lock_wait_timeout'], $this->replayLog($kernel)->entries);
         $kernel->shutdown();
     }
 
@@ -82,6 +85,7 @@ final class BundleTest extends TestCase
         $response = $kernel->handle(Request::create('/listed', 'POST'));
 
         self::assertSame('saved after 2', $response->getContent());
+        self::assertSame(['high', 'low', 'event 2 org_listed_route deadlock'], $this->replayLog($kernel)->entries);
         self::assertSame(500, $kernel->handle(Request::create('/unit', 'POST'))->getStatusCode());
         $kernel->shutdown();
     }
@@ -144,6 +148,14 @@ final class BundleTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
 
         $this->boot(['replay_on' => ['nope']]);
+    }
+
+    private function replayLog(TestKernel $kernel): ReplayLog
+    {
+        $log = $kernel->getContainer()->get(ReplayLog::class);
+        self::assertInstanceOf(ReplayLog::class, $log);
+
+        return $log;
     }
 
     private function testContainer(TestKernel $kernel): ContainerInterface

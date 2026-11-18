@@ -20,7 +20,7 @@ use Throwable;
 final class SafeLog
 {
     /**
-     * @param 'debug'|'notice'|'warning' $level
+     * @param 'debug'|'error'|'notice'|'warning' $level
      * @param array<string, scalar|null> $context
      */
     public static function log(LoggerInterface $logger, string $level, string $message, array $context): void

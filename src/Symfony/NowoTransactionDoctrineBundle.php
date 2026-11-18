@@ -16,6 +16,7 @@ use Nowo\TransactionDoctrine\TransientFailureKind;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
+use Nowo\TransactionDoctrine\WriteUnit\ResetBetweenAttemptsInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
@@ -43,6 +44,9 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_it
  *   `controller_routes`, the Messenger middleware and the programmatic WriteUnitInterface service;
  * - `conflict_response`: the 409 (or 503) + `Retry-After` answer of a lock conflict, its template and JSON code, and
  *   the ConflictResponsePolicy service every bundle reads the status from;
+ * - request memos: services implementing ResetBetweenAttemptsInterface are autoconfigured (tag
+ *   `nowo_transaction_doctrine.reset_between_attempts`, ordered by priority) and emptied before every replay; a
+ *   WriteUnitRetryEvent is dispatched on `event_dispatcher` then;
  * - `worker_hygiene`: closed entity managers reset and failed connections pinged between requests and messages.
  *
  * Every service is stateless (FrankenPHP worker mode with kernel reset off). Templates and translations live at the
@@ -174,6 +178,8 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                 service('logger')->nullOnInvalid(),
                 null,
                 $config['commit_detection'] ? service($prefix . 'commit_ledger') : null,
+                tagged_iterator(ResetBetweenAttemptsInterface::TAG),
+                service('event_dispatcher')->nullOnInvalid(),
             ])
             ->tag('monolog.logger', ['channel' => 'transaction_doctrine'])
             ->public();
@@ -200,6 +206,7 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
             $services->alias(WriteUnitMiddleware::class, $prefix . 'write_unit_middleware');
         }
 
+        $builder->registerForAutoconfiguration(ResetBetweenAttemptsInterface::class)->addTag(ResetBetweenAttemptsInterface::TAG);
         $builder->registerForAutoconfiguration(ConflictExceptionMapperInterface::class)->addTag(ConflictExceptionMapperInterface::TAG);
         $builder->registerForAutoconfiguration(ConflictResponseFormatterInterface::class)->addTag(ConflictResponseFormatterInterface::TAG);
 

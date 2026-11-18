@@ -127,6 +127,7 @@
         "doctrine/persistence": "To reset a closed entity manager through a ManagerRegistry (required by WriteUnit)",
         "symfony/http-kernel": "For the optional NowoTransactionDoctrineBundle (#[AsWriteUnit], 409 conflict responder, worker hygiene)",
         "symfony/messenger": "For WriteUnitMiddleware (replays a consumed message after a lock conflict)",
+        "psr/event-dispatcher": "To dispatch WriteUnitRetryEvent before each write-unit replay (Symfony's event_dispatcher)",
         "symfony/clock": "To pause between write-unit attempts through the Symfony clock (testable)",
         "twig/twig": "For the branded HTML conflict page (overridable template)",
         "nowo-tech/ui-kit-bundle": "The conflict page extends UiKit's error page when UiKit is installed"

@@ -9,12 +9,16 @@ use Doctrine\Persistence\Mapping\ClassMetadata;
 use Doctrine\Persistence\ObjectManager;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\Journal;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
 use Nowo\TransactionDoctrine\WriteUnit\AsWriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
+use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
@@ -219,6 +223,57 @@ final class WriteUnitControllerListenerTest extends TestCase
         $manager->method('find')->willReturnCallback(static fn (string $class): ?object => $fresh[$class] ?? null);
 
         return $manager;
+    }
+
+    public function testTheReplayEventCarriesTheRouteAndAMemoIsResetBeforeTheReplay(): void
+    {
+        $log        = new Journal();
+        $dispatcher = new EventDispatcher();
+        $dispatcher->addListener(WriteUnitRetryEvent::class, static function (WriteUnitRetryEvent $event) use ($log): void {
+            $log->add('event ' . $event->attempt . ' ' . ($event->unit ?? 'none'));
+        });
+        $memo       = $log->resetter('reset');
+        $unit       = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock(), null, null, null, [$memo], $dispatcher);
+        $listener   = new WriteUnitControllerListener($unit, null, null, ['board_move'], false);
+        $controller = static function () use ($log): Response {
+            $log->add('attempt');
+            if (count($log->entries) === 1) {
+                throw FakeDriverException::deadlock();
+            }
+
+            return new Response('moved');
+        };
+
+        $request = Request::create('/move', 'POST');
+        $request->attributes->set('_route', 'board_move');
+        $event = $this->event($controller, [], $request);
+        $listener($event);
+
+        self::assertSame('moved', ($event->getController())()->getContent());
+        self::assertSame(['attempt', 'reset', 'event 2 board_move', 'attempt'], $log->entries);
+    }
+
+    public function testAnotherWriteUnitImplementationRunsWithoutAUnitName(): void
+    {
+        $unit = new class implements WriteUnitInterface {
+            public int $runs = 0;
+
+            public function run(callable $work): mixed
+            {
+                ++$this->runs;
+
+                return $work(1, null);
+            }
+        };
+        $listener = new WriteUnitControllerListener($unit, null, null, ['save']);
+        $request  = Request::create('/save', 'POST');
+        $request->attributes->set('_route', 'save');
+        $event = $this->event(static fn (): Response => new Response('saved'), [], $request);
+
+        $listener($event);
+
+        self::assertSame('saved', ($event->getController())()->getContent());
+        self::assertSame(1, $unit->runs);
     }
 
     private function registry(ObjectManager $manager): ManagerRegistry

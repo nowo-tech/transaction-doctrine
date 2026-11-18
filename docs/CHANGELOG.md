@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reset hook between write-unit attempts** (SYMFONY-BEACON spec 241 T020): request memos that keep entities are
+  emptied before a replay, so it no longer runs on detached entities (`ORMInvalidArgumentException` 500 instead of the
+  409, or silently lost changes).
+  - `ResetBetweenAttemptsInterface::resetBetweenAttempts()`: autoconfigured (tag
+    `nowo_transaction_doctrine.reset_between_attempts`), called in tag priority order after the entity managers were
+    cleared or reset and before the next attempt, for `#[AsWriteUnit]`, `controller_routes`, the Messenger middleware
+    and the programmatic service. Never before the first attempt nor after the last failure.
+  - `WriteUnitRetryEvent` (PSR-14, on `event_dispatcher`), dispatched after the resetters: attempt about to run,
+    failure, kind and unit name (route name, message class, or the new optional `$unit` argument of `WriteUnit::run()`).
+  - A resetter or retry listener that throws abandons the replay: `ConcurrencyConflict` with the attempt's failure as
+    previous and the new `ConcurrencyConflict::$resetFailure` (logged at `error`). So does one that leaves a
+    transaction open or entity changes pending (discarded first; `$resetFailure` is a `LogicException`), which would
+    otherwise make the replay run nested and return without committing.
+  - A `Generator` passed as `$resetters` is read once into a list, so units with several replays work.
+  - `WriteUnit` takes two new optional constructor arguments: `iterable $resetters` and a PSR-14 `$dispatcher`.
+
 ## [1.3.1] - 2026-11-17
 
 ### Fixed
