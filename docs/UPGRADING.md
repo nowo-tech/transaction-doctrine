@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.5.0](#to-150)
   - [Conflict codes in conflict answers](#conflict-codes-in-conflict-answers)
 - [To 1.4.0](#to-140)
   - [Request memos and write-unit replays](#request-memos-and-write-unit-replays)
@@ -16,6 +17,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.5.0
+
+From **1.4.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 From **1.4.0**: `composer update nowo-tech/transaction-doctrine`. No configuration change; the default status stays
 **409** (it has been since 1.3.0), and `conflict_response.status: 503` keeps working.
