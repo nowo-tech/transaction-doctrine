@@ -45,7 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Audit TA2-1 (affects 1.3.0 to 1.4.0):** when the server refused a COMMIT (a deferred constraint, or a PostgreSQL
+- **Duplicate autocommit writes after a failed COMMIT (audit TA2-1, affects 1.3.0–1.4.0; no GHSA, owner decision
+  2026-11-18):** when the server refused a COMMIT (a deferred constraint, or a PostgreSQL
   serialization failure at commit time), `CommitTrackingConnection` kept believing a transaction was open, so the
   autocommit writes that followed on that connection were no longer counted by `CommitLedger`. A write unit that met a
   conflict after such a write was then replayed instead of answering `committed: true`, and repeated the write. The
