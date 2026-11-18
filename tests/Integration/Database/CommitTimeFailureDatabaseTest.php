@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database;
 
+use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
@@ -66,7 +67,10 @@ final class CommitTimeFailureDatabaseTest extends DatabaseTestCase
                 $this->connection->executeStatement('INSERT INTO ddrb_deferred VALUES (1), (1)');   // checked at COMMIT
             });
 
-            self::assertInstanceOf(UniqueConstraintViolationException::class, $failure);
+            // DBAL 4 converts it; DBAL 3 lets the driver's Driver\PDO\PDOException (SQLSTATE in getCode()) through.
+            self::assertInstanceOf(Throwable::class, $failure);
+            self::assertNotInstanceOf(TransientStorageFailure::class, $failure);
+            self::assertTrue($failure instanceof UniqueConstraintViolationException || ($failure instanceof DriverException && $failure->getSQLState() === '23505'), $failure::class);
             self::assertNull((new TransientFailureClassifier())->classify($failure));
             $this->assertUsable();
             self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_deferred'));
