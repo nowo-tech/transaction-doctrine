@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.6.0](#to-160)
   - [Request commit watermark](#request-commit-watermark)
   - [X-Conflict-Code header](#x-conflict-code-header)
   - [forHostEntityManager() for the host's entity manager](#forhostentitymanager-for-the-hosts-entity-manager)
@@ -21,6 +22,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.6.0
+
+From **1.5.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 `composer update nowo-tech/transaction-doctrine`. No configuration change, and no public signature changed: every
 addition is a new class, method or optional argument.
