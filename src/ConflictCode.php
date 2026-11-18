@@ -14,6 +14,7 @@ use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
 use function array_pop;
+use function array_values;
 use function count;
 use function interface_exists;
 use function spl_object_id;
@@ -97,7 +98,8 @@ enum ConflictCode: string
 
     /**
      * Whether the failure, or anything it carries (getPrevious() and Messenger's wrapped exceptions), proves that part
-     * of the work committed. Each throwable is visited once, at most MAX_NODES of them.
+     * of the work committed. Each throwable is visited once, at most MAX_NODES of them, and the queue never holds more
+     * than the walk may still visit. Anything a custom wrapper returns that is not a Throwable is ignored.
      */
     private static function carriesCommit(Throwable $failure): bool
     {
@@ -119,14 +121,16 @@ enum ConflictCode: string
                 return true;
             }
 
-            $previous = $current->getPrevious();
-            if ($previous instanceof Throwable) {
-                $stack[] = $previous;
+            $children = [$current->getPrevious()];
+            if ($messenger && $current instanceof WrappedExceptionsInterface) {
+                $children = [...$children, ...array_values($current->getWrappedExceptions())];
             }
 
-            if ($messenger && $current instanceof WrappedExceptionsInterface) {
-                foreach ($current->getWrappedExceptions() as $wrapped) {
-                    $stack[] = $wrapped;
+            // A custom wrapper may hand back anything: only throwables are walked (a 409 never becomes a 500), and
+            // no more are queued than the walk may still visit.
+            foreach ($children as $child) {
+                if ($child instanceof Throwable && count($stack) + count($seen) < self::MAX_NODES) {
+                    $stack[] = $child;
                 }
             }
         }

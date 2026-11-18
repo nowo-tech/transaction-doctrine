@@ -179,6 +179,12 @@ process):
 - The request watermark is conservative too: any tracked commit after the mark counts, including one unrelated to
   the failed work (a Doctrine Messenger transport send, an audit row). The client is told to read again; it is never
   invited to repeat work that may be committed.
+- The Messenger wrapper rules (1.6.1, audit TA4-2) over-approximate on purpose, as DDRB 3.2.0 does: a
+  `HandlerFailedException` with a `HandledStamp` answers `CONFLICT_002` even when the handler that succeeded wrote
+  nothing, or wrote inside an outer transaction that then rolled back; any `DelayedMessageHandlingException` answers
+  `CONFLICT_002` even when the outer dispatch ran under a transaction that rolled back, so nothing committed. The
+  failure does not say whether that work reached the database, so the client is told to read again; it is never
+  invited to repeat work that may be committed.
 - `forHostEntityManager()` refuses a host manager with pending changes before the run (`LogicException`), so the
   host's own work never rides in a transaction that rolls back. That costs one `computeChangeSets()` per run.
 - `forHostEntityManager()` forgets only what the run brought in (detached without cascading into the caller's

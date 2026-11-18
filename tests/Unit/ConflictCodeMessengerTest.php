@@ -61,26 +61,63 @@ final class ConflictCodeMessengerTest extends TestCase
         $wrapper          = new CyclicWrapper();
         $wrapper->wrapped = [$wrapper, new RuntimeException('a')];
 
-        self::assertSame(ConflictCode::RetrySafe, ConflictCode::forFailure($wrapper));
+        self::assertSame(ConflictCode::RetrySafe, $this->code($wrapper));
 
         $wrapper->wrapped[] = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
-        self::assertSame(ConflictCode::Committed, ConflictCode::forFailure($wrapper));
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
     }
 
-    /** The walk is bounded: a proof beyond 256 throwables is not looked for. */
-    public function testTheWalkIsBounded(): void
+    /** Audit TA4-4: a custom wrapper returning something that is not a Throwable is ignored, never a TypeError. */
+    public function testNonThrowablesFromACustomWrapperAreIgnored(): void
     {
-        $committed        = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
         $wrapper          = new CyclicWrapper();
-        $wrapper->wrapped = [$committed];
-        for ($i = 0; $i < 300; ++$i) {
-            $wrapper->wrapped[] = new RuntimeException('x' . $i);
+        $wrapper->wrapped = [null, 'not a throwable', new stdClass(), 42, new RuntimeException('a')];
+
+        self::assertSame(ConflictCode::RetrySafe, $this->code($wrapper));
+
+        $wrapper->wrapped[] = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
+    }
+
+    /** Audit TA4-3: the queue stops growing once it holds what the walk may still visit. */
+    public function testTheQueueIsBoundedToo(): void
+    {
+        $leaf  = new CyclicWrapper();
+        $outer = new CyclicWrapper();
+        for ($i = 0; $i < 1000; ++$i) {
+            $outer->wrapped[] = new RuntimeException('x' . $i);
         }
 
-        // The last wrapped exception is walked first: the committed conflict lies beyond the bound.
-        self::assertSame(ConflictCode::RetrySafe, ConflictCode::forFailure($wrapper));
+        $outer->wrapped[] = $leaf;
+        $leaf->wrapped    = [new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true)];
+
+        // Only the first 255 children are queued; the committed conflict behind the 1001st is never reached.
+        self::assertSame(ConflictCode::RetrySafe, $this->code($outer));
+    }
+
+    /** The walk is bounded: a proof beyond 256 throwables is not looked for; one among the first is found. */
+    public function testTheWalkIsBounded(): void
+    {
+        $committed = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
+        $plain     = [];
+        for ($i = 0; $i < 300; ++$i) {
+            $plain[] = new RuntimeException('x' . $i);
+        }
+
+        $wrapper          = new CyclicWrapper();
+        $wrapper->wrapped = [...$plain, $committed];
+        self::assertSame(ConflictCode::RetrySafe, $this->code($wrapper));
+
+        $wrapper->wrapped = [$committed, ...$plain];
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
 
         $wrapper->wrapped = [new RuntimeException('a'), new RuntimeException('b'), $committed];
-        self::assertSame(ConflictCode::Committed, ConflictCode::forFailure($wrapper));
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
+    }
+
+    /** @phpstan-impure the answer depends on the wrapper, which the test changes between calls */
+    private function code(Throwable $failure): ConflictCode
+    {
+        return ConflictCode::forFailure($failure);
     }
 }

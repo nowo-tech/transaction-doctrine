@@ -34,7 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - (with `symfony/messenger`) a `HandlerFailedException` whose envelope carries a `HandledStamp` (another handler of
     the message already succeeded), or any `DelayedMessageHandlingException` (the outer dispatch, and its transaction,
     already committed).
-  The walk visits each throwable once and at most 256 of them (a cyclic custom wrapper cannot hang a worker). Without
+  Known over-approximation (conservative, same as DDRB 3.2.0, audit TA4-2): a `HandledStamp`, or a
+  `DelayedMessageHandlingException` under an outer transaction that rolled back, answers `CONFLICT_002` even when
+  nothing committed (see the accepted residual risks in [Concurrency](CONCURRENCY.md#accepted-residual-risk)).
+  The walk visits each throwable once and at most 256 of them, never queues more than it may still visit, and
+  ignores anything a custom wrapper returns that is not a `Throwable` (a cyclic or broken custom wrapper cannot hang
+  a worker or turn the 409 into a 500). Without
   `symfony/messenger` the Messenger rules are skipped (`interface_exists()` guard). `ConflictCode::forRequest()` and
   the 409 responder inherit the change.
 - **`forEntityManager()` is documented as bundle-owned only (audit TG delta follow-up):** the factory docblock, the
