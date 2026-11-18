@@ -68,6 +68,13 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testAnUncomputableHostIsRefusedWithItsCause(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUncomputableHostIsRefusedWithItsCause();
+    }
+
+    #[DataProvider('allServers')]
     public function testAFieldTheRunChangedStaysWithANotice(string $server): void
     {
         $this->boot($server);

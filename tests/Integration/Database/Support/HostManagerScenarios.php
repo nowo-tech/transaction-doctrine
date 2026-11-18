@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
+use Doctrine\ORM\Events;
 use DomainException;
 use LogicException;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
+use RuntimeException;
 use Throwable;
 
 use function array_column;
@@ -206,6 +208,55 @@ trait HostManagerScenarios
         $token = bin2hex(random_bytes(4));
         self::assertSame($token, $runner->run(static fn (): string => $token), 'A clean manager runs.');
         self::assertSame(0, $this->connection->getTransactionNestingLevel());
+    }
+
+    /**
+     * TA-3 final, Info 1: a host manager whose change sets cannot be computed (computeChangeSets() cascade-persists a
+     * new Card the host added to a Board, and a prePersist listener throws) is refused, and that exception is kept as
+     * the previous one of the LogicException.
+     */
+    private function scenarioAnUncomputableHostIsRefusedWithItsCause(): void
+    {
+        $manager = $this->manager();
+        $board   = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $board);
+        $cause    = new RuntimeException('prePersist refused');
+        $listener = new class($cause) {
+            public function __construct(private readonly RuntimeException $cause)
+            {
+            }
+
+            public function prePersist(): never
+            {
+                throw $this->cause;
+            }
+        };
+        $manager->getEventManager()->addEventListener([Events::prePersist], $listener);
+        $board->cards->add(new Card(63, $board));   // reached by cascade persist inside computeChangeSets()
+        $ran     = 0;
+        $runner  = DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry);
+        $refused = null;
+
+        try {
+            $runner->run(static function () use (&$ran): void {
+                ++$ran;
+            });
+        } catch (Throwable $throwable) {
+            $refused = $throwable;
+        } finally {
+            $manager->getEventManager()->removeEventListener([Events::prePersist], $listener);
+        }
+
+        self::assertInstanceOf(LogicException::class, $refused, 'An uncomputable host manager was not refused.');
+        self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
+        self::assertSame($cause, $refused->getPrevious(), 'The cause is kept.');
+        self::assertSame(0, $ran, 'The unit never ran.');
+        self::assertSame(0, $this->connection->getTransactionNestingLevel());
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 63'));
+
+        $manager->clear();   // the host's decision after the refusal
+        $token = bin2hex(random_bytes(4));
+        self::assertSame($token, $runner->run(static fn (): string => $token), 'A clean manager runs.');
     }
 
     /** TA3-3: a field the run changed on the host's entity stays (not cleared, not refreshed), with the notice. */

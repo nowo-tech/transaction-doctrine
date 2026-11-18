@@ -23,6 +23,20 @@
 
 ## Unreleased
 
+From **1.6.0**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
+
+- **`ConflictCode::forFailure()` (and the 409 responder) answers `CONFLICT_002`, without `Retry-After`, in more
+  cases:** a committed `ConcurrencyConflict` behind an uncommitted one or inside a Messenger wrapper, a
+  `HandlerFailedException` after another handler succeeded (`HandledStamp`), and any `DelayedMessageHandlingException`.
+  Each one is work that may already be committed, so 1.6.0's `CONFLICT_001` invited a blind retry. A test that
+  asserted `CONFLICT_001` for one of these needs `CONFLICT_002`. Nothing changes for a failure without such a
+  conflict or wrapper.
+- **`forHostEntityManager()` refusal:** the `LogicException` may now have a previous exception (what
+  `computeChangeSets()` threw). Code that matched the message keeps working.
+- **`forEntityManager()` is for bundle-owned managers only:** if a bundle passes the host's (default, shared) manager,
+  switch to `forHostEntityManager()` (same arguments). `forEntityManager()` keeps closing and resetting an open
+  manager after a storage failure; no option was added (see the 1.6.1 CHANGELOG).
+
 ## To 1.6.0
 
 From **1.5.0**:

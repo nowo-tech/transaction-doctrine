@@ -56,6 +56,8 @@ final class ConflictCodeTest extends TestCase
         yield 'raw deadlock' => [new DriverException($deadlock, null), ConflictCode::RetrySafe];
         yield 'lost savepoint, no deadlock' => [new DriverException(new FakeDriverException('SQLSTATE[42000]: 1305 SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305), null), ConflictCode::Committed];
         yield 'lost savepoint over a deadlock' => [new DriverException(new FakeDriverException('SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305, $deadlock), null), ConflictCode::RetrySafe];
+        yield 'a committed conflict behind an uncommitted one (1.6.1)' => [new ConcurrencyConflict(2, TransientFailureKind::Deadlock, 1, new RuntimeException('wrap', 0, new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, $deadlock, true))), ConflictCode::Committed];
+        yield 'two uncommitted conflicts' => [new ConcurrencyConflict(2, TransientFailureKind::Deadlock, 1, new ConcurrencyConflict(1, TransientFailureKind::Deadlock, 1, $deadlock)), ConflictCode::RetrySafe];
         yield 'conflict wins over a lost savepoint behind it' => [new ConcurrencyConflict(2, TransientFailureKind::Deadlock, 1, new DriverException(new FakeDriverException('SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305), null)), ConflictCode::RetrySafe];
     }
 

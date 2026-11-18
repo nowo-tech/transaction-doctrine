@@ -73,7 +73,8 @@ committed, or anything was committed earlier in the same request (request commit
 Pass a PSR-3 logger as the last argument; the default is a `NullLogger`, so nothing changes when you do not:
 
 ```php
-$runner = DoctrineTransactionRunner::forEntityManager($entityManager, $managerRegistry, 'default', 1, $logger);
+$runner = DoctrineTransactionRunner::forHostEntityManager($entityManager, $managerRegistry, 'default', 1, $logger);
+// forEntityManager($ownManager, $managerRegistry, 'my_bundle', 1, $logger) takes the logger in the same place
 $repairer = new ConnectionRepairer(null, $logger);
 ```
 

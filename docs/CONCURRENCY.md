@@ -70,8 +70,12 @@ Never mapped, wherever they sit in the chain:
 - `CONFLICT_002` (`ConflictCode::Committed`, constant `COMMITTED`): part of the request may already be committed;
   read again, do not repeat. No `Retry-After`.
 
-`ConflictCode::forFailure()` reads the first `ConcurrencyConflict` of the chain (`committed`), else the lost-savepoint
-rule. `ConflictCode::forRequest($request, $failure)` (1.6.0) adds the request-level rule: `CONFLICT_002` when anything
+`ConflictCode::forFailure()` answers `CONFLICT_002` when anything in the failure proves a commit (1.6.1): a
+`ConcurrencyConflict` with `committed: true` anywhere along `getPrevious()` or inside a Messenger wrapper's
+`getWrappedExceptions()`, a `HandlerFailedException` whose envelope carries a `HandledStamp`, or any
+`DelayedMessageHandlingException` (the Messenger rules only when `symfony/messenger` is installed; at most 256
+throwables walked, each once). Otherwise it reads the first `ConcurrencyConflict` of the chain (`committed`), else the
+lost-savepoint rule. `ConflictCode::forRequest($request, $failure)` (1.6.0) adds the request-level rule: `CONFLICT_002` when anything
 was committed since the request's `CommitMark`. The mark is taken by `RequestCommitWatermark` at `kernel.request`
 (priority 4096) on the main request when `commit_detection` is on; sub-requests carry the main request's mark. The
 responder uses `forRequest()`, so a conflict after a commit earlier in the same request (by the host, another bundle
@@ -153,7 +157,11 @@ process):
   notice (audit TA3; the same scenarios also run on SQLite in the unit suite);
 - reads (`WITH`, `VALUES`, `TABLE` included) never move the request mark; a data-modifying CTE does;
 - a host manager with pending changes (an edit, a persist, a remove) is refused before the run, and flushed intact
-  afterwards;
+  afterwards; when `computeChangeSets()` itself throws (a `prePersist` listener on a cascade-persisted child) the
+  refusal keeps that exception as previous (1.6.1);
+- a real lock wait timeout from a second session inside a Messenger `HandlerFailedException` answers `CONFLICT_001`,
+  and `CONFLICT_002` without `Retry-After` once another handler succeeded (`HandledStamp`) or inside a
+  `DelayedMessageHandlingException` (1.6.1);
 - PostgreSQL COMMITs the server refuses, on every leg (DBAL 3 included, audit TA3-5): a SERIALIZABLE write skew
   (40001) becomes `TransientStorageFailure` and a write unit replays it; a deferred unique violation (23505) is
   rethrown unchanged; the connection is back at level 0 each time;
@@ -170,6 +178,12 @@ process):
   client is told to read again, never to repeat, which is safe either way.
 - The request watermark is conservative too: any tracked commit after the mark counts, including one unrelated to
   the failed work (a Doctrine Messenger transport send, an audit row). The client is told to read again; it is never
+  invited to repeat work that may be committed.
+- The Messenger wrapper rules (1.6.1, audit TA4-2) over-approximate on purpose, as DDRB 3.2.0 does: a
+  `HandlerFailedException` with a `HandledStamp` answers `CONFLICT_002` even when the handler that succeeded wrote
+  nothing, or wrote inside an outer transaction that then rolled back; any `DelayedMessageHandlingException` answers
+  `CONFLICT_002` even when the outer dispatch ran under a transaction that rolled back, so nothing committed. The
+  failure does not say whether that work reached the database, so the client is told to read again; it is never
   invited to repeat work that may be committed.
 - `forHostEntityManager()` refuses a host manager with pending changes before the run (`LogicException`), so the
   host's own work never rides in a transaction that rolls back. That costs one `computeChangeSets()` per run.

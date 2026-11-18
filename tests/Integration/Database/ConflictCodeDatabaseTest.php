@@ -11,8 +11,16 @@ use Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
+use stdClass;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\DelayedMessageHandlingException;
+use Symfony\Component\Messenger\Exception\HandlerFailedException;
+use Symfony\Component\Messenger\Handler\HandlerDescriptor;
+use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
 use function json_decode;
@@ -41,6 +49,32 @@ final class ConflictCodeDatabaseTest extends DatabaseTestCase
 
         self::assertSame(TransientFailureKind::LockWaitTimeout, (new TransientFailureClassifier())->classify($failure));
         $this->assertAnswer($failure, ConflictCode::RetrySafe, '1');
+    }
+
+    /**
+     * 1.6.1 (audits TA-3 / TJ): a real lock wait timeout from a second session, inside a Messenger HandlerFailedException.
+     * Nothing handled yet: CONFLICT_001. Another handler of the message already succeeded (HandledStamp), or the
+     * failure comes from a delayed dispatch after the outer one committed: CONFLICT_002 without Retry-After.
+     */
+    #[DataProvider('allServers')]
+    public function testAMessengerWrapperAfterCommittedWorkAnswersConflict002(string $server): void
+    {
+        $this->boot($server);
+        $this->connection->executeStatement($this->isPostgreSql() ? "SET lock_timeout = '1s'" : 'SET SESSION innodb_lock_wait_timeout = 1');
+        self::assertSame('OK', $this->otherSession()->execute('BEGIN'));
+        self::assertSame('OK', $this->otherSession()->execute('UPDATE ddrb_counter SET counter_value = 9 WHERE id = 1'));
+
+        $failure = $this->failure('UPDATE ddrb_counter SET counter_value = 5 WHERE id = 1');
+        $this->otherSession()->execute('ROLLBACK');
+
+        $envelope = new Envelope(new stdClass());
+        $handled  = $envelope->with(HandledStamp::fromDescriptor(new HandlerDescriptor(static fn (): null => null), null));
+
+        $this->assertAnswer(new HandlerFailedException($envelope, [$failure]), ConflictCode::RetrySafe, '1');
+        $this->assertAnswer(new HandlerFailedException($handled, [$failure]), ConflictCode::Committed, null);
+        $this->assertAnswer(new DelayedMessageHandlingException([$failure], $envelope), ConflictCode::Committed, null);
+        $committed = new ConcurrencyConflict(1, TransientFailureKind::LockWaitTimeout, null, $failure, true);
+        self::assertSame(ConflictCode::Committed, ConflictCode::forFailure(new HandlerFailedException($envelope, [new RuntimeException('other handler'), $committed])));
     }
 
     /** A MySQL / MariaDB deadlock (1213) on the victim: CONFLICT_001. */
