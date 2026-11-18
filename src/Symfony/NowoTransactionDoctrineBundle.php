@@ -120,7 +120,7 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                         ->integerNode('retry_after')->defaultValue(ConflictResponsePolicy::DEFAULT_RETRY_AFTER)->min(0)
                             ->info('Retry-After seconds.')->end()
                         ->scalarNode('template')->defaultValue(ConcurrencyConflictResponder::DEFAULT_TEMPLATE)->cannotBeEmpty()
-                            ->info('Twig template of the HTML answer (variables: status_code, retry_url, retry_after, ui_kit, partial).')->end()
+                            ->info('Twig template of the HTML answer (variables: status_code, retry_url, retry_after, ui_kit, partial, conflict_code).')->end()
                         ->scalarNode('json_error')->defaultValue(ConcurrencyConflictResponder::DEFAULT_ERROR_CODE)->cannotBeEmpty()
                             ->info('The "error" code of the JSON answer.')->end()
                         ->arrayNode('json_path_prefixes')

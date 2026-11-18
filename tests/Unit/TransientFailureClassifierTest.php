@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Unit;
 
 use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
+use Doctrine\DBAL\Exception\ConnectionLost;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\RetryableException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Exception;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
@@ -50,6 +52,44 @@ final class TransientFailureClassifierTest extends TestCase
         yield 'PDO errorInfo 1205' => [self::pdo('HY000', ['HY000', 1205]), TransientFailureKind::LockWaitTimeout];
         yield 'PDO SQLSTATE 40001 without errorInfo' => [self::pdo('40001', null), TransientFailureKind::SerializationFailure];
         yield 'PDO other' => [self::pdo('23000', ['23000', 1062]), null];
+        yield 'PostgreSQL unique violation 23505' => [new DriverException(self::driver(7, '23505'), null), null];
+        yield 'MySQL unique violation 1062' => [new UniqueConstraintViolationException(self::driver(1062, '23000'), null), null];
+        yield 'MySQL server gone away 2006' => [new ConnectionLost(self::driver(2006, 'HY000'), null), null];
+        yield 'MySQL lost connection 2013' => [new DriverException(self::driver(2013, 'HY000'), null), null];
+        yield 'PostgreSQL connection failure 08006' => [new DriverException(self::driver(7, '08006'), null), null];
+    }
+
+    /**
+     * REQ-RUNTIME-003 rule 6: a lost savepoint with no transient failure in the chain is a commit of unknown outcome
+     * (CONFLICT_002); unique violations and lost connections never are, wherever they sit.
+     *
+     * @return iterable<string, array{Throwable, bool}>
+     */
+    public static function commitOutcomes(): iterable
+    {
+        yield 'bare 1305 SAVEPOINT (implicit commit)' => [self::lostSavepoint('SAVEPOINT DOCTRINE_2 does not exist'), true];
+        yield 'bare 1305 raw driver' => [self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_3 does not exist'), true];
+        yield 'bare 1305 PDO' => [self::pdo('42000', ['42000', 1305], 'SQLSTATE[42000]: 1305 SAVEPOINT DOCTRINE_2 does not exist'), true];
+        yield 'PostgreSQL 3B001' => [new DriverException(self::driver(7, '3B001', 'savepoint "DOCTRINE_2" does not exist'), null), true];
+        yield 'wrapped bare 1305' => [new RuntimeException('wrap', 0, self::lostSavepoint('SAVEPOINT DOCTRINE_2 does not exist')), true];
+        yield '1305 chained to its deadlock' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', new DeadlockException(self::driver(1213, '40001'), null)), null), false];
+        yield '1305 missing function' => [new DriverException(self::driver(1305, '42000', 'FUNCTION app.td_fn does not exist'), null), false];
+        yield '1305 over a unique violation' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', new UniqueConstraintViolationException(self::driver(1062, '23000'), null)), null), false];
+        yield '1305 over a raw unique violation' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', self::driver(1062, '23000')), null), false];
+        yield '1305 over a lost connection' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', new ConnectionLost(self::driver(2006, 'HY000'), null)), null), false];
+        yield '1305 over a raw lost connection 2013' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', self::driver(2013, 'HY000')), null), false];
+        yield '1305 over a PostgreSQL connection failure' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', self::driver(7, '08006')), null), false];
+        yield 'application exception naming a savepoint' => [new RuntimeException('SAVEPOINT x does not exist', 1305), false];
+        yield 'deadlock' => [new DeadlockException(self::driver(1213, '40001'), null), false];
+        yield 'unique violation' => [new UniqueConstraintViolationException(self::driver(1062, '23000'), null), false];
+        yield 'lost connection' => [new ConnectionLost(self::driver(2006, 'HY000'), null), false];
+        yield 'bug' => [new RuntimeException('bug'), false];
+    }
+
+    #[DataProvider('commitOutcomes')]
+    public function testIsCommitOutcomeUnknown(Throwable $failure, bool $expected): void
+    {
+        self::assertSame($expected, (new TransientFailureClassifier())->isCommitOutcomeUnknown($failure));
     }
 
     #[DataProvider('failures')]
@@ -95,9 +135,9 @@ final class TransientFailureClassifierTest extends TestCase
     /**
      * @param array<int, int|string|null>|null $errorInfo
      */
-    private static function pdo(string $sqlState, ?array $errorInfo): PDOException
+    private static function pdo(string $sqlState, ?array $errorInfo, string $message = 'pdo'): PDOException
     {
-        $pdo = new PDOException('pdo');
+        $pdo = new PDOException($message);
         (new ReflectionProperty(PDOException::class, 'code'))->setValue($pdo, $sqlState);
         $pdo->errorInfo = $errorInfo;
 

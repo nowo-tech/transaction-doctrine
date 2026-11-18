@@ -4,6 +4,7 @@
 #}
 {% extends '@NowoUiKit/error/status.html.twig' %}
 {% set _p = partial|default(false) ? 'conflict.partial.' : 'conflict.' %}
+{% set _code = conflict_code|default(partial|default(false) ? 'CONFLICT_002' : 'CONFLICT_001') %}
 {% block title %}{{ status_code }} — {{ (_p ~ 'title')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
 {% block error_title %}{{ (_p ~ 'title')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
 {% block error_lead %}{{ (_p ~ 'lead')|trans({}, 'nowo_transaction_doctrine') }}{% endblock %}
@@ -13,5 +14,5 @@
     <a class="{{ nowo_ui_class('error_action') }}"{{ nowo_ui_attrs('error_action') }} href="{{ retry_url }}" data-testid="concurrency-conflict-retry">{{ (_p ~ 'retry')|trans({}, 'nowo_transaction_doctrine') }}</a>
 {% endblock %}
 {% block error_extra %}
-    <span hidden data-testid="concurrency-conflict"></span>
+    <span hidden data-testid="concurrency-conflict" data-conflict-code="{{ _code }}"></span>
 {% endblock %}

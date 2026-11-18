@@ -56,8 +56,9 @@ public function move(Task $task): Response { /* ... */ }
 ```
 
 With `NowoTransactionDoctrineBundle` registered, a write unit that still conflicts answers **409** (or 503 with
-`conflict_response.status: 503`) with `Retry-After`: JSON `{"error": "concurrency_conflict", "message": …}` or a
-branded *Try again* page (UiKit's error page when installed). Hosts and bundles map their own exceptions with
+`conflict_response.status: 503`) with `Retry-After`: JSON `{"error": "concurrency_conflict", "code": "CONFLICT_001",
+"message": …}` or a branded *Try again* page (UiKit's error page when installed). When part of the unit already
+committed the code is `CONFLICT_002` and there is no `Retry-After` ([Concurrency](docs/CONCURRENCY.md)). Hosts and bundles map their own exceptions with
 `LockConflictExceptionInterface` or a `ConflictExceptionMapperInterface` service, and shape their own answers with a
 `ConflictResponseFormatterInterface` service, never by route name. See [Usage](docs/USAGE.md#write-units-130) and
 [Configuration](docs/CONFIGURATION.md#symfony-bundle).
@@ -96,6 +97,7 @@ is safe in a long-running worker.
 - [Installation](docs/INSTALLATION.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Usage](docs/USAGE.md)
+- [Concurrency (REQ-RUNTIME-003)](docs/CONCURRENCY.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Changelog](docs/CHANGELOG.md)

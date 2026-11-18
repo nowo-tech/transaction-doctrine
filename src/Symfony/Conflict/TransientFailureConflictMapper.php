@@ -11,7 +11,9 @@ use Throwable;
 /**
  * Opt-in mapper (`conflict_response.map_transient_failures: true`): every transient storage failure that reaches the
  * kernel (the contract's TransientStorageFailure, or a deadlock / lock wait / serialization failure no runner wrapped)
- * is answered as a conflict instead of a 500. Off by default, because the responder runs before the bundles' own
+ * is answered as a conflict instead of a 500 (CONFLICT_001), and so is a lost savepoint with no deadlock behind it
+ * (TransientFailureClassifier::isCommitOutcomeUnknown(): CONFLICT_002, no Retry-After). Unique violations and lost
+ * connections are never mapped. Off by default, because the responder runs before the bundles' own
  * mappers and would take over their JSON shapes. Stateless.
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -34,6 +36,6 @@ final readonly class TransientFailureConflictMapper implements ConflictException
             }
         }
 
-        return $this->classifier->isTransient($failure);
+        return $this->classifier->isTransient($failure) || $this->classifier->isCommitOutcomeUnknown($failure);
     }
 }

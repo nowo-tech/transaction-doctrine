@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony;
 
+use Doctrine\DBAL\Exception\DriverException;
 use Nowo\TransactionContract\TransientStorageFailure;
+use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseContext;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
+use Nowo\TransactionDoctrine\Symfony\Conflict\TransientFailureConflictMapper;
 use Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
@@ -61,8 +64,9 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertStringContainsString('Someone else was saving at the same moment', $html);
         self::assertStringContainsString('href="/board/7" data-testid="concurrency-conflict-retry"', $html);
         self::assertStringContainsString('<title>409 — ', $html);
+        self::assertStringContainsString('data-testid="concurrency-conflict" data-conflict-code="CONFLICT_001"', $html);
         self::assertSame('A write gave up after repeated database lock conflicts; answered the conflict status.', $logger->records[0]['message']);
-        self::assertSame(['route' => 'app_board', 'method' => 'GET', 'attempts' => 3, 'status' => 409, 'committed' => false, 'exception_class' => ConcurrencyConflict::class, 'exception_code' => 0], $logger->records[0]['context']);
+        self::assertSame(['route' => 'app_board', 'method' => 'GET', 'attempts' => 3, 'status' => 409, 'committed' => false, 'code' => 'CONFLICT_001', 'exception_class' => ConcurrencyConflict::class, 'exception_code' => 0], $logger->records[0]['context']);
     }
 
     public function testThePageIsTranslated(): void
@@ -91,7 +95,7 @@ final class ConcurrencyConflictResponderTest extends TestCase
 
         self::assertStringContainsString('<ui-kit code="409">Someone else was saving at the same moment|', $html);
         self::assertStringContainsString('class="kit-error_action" href="https://app.test/form" data-testid="concurrency-conflict-retry">Try again</a>', $html);
-        self::assertStringContainsString('data-testid="concurrency-conflict"', $html);
+        self::assertStringContainsString('data-testid="concurrency-conflict" data-conflict-code="CONFLICT_001"', $html);
     }
 
     public function testA503PolicyAnswers503(): void
@@ -131,7 +135,7 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertSame(409, $response->getStatusCode());
         self::assertSame('1', $response->headers->get('Retry-After'));
         self::assertSame(
-            ['error' => 'concurrency_conflict', 'message' => 'Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again.'],
+            ['error' => 'concurrency_conflict', 'code' => 'CONFLICT_001', 'message' => 'Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again.'],
             json_decode((string) $response->getContent(), true),
         );
     }
@@ -256,7 +260,7 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertSame(409, $json->getStatusCode());
         self::assertFalse($json->headers->has('Retry-After'));
         self::assertSame(
-            ['error' => 'concurrency_conflict_partial', 'message' => 'Part of your change may have been saved before the same data was changed at the same time. Reload before trying again.'],
+            ['error' => 'concurrency_conflict_partial', 'code' => 'CONFLICT_002', 'message' => 'Part of your change may have been saved before the same data was changed at the same time. Reload before trying again.'],
             json_decode((string) $json->getContent(), true),
         );
 
@@ -266,6 +270,7 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertStringContainsString('Part of your change may have been saved', $html);
         self::assertStringContainsString('href="https://app.test/form" data-testid="concurrency-conflict-retry">Reload</a>', $html);
         self::assertStringNotContainsString('Nothing was lost', $html);
+        self::assertStringContainsString('data-conflict-code="CONFLICT_002"', $html);
 
         $spanish = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [], $this->twig(null, 'es'), $this->translator('es'));
         self::assertStringContainsString('Puede que parte de tu cambio se haya guardado', (string) $spanish->respond(Request::create('/x'), $partial)->getContent());
@@ -273,11 +278,13 @@ final class ConcurrencyConflictResponderTest extends TestCase
         $plain = (string) (new ConcurrencyConflictResponder(new ConflictResponsePolicy()))->respond(Request::create('/x'), $partial)->getContent();
         self::assertStringContainsString('<h1>Part of your change may have been saved</h1>', $plain);
         self::assertStringContainsString('>Reload</a>', $plain);
+        self::assertStringContainsString('data-conflict-code="CONFLICT_002"', $plain);
 
         $logger = new RecordingLogger();
         $event  = $this->event(Request::create('/api/x', 'POST'), $partial);
         (new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [], null, null, $logger))($event);
         self::assertTrue($logger->records[0]['context']['committed']);
+        self::assertSame('CONFLICT_002', $logger->records[0]['context']['code']);
     }
 
     public function testAFormatterSeesTheCommittedFlagAndCannotAddRetryAfter(): void
@@ -302,6 +309,71 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertTrue($formatter->context->committed);
         self::assertNull($formatter->context->retryAfterSeconds);
         self::assertSame('concurrency_conflict_partial', $formatter->context->errorCode);
+    }
+
+    /** REQ-RUNTIME-003 rule 6: a formatter receives the code to put in its own shape. */
+    public function testAFormatterReceivesTheConflictCode(): void
+    {
+        $formatter = new class implements ConflictResponseFormatterInterface {
+            public function format(Request $request, ConflictResponseContext $context): JsonResponse
+            {
+                return new JsonResponse(['err' => $context->code->value]);
+            }
+        };
+        $responder = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [], [$formatter]);
+
+        $retry = $responder->respond(Request::create('/api/x'), $this->conflict());
+        self::assertSame(['err' => 'CONFLICT_001'], json_decode((string) $retry->getContent(), true));
+        self::assertSame('1', $retry->headers->get('Retry-After'));
+
+        $committed = $responder->respond(Request::create('/api/x'), new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true));
+        self::assertSame(['err' => 'CONFLICT_002'], json_decode((string) $committed->getContent(), true));
+        self::assertFalse($committed->headers->has('Retry-After'));
+    }
+
+    public function testTheContextDerivesTheCodeFromTheCommittedFlag(): void
+    {
+        $failure = new RuntimeException('x');
+
+        self::assertSame(ConflictCode::RetrySafe, (new ConflictResponseContext(409, 1, 'e', 'm', null, $failure))->code);
+        self::assertSame(ConflictCode::Committed, (new ConflictResponseContext(409, null, 'e', 'm', null, $failure, true))->code);
+        self::assertSame(ConflictCode::Committed, (new ConflictResponseContext(409, null, 'e', 'm', null, $failure, false, ConflictCode::Committed))->code);
+    }
+
+    /**
+     * A bare lost savepoint (1305 with no deadlock behind it) reaching the kernel with `map_transient_failures`: 409
+     * CONFLICT_002 and no Retry-After, in JSON and on the page. Without the mapper it is not a conflict (unchanged).
+     */
+    public function testABareLostSavepointAnswersConflict002WhenTransientFailuresAreMapped(): void
+    {
+        $lost   = new DriverException(new FakeDriverException('SQLSTATE[42000]: 1305 SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305), null);
+        $mapped = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [new TransientFailureConflictMapper()], [], $this->twig(), $this->translator('en'));
+
+        self::assertFalse((new ConcurrencyConflictResponder(new ConflictResponsePolicy()))->isConflict($lost));
+        self::assertTrue($mapped->isConflict($lost));
+
+        $json = $mapped->respond(Request::create('/api/x', 'POST'), $lost);
+        self::assertSame(409, $json->getStatusCode());
+        self::assertFalse($json->headers->has('Retry-After'));
+        self::assertSame('CONFLICT_002', json_decode((string) $json->getContent(), true)['code'] ?? null);
+
+        $page = (string) $mapped->respond(Request::create('/x'), $lost)->getContent();
+        self::assertStringContainsString('data-conflict-code="CONFLICT_002"', $page);
+        self::assertStringContainsString('Part of your change may have been saved', $page);
+
+        $deadlock = $mapped->respond(Request::create('/api/x', 'POST'), new DriverException(FakeDriverException::deadlock(), null));
+        self::assertSame('1', $deadlock->headers->get('Retry-After'));
+        self::assertSame('CONFLICT_001', json_decode((string) $deadlock->getContent(), true)['code'] ?? null);
+    }
+
+    /** A host rendering the template without `conflict_code` (an override's include, 1.4 variables) still gets it. */
+    public function testTheTemplateDerivesTheCodeWhenTheVariableIsMissing(): void
+    {
+        $twig = $this->twig();
+        $vars = ['status_code' => 409, 'exception' => null, 'retry_url' => '/', 'retry_after' => null, 'ui_kit' => false];
+
+        self::assertStringContainsString('data-conflict-code="CONFLICT_002"', $twig->render(ConcurrencyConflictResponder::DEFAULT_TEMPLATE, $vars + ['partial' => true]));
+        self::assertStringContainsString('data-conflict-code="CONFLICT_001"', $twig->render(ConcurrencyConflictResponder::DEFAULT_TEMPLATE, $vars + ['partial' => false]));
     }
 
     public function testTheConflictsOwnRetryAfterHintIsUsed(): void

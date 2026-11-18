@@ -5,12 +5,14 @@
 
   Variables: status_code (409 | 503), retry_url (the page itself for a GET, else the same-host referer, else home),
   retry_after (seconds, or null), ui_kit (whether @NowoUiKit/error/status.html.twig exists), partial (true when part
-  of the change was already committed: the conflict.partial.* texts, "reload before trying again", no Retry-After).
+  of the change was already committed: the conflict.partial.* texts, "reload before trying again", no Retry-After),
+  conflict_code (CONFLICT_001 | CONFLICT_002, REQ-RUNTIME-003 rule 6; keep data-conflict-code in an override).
 
   Override: templates/bundles/NowoTransactionDoctrineBundle/conflict.html.twig, or conflict_response.template.
   Texts: translation domain nowo_transaction_doctrine (conflict.title | lead | hint | retry, and conflict.partial.*).
 #}
 {% set _p = partial|default(false) ? 'conflict.partial.' : 'conflict.' %}
+{% set _code = conflict_code|default(partial|default(false) ? 'CONFLICT_002' : 'CONFLICT_001') %}
 {% if ui_kit %}
     {{- include('@NowoTransactionDoctrine/conflict_ui_kit.html.twig') -}}
 {% else %}
@@ -23,7 +25,7 @@
     <title>{{ status_code }} — {{ (_p ~ 'title')|trans({}, 'nowo_transaction_doctrine') }}</title>
 </head>
 <body>
-    <main data-testid="concurrency-conflict">
+    <main data-testid="concurrency-conflict" data-conflict-code="{{ _code }}">
         <h1>{{ (_p ~ 'title')|trans({}, 'nowo_transaction_doctrine') }}</h1>
         <p>{{ (_p ~ 'lead')|trans({}, 'nowo_transaction_doctrine') }}</p>
         <p>{{ (_p ~ 'hint')|trans({}, 'nowo_transaction_doctrine') }}</p>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony\EventListener;
 
+use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseContext;
@@ -40,9 +41,13 @@ use const PHP_URL_SCHEME;
  * implementing LockConflictExceptionInterface in the previous chain, or whatever a tagged
  * ConflictExceptionMapperInterface accepts (the exception-mapping hook: no route-name matching here).
  *
- * The answer: the first tagged ConflictResponseFormatterInterface that returns one (a bundle's own API shape); else
- * JSON `{"error": "<json_error>", "message": "<text>"}` for JSON, XHR and API-path requests; else the branded HTML page
- * with *Try again* (Twig template `@NowoTransactionDoctrine/conflict.html.twig`, overridable through the bundle path or
+ * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCode): CONFLICT_001 when nothing was committed
+ * (with `Retry-After`), CONFLICT_002 when part of the unit was (ConcurrencyConflict::$committed, or a lost savepoint
+ * with no deadlock behind it; no `Retry-After`). It is the first tagged ConflictResponseFormatterInterface that returns
+ * one (a bundle's own API shape; the context carries the code); else JSON
+ * `{"error": "<json_error>", "code": "CONFLICT_00n", "message": "<text>"}` for JSON, XHR and API-path requests; else the
+ * branded HTML page with *Try again* and `data-conflict-code="CONFLICT_00n"` (Twig template
+ * `@NowoTransactionDoctrine/conflict.html.twig`, overridable through the bundle path or
  * `conflict_response.template`; it extends UiKit's error page when UiKit is installed). Every answer gets the
  * policy's status, `Retry-After` and `Cache-Control: no-store`. Without Twig (or when the template fails) a plain page
  * is built here.
@@ -106,12 +111,14 @@ final readonly class ConcurrencyConflictResponder
 
         $request  = $event->getRequest();
         $attempts = $this->attempts($failure);
+        $code     = ConflictCode::forFailure($failure);
         SafeLog::log($this->logger, 'warning', 'A write gave up after repeated database lock conflicts; answered the conflict status.', [
             'route'     => $this->route($request),
             'method'    => $request->getMethod(),
             'attempts'  => $attempts,
             'status'    => $this->policy->status,
-            'committed' => $this->committed($failure),
+            'committed' => $code === ConflictCode::Committed,
+            'code'      => $code->value,
         ] + SafeLog::throwable($failure));
         $event->setResponse($this->respond($request, $failure));
     }
@@ -135,7 +142,8 @@ final readonly class ConcurrencyConflictResponder
 
     public function respond(Request $request, Throwable $failure): Response
     {
-        $committed = $this->committed($failure);
+        $code      = ConflictCode::forFailure($failure);
+        $committed = !$code->retrySafe();
         $context   = new ConflictResponseContext(
             $this->policy->status,
             $committed ? null : $this->policy->retryAfter($this->hint($failure)),
@@ -144,6 +152,7 @@ final readonly class ConcurrencyConflictResponder
             $this->attempts($failure),
             $failure,
             $committed,
+            $code,
         );
 
         $response = null;
@@ -155,7 +164,7 @@ final readonly class ConcurrencyConflictResponder
         }
 
         $response ??= $this->wantsJson($request)
-            ? new JsonResponse(['error' => $context->errorCode, 'message' => $context->message])
+            ? new JsonResponse(['error' => $context->errorCode, 'code' => $context->code->value, 'message' => $context->message])
             : new Response($this->html($request, $context), Response::HTTP_OK, ['Content-Type' => 'text/html; charset=UTF-8']);
 
         $response->setStatusCode($context->status);
@@ -213,12 +222,13 @@ final readonly class ConcurrencyConflictResponder
         if ($this->twig instanceof Environment) {
             try {
                 return $this->twig->render($this->template, [
-                    'status_code' => $context->status,
-                    'exception'   => null,
-                    'retry_url'   => $retryUrl,
-                    'retry_after' => $context->retryAfterSeconds,
-                    'partial'     => $context->committed,
-                    'ui_kit'      => $this->twig->getLoader()->exists(self::UI_KIT_TEMPLATE),
+                    'status_code'   => $context->status,
+                    'exception'     => null,
+                    'retry_url'     => $retryUrl,
+                    'retry_after'   => $context->retryAfterSeconds,
+                    'partial'       => $context->committed,
+                    'conflict_code' => $context->code->value,
+                    'ui_kit'        => $this->twig->getLoader()->exists(self::UI_KIT_TEMPLATE),
                 ]);
             } catch (Throwable $failure) {
                 SafeLog::log($this->logger, 'warning', 'The conflict page template failed; answered the plain page.', SafeLog::throwable($failure));
@@ -230,9 +240,10 @@ final readonly class ConcurrencyConflictResponder
 
         return sprintf(
             '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%d — %s</title></head>'
-            . '<body><main data-testid="concurrency-conflict"><h1>%s</h1><p>%s</p><p>%s</p><p><a href="%s" data-testid="concurrency-conflict-retry">%s</a></p></main></body></html>',
+            . '<body><main data-testid="concurrency-conflict" data-conflict-code="%s"><h1>%s</h1><p>%s</p><p>%s</p><p><a href="%s" data-testid="concurrency-conflict-retry">%s</a></p></main></body></html>',
             $context->status,
             $escape($this->text($prefix . 'title')),
+            $context->code->value,
             $escape($this->text($prefix . 'title')),
             $escape($context->message),
             $escape($this->text($prefix . 'hint')),
@@ -260,18 +271,6 @@ final readonly class ConcurrencyConflictResponder
         }
 
         return null;
-    }
-
-    /** Whether a ConcurrencyConflict in the chain says part of the unit was already committed. */
-    private function committed(Throwable $failure): bool
-    {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
-            if ($current instanceof ConcurrencyConflict) {
-                return $current->committed;
-            }
-        }
-
-        return false;
     }
 
     private function hint(Throwable $failure): ?int

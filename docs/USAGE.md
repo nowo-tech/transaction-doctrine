@@ -15,6 +15,8 @@
 - [Lock-conflict answer: 409 + Retry-After](#lock-conflict-answer-409--retry-after)
   - [Exception-mapping and response hooks](#exception-mapping-and-response-hooks)
   - [Bundles that answer in their own shape](#bundles-that-answer-in-their-own-shape)
+  - [Conflict codes: CONFLICT_001 and CONFLICT_002 (1.5.0)](#conflict-codes-conflict_001-and-conflict_002-150)
+- [How bundles comply with REQ-RUNTIME-003 using transaction-doctrine](#how-bundles-comply-with-req-runtime-003-using-transaction-doctrine)
 - [Worker connection hygiene](#worker-connection-hygiene)
 
 ## Run a unit of work
@@ -329,17 +331,23 @@ before the bundles' own mappers) answers **409 Conflict** (configurable: `confli
   default `/api/`):
 
   ```json
-  {"error": "concurrency_conflict", "message": "Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again."}
+  {"error": "concurrency_conflict", "code": "CONFLICT_001", "message": "Your change was not saved because the same data was being changed at the same time. Nothing was lost: try again."}
   ```
+
+  When part of the unit was already committed: `{"error": "concurrency_conflict_partial", "code": "CONFLICT_002",
+  "message": "Part of your change may have been saved…"}` and no `Retry-After` (see
+  [Conflict codes](#conflict-codes-conflict_001-and-conflict_002-150)).
 
 - **HTML:** a branded page "Someone else was saving at the same moment" with **Try again** (the page itself for a GET,
   the same-host page the form was sent from after a POST, else home). Template `@NowoTransactionDoctrine/conflict.html.twig`;
   when `nowo-tech/ui-kit-bundle` is installed it extends UiKit's error page (`@NowoUiKit/error/status.html.twig`).
   Override it in `templates/bundles/NowoTransactionDoctrineBundle/conflict.html.twig` or with
-  `conflict_response.template`. Without Twig a plain, escaped page is built.
+  `conflict_response.template`. Without Twig a plain, escaped page is built. The page carries the code on its
+  `data-testid="concurrency-conflict"` element: `data-conflict-code="CONFLICT_001"` (or `CONFLICT_002`); the template
+  receives it as `conflict_code`.
 
 The responder logs one constant warning (`A write gave up after repeated database lock conflicts; answered the conflict
-status.`) with the route name, method, attempts and status; never the URL, SQL or a message.
+status.`) with the route name, method, attempts, status, `committed` and `code`; never the URL, SQL or a message.
 
 ### Exception-mapping and response hooks
 
@@ -379,13 +387,14 @@ final class TaskApiConflictFormatter implements ConflictResponseFormatterInterfa
             return null;
         }
 
-        return new JsonResponse(['err' => $context->message, 'ECODE' => 'CONFLICT_001']);
+        return new JsonResponse(['err' => $context->message, 'ECODE' => $context->code->value]); // CONFLICT_001 | CONFLICT_002
     }
 }
 ```
 
 `map_transient_failures: true` registers a mapper that treats **any** transient storage failure reaching the kernel
-as a conflict (not only write-unit conflicts). It runs before the bundles' own mappers, so it replaces their JSON
+as a conflict (not only write-unit conflicts), and a lost savepoint with no deadlock behind it as a `CONFLICT_002`
+conflict (1.5.0). Unique violations and lost connections are never mapped. It runs before the bundles' own mappers, so it replaces their JSON
 shapes: leave it off when you rely on them.
 
 ### Bundles that answer in their own shape
@@ -404,6 +413,48 @@ $response = new JsonResponse(['ok' => false, 'error' => 'unavailable'], $policy-
 
 `headers($hint)` and `retryAfter($hint)` use a failure's own hint (`TransientStorageFailure::retryAfterSeconds()`)
 when it has one, else `conflict_response.retry_after`.
+
+### Conflict codes: CONFLICT_001 and CONFLICT_002 (1.5.0)
+
+Every conflict answer carries one code (nowo-tech REQ-RUNTIME-003 rule 6). It is a
+`Nowo\TransactionDoctrine\ConflictCode` (backed enum; constants `ConflictCode::RETRY_SAFE` and
+`ConflictCode::COMMITTED` for attributes and strings):
+
+| Code | When | Client should | `Retry-After` | JSON `error` |
+|------|------|---------------|---------------|--------------|
+| `CONFLICT_001` | Nothing was committed (deadlock, lock wait timeout, serialization failure; the unit rolled back) | Retry | Yes | `concurrency_conflict` |
+| `CONFLICT_002` | Part of the request may already be committed: `ConcurrencyConflict::$committed`, or a lost savepoint (1305 / 3B001) with no deadlock behind it | Read again; do not repeat blindly | No | `concurrency_conflict_partial` |
+
+- JSON: the `code` key, next to the unchanged `error` key.
+- HTML: `data-conflict-code` on the `data-testid="concurrency-conflict"` element.
+- Formatters: `$context->code` (`ConflictResponseContext`).
+- Own answers outside the responder (JSON-RPC, MCP tools, a console command): `ConflictCode::forFailure($failure)`.
+
+The status stays `conflict_response.status` (409 by default, 503 per host).
+
+## How bundles comply with REQ-RUNTIME-003 using transaction-doctrine
+
+A bundle that writes inherits most of REQ-RUNTIME-003 from this package:
+
+1. **One transaction per write unit (rule 1):** run each user action through `TransactionRunnerInterface`
+   (`DoctrineTransactionRunner`, or the bundle's adapter); mark controllers `#[AsWriteUnit]` or list them in
+   `controller_routes`; consume Messenger messages through `WriteUnitMiddleware`.
+2. **Nested transactions repair themselves (rule 3):** the runner and `ConnectionRepairer` bring the nesting level back
+   to where it started; a lone lost savepoint is never success.
+3. **409 + code (rule 6):** let `ConcurrencyConflict` reach the kernel; the responder answers 409 + `CONFLICT_001`
+   + `Retry-After`, or `CONFLICT_002` without it when the unit already committed (`commit_detection`, on by default).
+   A bundle with its own error shape registers a `ConflictResponseFormatterInterface` and copies `$context->code`; a
+   bundle that maps a transient failure itself reads the status from `ConflictResponsePolicy` and the code from
+   `ConflictCode::forFailure()`. Never map unique violations or lost connections to a conflict.
+4. **Safe replays (rule 7):** request memos implement `ResetBetweenAttemptsInterface` (or store ids); side effects
+   run after the commit.
+5. **Prove it:** a real-database CI job (MySQL 8.4, MariaDB 11.x, PostgreSQL 16+, DBAL 3 and 4) with two-connection
+   race tests asserting the status, the code, `Retry-After`, the stored data and a usable connection; document the
+   write paths in the bundle's `docs/CONCURRENCY.md`.
+
+What remains the bundle's own job: choosing the concurrency control of each write (rule 4: version column,
+`FOR UPDATE`, atomic counters, unique key plus catch), exact business keys (rule 5) and idempotency keys (rule 7).
+See [CONCURRENCY](CONCURRENCY.md) for this package's own write paths.
 
 ## Worker connection hygiene
 

@@ -146,7 +146,7 @@ final class ReplayResetTest extends TestCase
         self::assertSame($broken, $caught->resetFailure);
         self::assertSame(1, $caught->retryAfterSeconds());
         self::assertFalse($caught->committed);
-        self::assertSame(['attempt 1', 'clear'], $journal->entries);
+        self::assertSame(['attempt 1', 'clear', 'clear'], $journal->entries, 'Audit TA-6: discarded again after the failing reset.');
         self::assertCount(2, $logger->records);
         self::assertSame('Write unit not replayed: resetting request state between attempts failed.', $logger->records[1]['message']);
         self::assertSame('error', $logger->records[1]['level']);
@@ -170,7 +170,7 @@ final class ReplayResetTest extends TestCase
 
         self::assertSame($broken, $caught->resetFailure);
         self::assertSame(1, $caught->attempts);
-        self::assertSame(['clear', 'reset'], $journal->entries);
+        self::assertSame(['clear', 'reset', 'clear'], $journal->entries, 'Audit TA-6: discarded again after the failing listener.');
     }
 
     /** Audit TA-1: a Generator is read once, so a unit with two replays calls the resetters twice. */

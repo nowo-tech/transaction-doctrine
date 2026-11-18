@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Conflict codes (REQ-RUNTIME-003 rule 6):** every conflict answer carries `CONFLICT_001` (nothing committed, with
+  `Retry-After`) or `CONFLICT_002` (part of the unit committed, no `Retry-After`).
+  - New `Nowo\TransactionDoctrine\ConflictCode` backed enum (`RetrySafe`, `Committed`; constants `RETRY_SAFE`,
+    `COMMITTED`) with `ConflictCode::forFailure()` for bundles that answer in their own shape.
+  - JSON answers gain a `code` key next to the unchanged `error` and `message` keys.
+  - The HTML page (plain, Twig and UiKit variants) carries `data-conflict-code` on its `data-testid="concurrency-conflict"`
+    element; the template receives `conflict_code`.
+  - `ConflictResponseContext::$code`, so a `ConflictResponseFormatterInterface` receives the code.
+  - The responder's log context gains `code`.
+- `TransientFailureClassifier::isCommitOutcomeUnknown()`: a lost savepoint (MySQL / MariaDB 1305 naming a SAVEPOINT,
+  PostgreSQL 3B001) with no transient failure in its chain, answered `CONFLICT_002` by the opt-in
+  `map_transient_failures` mapper. A 1305 about a missing function, unique (constraint) violations and lost
+  connections are never mapped.
+- `docs/CONCURRENCY.md` (write paths, classification, codes, host options, residual risk) and a USAGE section on how
+  bundles comply with REQ-RUNTIME-003 using this package.
+
+### Fixed
+
+- **Audit TA-6:** a reset-between-attempts service or retry listener that opened a transaction (or persisted an entity)
+  and then threw left the connection one nesting level up after the write unit gave up; the unit now discards it
+  before throwing `ConcurrencyConflict`. Tested on MySQL 8.4, MariaDB 11.4 and PostgreSQL 16.
+
 ## [1.4.0] - 2026-11-18
 
 ### Added

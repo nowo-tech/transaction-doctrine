@@ -83,9 +83,9 @@ nowo_transaction_doctrine:
 | `conflict_response.status` | `409` | `409` or `503` only |
 | `conflict_response.retry_after` | `1` | ≥ 0 |
 | `conflict_response.template` | `@NowoTransactionDoctrine/conflict.html.twig` | Or override the file in `templates/bundles/NowoTransactionDoctrineBundle/` |
-| `conflict_response.json_error` | `concurrency_conflict` | Stable JSON code; `<json_error>_partial` (no `Retry-After`) when part of the unit committed |
+| `conflict_response.json_error` | `concurrency_conflict` | Stable JSON `error` key; `<json_error>_partial` (no `Retry-After`) when part of the unit committed. The `code` key (`CONFLICT_001` / `CONFLICT_002`, 1.5.0) is fixed |
 | `conflict_response.json_path_prefixes` | `['/api/']` | Empty entries are ignored |
-| `conflict_response.map_transient_failures` | `false` | Runs before the bundles' own mappers: turning it on replaces their JSON shapes with this one |
+| `conflict_response.map_transient_failures` | `false` | Runs before the bundles' own mappers: turning it on replaces their JSON shapes with this one. Also maps a lost savepoint with no deadlock behind it (`CONFLICT_002`, 1.5.0) |
 
 Texts: translation domain `nowo_transaction_doctrine` (`conflict.title`, `conflict.lead`, `conflict.hint`,
 `conflict.retry`, and `conflict.partial.*` for a conflict after a commit), shipped in English, Spanish, French and German; override them in your own
