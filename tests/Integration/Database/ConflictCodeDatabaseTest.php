@@ -110,6 +110,24 @@ final class ConflictCodeDatabaseTest extends DatabaseTestCase
         $this->assertNotMapped($failure);
     }
 
+    /** Audit TA2-2: localized server messages (lc_messages) keep the untranslated SAVEPOINT / FUNCTION keyword. */
+    #[DataProvider('mysqlFamily')]
+    public function testLocalizedMessagesAreClassifiedTheSame(string $server): void
+    {
+        $this->boot($server);
+
+        foreach (['es_ES', 'de_DE', 'fr_FR'] as $locale) {
+            $this->connection->executeStatement("SET lc_messages = '" . $locale . "'");
+            $this->connection->beginTransaction();
+            $lost = $this->failure('ROLLBACK TO SAVEPOINT td_missing');
+            $this->connection->rollBack();
+
+            self::assertTrue((new TransientFailureClassifier())->isCommitOutcomeUnknown($lost), $locale);
+            self::assertSame(ConflictCode::Committed, ConflictCode::forFailure($lost), $locale);
+            $this->assertNotMapped($this->failure('SELECT td_missing_function()'));
+        }
+    }
+
     #[DataProvider('allServers')]
     public function testAUniqueViolationIsNeverMapped(string $server): void
     {

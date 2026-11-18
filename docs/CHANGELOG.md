@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     element; the template receives `conflict_code`.
   - `ConflictResponseContext::$code`, so a `ConflictResponseFormatterInterface` receives the code.
   - The responder's log context gains `code`.
-- `TransientFailureClassifier::isCommitOutcomeUnknown()`: a lost savepoint (MySQL / MariaDB 1305 naming a SAVEPOINT,
+- `TransientFailureClassifier::isCommitOutcomeUnknown()`: a lost savepoint (MySQL / MariaDB 1305 about a SAVEPOINT,
   PostgreSQL 3B001) with no transient failure in its chain, answered `CONFLICT_002` by the opt-in
   `map_transient_failures` mapper. A 1305 about a missing function, unique (constraint) violations and lost
   connections are never mapped.
@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Audit TA2-1 (affects 1.3.0 to 1.4.0):** when the server refused a COMMIT (a deferred constraint, or a PostgreSQL
+  serialization failure at commit time), `CommitTrackingConnection` kept believing a transaction was open, so the
+  autocommit writes that followed on that connection were no longer counted by `CommitLedger`. A write unit that met a
+  conflict after such a write was then replayed instead of answering `committed: true`, and repeated the write. The
+  flag is now reset in a `finally`; a refused COMMIT is still not counted as a commit. Tested on PostgreSQL 16.
+- **Audit TA2-2:** a lost savepoint (1305) is recognised on servers with localized messages (`lc_messages` such as
+  `es_ES` or `de_DE`): the classifier matches the untranslated `SAVEPOINT` keyword where the server puts it, no longer
+  the English "does not exist". A 1305 about a missing `FUNCTION` stays unmapped in every language.
 - **Audit TA-6:** a reset-between-attempts service or retry listener that opened a transaction (or persisted an entity)
   and then threw left the connection one nesting level up after the write unit gave up; the unit now discards it
   before throwing `ConcurrencyConflict`. Tested on MySQL 8.4, MariaDB 11.4 and PostgreSQL 16.

@@ -43,15 +43,16 @@ request memos.
 | PostgreSQL | 40P01 (deadlock) | `Deadlock` | `CONFLICT_001` |
 | PostgreSQL | 55P03 (lock not available: `lock_timeout`, `NOWAIT`) | `LockWaitTimeout` | `CONFLICT_001` |
 | PostgreSQL | 40001 (serialization failure) | `SerializationFailure` | `CONFLICT_001` |
-| MySQL / MariaDB | 1305 `SAVEPOINT … does not exist`, with a deadlock in the chain | `Deadlock` | `CONFLICT_001` |
-| MySQL / MariaDB, PostgreSQL | 1305 `SAVEPOINT … does not exist` / 3B001, with no transient failure in the chain | not transient; `isCommitOutcomeUnknown()` | `CONFLICT_002` |
+| MySQL / MariaDB | 1305 about a `SAVEPOINT` (any `lc_messages` language), with a deadlock in the chain | `Deadlock` | `CONFLICT_001` |
+| MySQL / MariaDB, PostgreSQL | 1305 about a `SAVEPOINT` / 3B001, with no transient failure in the chain | not transient; `isCommitOutcomeUnknown()` | `CONFLICT_002` |
 
 Never mapped, wherever they sit in the chain:
 
 - unique and other constraint violations (SQLSTATE class 23, `ConstraintViolationException`);
 - lost connections (SQLSTATE class 08, MySQL / MariaDB 2006, 2013 and 4031, `ConnectionException` / `ConnectionLost`):
   the outcome of a commit is unknown to the driver, and replaying could repeat it;
-- a 1305 about a missing `FUNCTION` or `PROCEDURE`;
+- a 1305 about a missing `FUNCTION` or `PROCEDURE` (the server never translates the object type, so the classifier
+  matches the `SAVEPOINT` keyword where the server puts it, in any `lc_messages` language);
 - an application exception that happens to use a vendor code.
 
 ## Conflict codes and answers
@@ -98,7 +99,8 @@ reaches the kernel outside a write unit is answered only with `conflict_response
   TA-6) what it left is discarded in both cases, so the connection is back at nesting level 0 before
   `ConcurrencyConflict` is thrown.
 - With `commit_detection` (default) a failed attempt that already committed is never replayed: `ConcurrencyConflict`
-  with `committed: true`, answered `CONFLICT_002`.
+  with `committed: true`, answered `CONFLICT_002`. A COMMIT the server refuses is not counted, and it ends the tracked
+  transaction, so the autocommit writes after it are counted (audit TA2-1, fixed in 1.5.0).
 
 ## Host options
 
@@ -124,7 +126,7 @@ process):
   409 `CONFLICT_001` once the attempts are exhausted; an explicit `replay_on` without it rethrows it unchanged;
 - a committed-then-conflict unit, not replayed (`committed: true`, `CONFLICT_002`);
 - a real lost savepoint (`ROLLBACK TO SAVEPOINT` unknown: 1305 / 3B001) answered `CONFLICT_002` with no
-  `Retry-After`; a real 1305 for a missing function, a real unique violation and a real killed session not mapped;
+  `Retry-After`, also with localized server messages; a real 1305 for a missing function, a real unique violation and a real killed session not mapped;
 - nested deadlocks and failed savepoint rollbacks repaired to nesting level 0;
 - replays with request memos reset between attempts, and resetters or listeners that open a transaction and throw
   (TA-6) leaving level 0 and nothing committed.

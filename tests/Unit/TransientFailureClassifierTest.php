@@ -73,6 +73,12 @@ final class TransientFailureClassifierTest extends TestCase
         yield 'PostgreSQL 3B001' => [new DriverException(self::driver(7, '3B001', 'savepoint "DOCTRINE_2" does not exist'), null), true];
         yield 'wrapped bare 1305' => [new RuntimeException('wrap', 0, self::lostSavepoint('SAVEPOINT DOCTRINE_2 does not exist')), true];
         yield '1305 chained to its deadlock' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', new DeadlockException(self::driver(1213, '40001'), null)), null), false];
+        yield 'bare 1305 SAVEPOINT es_ES (mysqli form)' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT td_missing no existe'), null), true];
+        yield 'bare 1305 SAVEPOINT de_DE (PDO form)' => [new DriverException(self::driver(1305, '42000', 'SQLSTATE[42000]: Syntax error or access violation: 1305 SAVEPOINT td_missing existiert nicht'), null), true];
+        yield 'bare 1305 SAVEPOINT de_DE (DBAL form)' => [new DriverException(self::driver(1305, '42000', 'An exception occurred while executing a query: SQLSTATE[42000]: Syntax error or access violation: 1305 SAVEPOINT DOCTRINE_2 existiert nicht'), null), true];
+        yield '1305 FUNCTION de_DE' => [new DriverException(self::driver(1305, '42000', 'SQLSTATE[42000]: Syntax error or access violation: 1305 FUNCTION ddrb.td_missing_function existiert nicht'), null), false];
+        yield '1305 FUNCTION es_ES' => [new DriverException(self::driver(1305, '42000', 'FUNCTION ddrb.td_missing_function no existe'), null), false];
+        yield '1305 FUNCTION whose name holds SAVEPOINT' => [new DriverException(self::driver(1305, '42000', 'SQLSTATE[42000]: 1305 FUNCTION ddrb.SAVEPOINT existiert nicht'), null), false];
         yield '1305 missing function' => [new DriverException(self::driver(1305, '42000', 'FUNCTION app.td_fn does not exist'), null), false];
         yield '1305 over a unique violation' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', new UniqueConstraintViolationException(self::driver(1062, '23000'), null)), null), false];
         yield '1305 over a raw unique violation' => [new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', self::driver(1062, '23000')), null), false];

@@ -55,6 +55,9 @@ is additive:
   ```
 
   Programmatic units: `new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout'])`.
+- **Commit detection after a refused COMMIT (audit TA2-1)**: fixed; no action. Units that met a conflict after an
+  autocommit write on a connection whose earlier COMMIT the server refused now answer `committed: true`
+  (`CONFLICT_002`) instead of replaying the write.
 - **Write units (audit TA-6)**: when a `ResetBetweenAttemptsInterface` service or a `WriteUnitRetryEvent` listener
   throws, the unit now discards what it left (open transaction levels, pending entity changes) before throwing
   `ConcurrencyConflict`, so the connection is back at nesting level 0. The managers are cleared once more on that path.

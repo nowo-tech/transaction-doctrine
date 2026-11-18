@@ -146,14 +146,17 @@ final class TransientFailureClassifier
             || ($sqlState !== null && (str_starts_with($sqlState, '23') || str_starts_with($sqlState, '08')));
     }
 
-    /** PostgreSQL 3B001, or a MySQL / MariaDB 1305 about a SAVEPOINT (1305 also reports a missing FUNCTION / PROCEDURE). */
+    /** PostgreSQL 3B001, or a MySQL / MariaDB 1305 about a SAVEPOINT (1305 also reports a missing FUNCTION / PROCEDURE), in any server language. */
     private function isLostSavepoint(Throwable $throwable, int $vendorCode, ?string $sqlState): bool
     {
         if ($sqlState === '3B001') {
             return true;
         }
 
-        return $vendorCode === 1305 && preg_match('/\bSAVEPOINT\s+\S+\s+does not exist/i', $throwable->getMessage()) === 1;
+        // The object type is never translated ("SAVEPOINT x does not exist", "SAVEPOINT x no existe", "SAVEPOINT x
+        // existiert nicht"); match it where the server puts it: first in the text, or right after "1305 " in the
+        // PDO / DBAL forms ("SQLSTATE[42000]: …: 1305 SAVEPOINT …"). Audit TA2-2.
+        return $vendorCode === 1305 && preg_match('/(?:^|\b1305\s+)SAVEPOINT\s/', $throwable->getMessage()) === 1;
     }
 
     private function fromCodes(int $vendorCode, ?string $sqlState): ?TransientFailureKind
