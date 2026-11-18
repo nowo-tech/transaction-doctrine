@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database;
 
+use Doctrine\DBAL\TransactionIsolationLevel;
+use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Counter;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
@@ -218,6 +220,83 @@ final class WriteUnitDatabaseTest extends DatabaseTestCase
         self::assertSame(1, $caught->attempts);
         self::assertSame(1, $mails);
         self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_ballast WHERE id > 1000'));
+    }
+
+    /**
+     * Audit TA2-1 (probe testPgCommitTime40001AndLedgerFlag): PostgreSQL refuses a COMMIT (a deferred unique
+     * constraint, or a serialization failure 40001 at commit time). The transaction is over, so a later unit's
+     * autocommit write must be counted: when its next statement hits a lock timeout the unit is not replayed
+     * (`committed: true`, CONFLICT_002) and the autocommit row exists exactly once.
+     */
+    public function testAfterARefusedCommitAutocommitWritesAreStillDetected(): void
+    {
+        foreach (['deferred constraint', 'serialization failure at commit'] as $cause) {
+            $this->ledger = new CommitLedger();
+            $this->boot('TD_POSTGRES_URL');
+            $this->connection->executeStatement("SET lock_timeout = '1s'");
+
+            $refused = $this->refuseACommit($cause);
+            self::assertInstanceOf(Throwable::class, $refused, $cause);
+            if ($this->connection->isTransactionActive()) {
+                $this->connection->rollBack();
+            }
+
+            self::assertSame('OK', $this->otherSession()->execute('BEGIN'));
+            self::assertSame('OK', $this->otherSession()->execute('UPDATE ddrb_counter SET counter_value = 7 WHERE id = 1'));
+            $unit     = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0), null, null, null, null, $this->ledger);
+            $attempts = 0;
+            $caught   = null;
+
+            try {
+                $unit->run(function (int $attempt) use (&$attempts): void {
+                    $attempts = $attempt;
+                    $this->connection->executeStatement('INSERT INTO ddrb_ballast (id) VALUES (' . (2000 + $attempt) . ')'); // autocommit
+                    $this->connection->executeStatement('UPDATE ddrb_counter SET counter_value = 1 WHERE id = 1');              // 55P03
+                });
+            } catch (ConcurrencyConflict $conflict) {
+                $caught = $conflict;
+            } finally {
+                $this->otherSession()->execute('ROLLBACK');
+            }
+
+            self::assertInstanceOf(ConcurrencyConflict::class, $caught, $cause);
+            self::assertTrue($caught->committed, $cause);
+            self::assertSame(ConflictCode::Committed, ConflictCode::forFailure($caught), $cause);
+            self::assertSame(1, $attempts, $cause);
+            self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_ballast WHERE id > 2000'), $cause);
+            self::assertSame(0, $this->connection->getTransactionNestingLevel(), $cause);
+            $this->tearDown();
+        }
+    }
+
+    private function refuseACommit(string $cause): ?Throwable
+    {
+        if ($cause === 'deferred constraint') {
+            $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_deferred');
+            $this->connection->executeStatement('CREATE TABLE ddrb_deferred (id INT, CONSTRAINT ddrb_deferred_u UNIQUE (id) DEFERRABLE INITIALLY DEFERRED)');
+            $this->connection->beginTransaction();
+            $this->connection->executeStatement('INSERT INTO ddrb_deferred VALUES (1), (1)');
+        } else {
+            // Write skew under SERIALIZABLE: both read the notes, both insert one; the peer commits first.
+            $this->connection->setTransactionIsolation(TransactionIsolationLevel::SERIALIZABLE);
+            $this->connection->beginTransaction();
+            $this->connection->fetchOne('SELECT COUNT(*) FROM ddrb_note');
+            self::assertSame('OK', $this->otherSession()->execute('BEGIN ISOLATION LEVEL SERIALIZABLE'));
+            self::assertSame('OK', $this->otherSession()->execute('SELECT COUNT(*) FROM ddrb_note'));
+            self::assertSame('OK', $this->otherSession()->execute('INSERT INTO ddrb_note (id, counter_id) VALUES (51, 1)'));
+            $this->connection->executeStatement('INSERT INTO ddrb_note (id, counter_id) VALUES (50, 1)');
+            self::assertSame('OK', $this->otherSession()->execute('COMMIT'));
+        }
+
+        try {
+            $this->connection->commit();
+        } catch (Throwable $failure) {
+            return $failure;
+        } finally {
+            $this->connection->setTransactionIsolation(TransactionIsolationLevel::READ_COMMITTED);
+        }
+
+        return null;
     }
 
     /**

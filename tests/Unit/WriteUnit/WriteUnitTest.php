@@ -146,7 +146,7 @@ final class WriteUnitTest extends TestCase
 
     public function testAKindOutsideThePolicyIsNotReplayed(): void
     {
-        $unit = new WriteUnit(new RecordingRegistry(['default' => $this->idleConnection()]), new WriteUnitPolicy(), null, new MockClock());
+        $unit = new WriteUnit(new RecordingRegistry(['default' => $this->idleConnection()]), new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout']), null, new MockClock());
 
         $this->expectException(FakeDriverException::class);
 
@@ -247,7 +247,7 @@ final class WriteUnitTest extends TestCase
 
     public function testConflictKindReadsTheChainAndWrappedExceptions(): void
     {
-        $unit     = new WriteUnit(new RecordingRegistry());
+        $unit     = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout']));
         $envelope = new Envelope(new stdClass());
         $handled  = $envelope->with(new HandledStamp('done', 'other_handler'));
 

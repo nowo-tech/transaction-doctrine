@@ -147,6 +147,29 @@ final class CommitTrackingMiddlewareTest extends TestCase
         self::assertSame(0, $ledger->count());
     }
 
+    /** Audit TA2-1: a COMMIT the server refused ends the transaction for the ledger too; later autocommit writes count. */
+    public function testAFailedCommitStillEndsTheTransaction(): void
+    {
+        $ledger  = new CommitLedger();
+        $refused = new RuntimeException('deferred unique violation');
+        $driver  = $this->createMock(DriverConnection::class);
+        $driver->method('exec')->willReturn(1);
+        $driver->method('commit')->willThrowException($refused);
+        $connection = new CommitTrackingConnection($driver, $ledger);
+        $connection->beginTransaction();
+
+        try {
+            $connection->commit();
+            self::fail('The commit passed.');
+        } catch (RuntimeException $failure) {
+            self::assertSame($refused, $failure);
+        }
+
+        self::assertSame(0, $ledger->count(), 'A refused COMMIT is not a commit.');
+        $connection->exec('INSERT INTO t VALUES (1)');
+        self::assertSame(1, $ledger->count(), 'The autocommit write after it is counted.');
+    }
+
     private function connect(CommitLedger $ledger, string $server = 'pgsql'): DriverConnection
     {
         $statement = $this->createMock(Statement::class);

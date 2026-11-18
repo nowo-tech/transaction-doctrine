@@ -27,11 +27,14 @@ final readonly class WriteUnitPolicy
     public const DEFAULT_CAP_MS       = 200;
     public const DEFAULT_RETRY_AFTER  = 1;
 
+    /** Kinds replayed by default: deadlock, lock wait timeout and (since 1.5.0) serialization failure. */
+    public const DEFAULT_REPLAY_KINDS = [TransientFailureKind::Deadlock, TransientFailureKind::LockWaitTimeout, TransientFailureKind::SerializationFailure];
+
     /** @var list<TransientFailureKind> */
     public array $replayKinds;
 
     /**
-     * @param list<string|TransientFailureKind>|null $replayKinds Kinds replayed (cases or their values); null = deadlock and lock wait timeout
+     * @param list<string|TransientFailureKind>|null $replayKinds Kinds replayed (cases or their values); null = deadlock, lock wait timeout and serialization failure (1.5.0)
      * @param int|null $retryAfterSeconds Retry-After hint of the final ConcurrencyConflict
      *
      * @throws InvalidArgumentException When a bound is out of range
@@ -57,7 +60,7 @@ final readonly class WriteUnitPolicy
         }
 
         $kinds = [];
-        foreach ($replayKinds ?? [TransientFailureKind::Deadlock, TransientFailureKind::LockWaitTimeout] as $kind) {
+        foreach ($replayKinds ?? self::DEFAULT_REPLAY_KINDS as $kind) {
             $kinds[] = $kind instanceof TransientFailureKind ? $kind : TransientFailureKind::from($kind);
         }
 

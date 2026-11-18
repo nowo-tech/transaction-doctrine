@@ -17,6 +17,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Conflict codes (REQ-RUNTIME-003 rule 6):** every conflict answer carries `CONFLICT_001` (nothing committed, with
+  `Retry-After`) or `CONFLICT_002` (part of the unit committed, no `Retry-After`).
+  - New `Nowo\TransactionDoctrine\ConflictCode` backed enum (`RetrySafe`, `Committed`; constants `RETRY_SAFE`,
+    `COMMITTED`) with `ConflictCode::forFailure()` for bundles that answer in their own shape.
+  - JSON answers gain a `code` key next to the unchanged `error` and `message` keys.
+  - The HTML page (plain, Twig and UiKit variants) carries `data-conflict-code` on its `data-testid="concurrency-conflict"`
+    element; the template receives `conflict_code`.
+  - `ConflictResponseContext::$code`, so a `ConflictResponseFormatterInterface` receives the code.
+  - The responder's log context gains `code`.
+- `TransientFailureClassifier::isCommitOutcomeUnknown()`: a lost savepoint (MySQL / MariaDB 1305 about a SAVEPOINT,
+  PostgreSQL 3B001) with no transient failure in its chain, answered `CONFLICT_002` by the opt-in
+  `map_transient_failures` mapper. A 1305 about a missing function, unique (constraint) violations and lost
+  connections are never mapped.
+- `docs/CONCURRENCY.md` (write paths, classification, codes, host options, residual risk) and a USAGE section on how
+  bundles comply with REQ-RUNTIME-003 using this package.
+
+### Changed
+
+- **Serialization failures are replayed by default** (owner decision 2026-11-18): the default `replay_on` and
+  `WriteUnitPolicy` kinds now include `serialization_failure` (PostgreSQL 40001, MariaDB 1020), new constant
+  `WriteUnitPolicy::DEFAULT_REPLAY_KINDS`. A write unit replays them and, once the attempts are exhausted, throws
+  `ConcurrencyConflict`, answered 409 `CONFLICT_001` + `Retry-After` instead of a 500. An explicit `replay_on` list
+  keeps the 1.4 behaviour (see UPGRADING).
+
+### Fixed
+
+- **Duplicate autocommit writes after a failed COMMIT (audit TA2-1, affects 1.3.0–1.4.0; no GHSA, owner decision
+  2026-11-18):** when the server refused a COMMIT (a deferred constraint, or a PostgreSQL
+  serialization failure at commit time), `CommitTrackingConnection` kept believing a transaction was open, so the
+  autocommit writes that followed on that connection were no longer counted by `CommitLedger`. A write unit that met a
+  conflict after such a write was then replayed instead of answering `committed: true`, and repeated the write. The
+  flag is now reset in a `finally`; a refused COMMIT is still not counted as a commit. Tested on PostgreSQL 16.
+- **Audit TA2-2:** a lost savepoint (1305) is recognised on servers with localized messages (`lc_messages` such as
+  `es_ES` or `de_DE`): the classifier matches the untranslated `SAVEPOINT` keyword where the server puts it, no longer
+  the English "does not exist". A 1305 about a missing `FUNCTION` stays unmapped in every language.
+- **Audit TA-6:** a reset-between-attempts service or retry listener that opened a transaction (or persisted an entity)
+  and then threw left the connection one nesting level up after the write unit gave up; the unit now discards it
+  before throwing `ConcurrencyConflict`. Tested on MySQL 8.4, MariaDB 11.4 and PostgreSQL 16.
+
 ## [1.4.0] - 2026-11-18
 
 ### Added

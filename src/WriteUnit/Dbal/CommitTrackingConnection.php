@@ -88,8 +88,14 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
 
     public function commit(): void
     {
-        parent::commit();
-        $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+        // Audit TA2-1: a COMMIT the server refuses (a deferred constraint, PostgreSQL 40001 at commit) still ends the
+        // transaction; a flag left true would stop counting the autocommit writes that follow.
+        try {
+            parent::commit();
+        } finally {
+            $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+        }
+
         $this->ledger->record();
     }
 

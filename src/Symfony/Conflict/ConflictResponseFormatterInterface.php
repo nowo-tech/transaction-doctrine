@@ -11,7 +11,9 @@ use Symfony\Component\HttpFoundation\Response;
  * Lets a bundle or host answer a conflict on its own requests in its own shape (a REST API's `{err, ECODE}`, CORS
  * headers…), recognising them by its own means (a request attribute its listener set, a controller class) rather than
  * the responder matching route names. The first formatter (highest tag priority) that returns a response wins; null
- * falls through to the next one and finally to the default JSON or HTML answer. Whatever it returns, the responder sets
+ * falls through to the next one and finally to the default JSON or HTML answer. The context carries the conflict code
+ * (`$context->code`: ConflictCode::RetrySafe `CONFLICT_001` or ConflictCode::Committed `CONFLICT_002`); a formatter
+ * puts it in its own shape (REQ-RUNTIME-003 rule 6). Whatever it returns, the responder sets
  * the policy's status, `Retry-After` and `Cache-Control: no-store`. Autoconfigured with the
  * `nowo_transaction_doctrine.conflict_response_formatter` tag. Implementations must be stateless.
  *

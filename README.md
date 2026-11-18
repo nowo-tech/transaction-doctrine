@@ -6,8 +6,8 @@
 
 Safe plain-Doctrine default for [`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract):
 `DoctrineTransactionRunner` implements `TransactionRunnerInterface` with **one attempt and no retry**, for a bundle
-to use when the host wires no adapter. Since 1.3.0 also **write units** that replay a deadlock or lock wait timeout,
-and an **optional Symfony bundle** (`#[AsWriteUnit]`, Messenger middleware, one lock-conflict answer **409 +
+to use when the host wires no adapter. Since 1.3.0 also **write units** that replay a deadlock, lock wait timeout or
+(since 1.5.0) serialization failure, and an **optional Symfony bundle** (`#[AsWriteUnit]`, Messenger middleware, one lock-conflict answer **409 +
 `Retry-After`**, worker connection hygiene). `doctrine/dbal` required; `doctrine/orm`, `doctrine/persistence` and the
 Symfony packages optional.
 
@@ -46,7 +46,7 @@ Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `Connection
 ## Write units and the 409 lock-conflict answer (1.3.0)
 
 ```php
-// Programmatic: replayed up to 3 times (full jitter) after a deadlock or lock wait timeout, outermost unit only.
+// Programmatic: replayed up to 3 times (full jitter) after a deadlock, lock wait timeout or serialization failure, outermost unit only.
 $writeUnit->run(fn (int $attempt) => $runner->run(fn () => $tasks->get($id)->moveTo($column)));
 ```
 
@@ -56,8 +56,9 @@ public function move(Task $task): Response { /* ... */ }
 ```
 
 With `NowoTransactionDoctrineBundle` registered, a write unit that still conflicts answers **409** (or 503 with
-`conflict_response.status: 503`) with `Retry-After`: JSON `{"error": "concurrency_conflict", "message": …}` or a
-branded *Try again* page (UiKit's error page when installed). Hosts and bundles map their own exceptions with
+`conflict_response.status: 503`) with `Retry-After`: JSON `{"error": "concurrency_conflict", "code": "CONFLICT_001",
+"message": …}` or a branded *Try again* page (UiKit's error page when installed). When part of the unit already
+committed the code is `CONFLICT_002` and there is no `Retry-After` ([Concurrency](docs/CONCURRENCY.md)). Hosts and bundles map their own exceptions with
 `LockConflictExceptionInterface` or a `ConflictExceptionMapperInterface` service, and shape their own answers with a
 `ConflictResponseFormatterInterface` service, never by route name. See [Usage](docs/USAGE.md#write-units-130) and
 [Configuration](docs/CONFIGURATION.md#symfony-bundle).
@@ -96,6 +97,7 @@ is safe in a long-running worker.
 - [Installation](docs/INSTALLATION.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Usage](docs/USAGE.md)
+- [Concurrency (REQ-RUNTIME-003)](docs/CONCURRENCY.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Changelog](docs/CHANGELOG.md)

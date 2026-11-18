@@ -27,8 +27,8 @@ use function iterator_to_array;
 use function usleep;
 
 /**
- * Runs one write unit and replays it after a lock conflict: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01) or a
- * lock wait timeout (1205, 55P03) by default, found in the failure's previous chain (the contract's
+ * Runs one write unit and replays it after a lock conflict: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01), a
+ * lock wait timeout (1205, 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020) by default, found in the failure's previous chain (the contract's
  * TransientStorageFailure of a bundle's runner included). At most WriteUnitPolicy::$maxAttempts attempts with a
  * full-jitter pause between them; between two attempts the levels the unit left open are rolled back, closed entity
  * managers reset and open ones cleared (DoctrineStateRepairer), so an attempt never sees what the failed one loaded.
@@ -51,8 +51,9 @@ use function usleep;
  * Request memos that keep entities must therefore be emptied before the replay: after the managers are cleared and
  * the pause, and right before the next attempt, every ResetBetweenAttemptsInterface given (in order) is called, then
  * a WriteUnitRetryEvent is dispatched when a PSR-14 dispatcher is given. Neither runs before the first attempt nor
- * after the last failure. When one of them throws, the replay is abandoned: the unit gives up with ConcurrencyConflict
- * (the attempt's failure as previous, the reset exception as ConcurrencyConflict::$resetFailure).
+ * after the last failure. When one of them throws, the replay is abandoned (the transaction levels and entity changes
+ * it left are discarded first): the unit gives up with ConcurrencyConflict (the attempt's failure as previous, the
+ * reset exception as ConcurrencyConflict::$resetFailure).
  *
  * Never replayed either: a ConcurrencyConflict anywhere in the chain or inside wrapped exceptions (an inner unit
  * already replayed), and a Messenger wrapper (HandlerFailedException, DelayedMessageHandlingException) unless every
@@ -246,9 +247,10 @@ final readonly class WriteUnit implements WriteUnitInterface
 
     /**
      * Empties request memos before the given attempt (resetters in order, then WriteUnitRetryEvent). A failure of
-     * either abandons the replay: the unit gives up with the attempt's conflict, the reset failure attached. So does a
-     * resetter or listener that left a transaction open or entity changes pending: the replay would run nested (its
-     * flush never committing) or write them; they are discarded first.
+     * either abandons the replay (whatever it left open discarded first, audit TA-6): the unit gives up with the
+     * attempt's conflict, the reset failure attached. So does a resetter or listener that left a transaction open or
+     * entity changes pending: the replay would run nested (its flush never committing) or write them; they are
+     * discarded first.
      */
     private function prepareReplay(int $next, Throwable $failure, TransientFailureKind $kind, ?string $unit): void
     {
@@ -259,6 +261,8 @@ final readonly class WriteUnit implements WriteUnitInterface
 
             $this->dispatcher?->dispatch(new WriteUnitRetryEvent($next, $failure, $kind, $unit));
         } catch (Throwable $resetFailure) {
+            // Audit TA-6: a resetter or listener may have opened a transaction (or persisted) before throwing.
+            $this->repairer->discardUnitOfWork();
             $this->abandonReplay($next - 1, $failure, $kind, $resetFailure);
         }
 

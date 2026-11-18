@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+  - [Conflict codes in conflict answers](#conflict-codes-in-conflict-answers)
 - [To 1.4.0](#to-140)
   - [Request memos and write-unit replays](#request-memos-and-write-unit-replays)
 - [To 1.3.1](#to-131)
@@ -15,6 +16,51 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+From **1.4.0**: `composer update nowo-tech/transaction-doctrine`. No configuration change; the default status stays
+**409** (it has been since 1.3.0), and `conflict_response.status: 503` keeps working.
+
+### Conflict codes in conflict answers
+
+Every conflict answer now carries a REQ-RUNTIME-003 code (`Nowo\TransactionDoctrine\ConflictCode`): `CONFLICT_001`
+when nothing was committed (with `Retry-After`), `CONFLICT_002` when part of the unit was (no `Retry-After`). The change
+is additive:
+
+- **JSON** gains a `code` key; `error` and `message` are unchanged:
+  `{"error": "concurrency_conflict", "code": "CONFLICT_001", "message": "…"}` and
+  `{"error": "concurrency_conflict_partial", "code": "CONFLICT_002", "message": "…"}`. Clients that compare the whole
+  body (tests asserting an exact array) need the new key.
+- **HTML**: the `data-testid="concurrency-conflict"` element gets `data-conflict-code`. The template receives
+  `conflict_code`. **An overridden template** (`templates/bundles/NowoTransactionDoctrineBundle/conflict.html.twig` or
+  `conflict_response.template`) should add `data-conflict-code="{{ conflict_code }}"` to keep the code testable.
+- **Formatters**: `ConflictResponseContext` has a new `code` property (the constructor's new last argument is optional
+  and derived from `committed`); put `$context->code->value` in your own shape.
+- **Log**: the responder's warning context gains `code`.
+- **Opt-in mapper**: with `map_transient_failures: true`, a lost savepoint with no deadlock behind it (MySQL / MariaDB
+  1305 naming a SAVEPOINT, PostgreSQL 3B001) is now answered 409 `CONFLICT_002` instead of a 500. With the default
+  `false` nothing changes for it.
+- **Serialization failures are replayed by default** (owner decision 2026-11-18): the default `replay_on` (and
+  `WriteUnitPolicy`'s default kinds, `WriteUnitPolicy::DEFAULT_REPLAY_KINDS`) is now `[deadlock, lock_wait_timeout,
+  serialization_failure]`. A PostgreSQL 40001 or MariaDB 1020 inside a write unit used to be rethrown at once as the
+  DBAL exception (or the runner's `TransientStorageFailure`), which the responder did not answer (a 500 unless
+  `map_transient_failures` was on). Now the unit is replayed; when every attempt fails it throws `ConcurrencyConflict`
+  (kind `serialization_failure`), answered 409 `CONFLICT_001` + `Retry-After`. Code that caught the DBAL
+  serialization exception around a write unit should catch `ConcurrencyConflict` (or the contract's
+  `TransientStorageFailure`, which it extends). To keep the 1.4 behaviour, list the kinds explicitly; an explicit
+  list replaces the default:
+
+  ```yaml
+  nowo_transaction_doctrine:
+      replay_on: [deadlock, lock_wait_timeout]
+  ```
+
+  Programmatic units: `new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout'])`.
+- **Commit detection after a refused COMMIT (audit TA2-1)**: fixed; no action. Units that met a conflict after an
+  autocommit write on a connection whose earlier COMMIT the server refused now answer `committed: true`
+  (`CONFLICT_002`) instead of replaying the write.
+- **Write units (audit TA-6)**: when a `ResetBetweenAttemptsInterface` service or a `WriteUnitRetryEvent` listener
+  throws, the unit now discards what it left (open transaction levels, pending entity changes) before throwing
+  `ConcurrencyConflict`, so the connection is back at nesting level 0. The managers are cleared once more on that path.
 
 ## To 1.4.0
 

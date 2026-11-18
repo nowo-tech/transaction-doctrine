@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database;
 
+use Closure;
 use Doctrine\ORM\ORMInvalidArgumentException;
 use LogicException;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
@@ -20,6 +21,7 @@ use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -159,6 +161,60 @@ final class ReplayResetDatabaseTest extends DatabaseTestCase
             self::assertSame([], $this->manager()->getUnitOfWork()->getScheduledEntityInsertions(), $leftover);
             self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 3'), $leftover);
             self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_note WHERE id = 2'), $leftover);
+            $this->tearDown();
+        }
+    }
+
+    /**
+     * Audit TA-6: a resetter (or a retry listener) that opens a transaction and then throws. The unit discards what it
+     * left before giving up, so the connection is back at nesting level 0 and nothing it wrote is committed later.
+     */
+    #[DataProvider('allServers')]
+    public function testAResetterThatOpensATransactionAndThrowsLeavesLevelZero(string $server): void
+    {
+        foreach (['resetter', 'listener'] as $where) {
+            $memo   = $this->prepare($server);
+            $broken = function (): never {
+                $this->leaveBehind('transaction');
+
+                throw new RuntimeException('reset failed after BEGIN');
+            };
+            $dispatcher = new EventDispatcher();
+            $resetters  = [$memo];
+            if ($where === 'listener') {
+                $dispatcher->addListener(WriteUnitRetryEvent::class, $broken);
+            } else {
+                $resetters[] = new class($broken) implements ResetBetweenAttemptsInterface {
+                    /** @param Closure(): never $broken */
+                    public function __construct(private readonly Closure $broken)
+                    {
+                    }
+
+                    public function resetBetweenAttempts(): void
+                    {
+                        ($this->broken)();
+                    }
+                };
+            }
+
+            $unit   = new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0), null, null, null, null, null, $resetters, $dispatcher);
+            $caught = null;
+
+            try {
+                $unit->run(fn (int $attempt) => $this->addNote($memo, $attempt, 2));
+            } catch (ConcurrencyConflict $conflict) {
+                $caught = $conflict;
+            } finally {
+                $this->releasePeer();
+            }
+
+            self::assertNotNull($caught, $where);
+            self::assertInstanceOf(RuntimeException::class, $caught->resetFailure, $where);
+            self::assertSame(0, $this->connection->getTransactionNestingLevel(), $where);
+            self::assertFalse($this->connection->isTransactionActive(), $where);
+            self::assertSame('1', (string) $this->connection->fetchOne('SELECT 1'), $where);
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 3'), $where);
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_note WHERE id = 2'), $where);
             $this->tearDown();
         }
     }

@@ -17,16 +17,16 @@ use ValueError;
  */
 final class WriteUnitPolicyTest extends TestCase
 {
-    public function testDefaultsReplayDeadlocksAndLockWaitTimeoutsThreeTimes(): void
+    public function testDefaultsReplayDeadlocksLockWaitTimeoutsAndSerializationFailuresThreeTimes(): void
     {
         $policy = new WriteUnitPolicy();
 
         self::assertSame(3, $policy->maxAttempts);
         self::assertSame(1, $policy->retryAfterSeconds);
-        self::assertSame([TransientFailureKind::Deadlock, TransientFailureKind::LockWaitTimeout], $policy->replayKinds);
+        self::assertSame([TransientFailureKind::Deadlock, TransientFailureKind::LockWaitTimeout, TransientFailureKind::SerializationFailure], $policy->replayKinds);
         self::assertTrue($policy->replays(TransientFailureKind::Deadlock));
         self::assertTrue($policy->replays(TransientFailureKind::LockWaitTimeout));
-        self::assertFalse($policy->replays(TransientFailureKind::SerializationFailure));
+        self::assertTrue($policy->replays(TransientFailureKind::SerializationFailure));
         self::assertFalse($policy->replays(TransientFailureKind::Retryable));
     }
 

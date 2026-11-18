@@ -40,7 +40,7 @@ nowo_transaction_doctrine:
         base_ms: 100
         cap_ms: 200
     # Transient kinds a write unit replays: deadlock, lock_wait_timeout, serialization_failure, retryable.
-    replay_on: [deadlock, lock_wait_timeout]
+    replay_on: [deadlock, lock_wait_timeout, serialization_failure]
     # Run controllers marked #[AsWriteUnit] as write units.
     controller_attribute: true
     # Route names that run as write units (exact; "*" is an explicit wildcard): controllers you cannot annotate.
@@ -73,7 +73,7 @@ nowo_transaction_doctrine:
 |-----|---------|-------|
 | `max_attempts` | `3` | 1–10 |
 | `backoff.floor_ms` / `base_ms` / `cap_ms` | `20` / `100` / `200` | ≥ 0 |
-| `replay_on` | `[deadlock, lock_wait_timeout]` | `serialization_failure` (PostgreSQL 40001, MariaDB 1020) and `retryable` (any other DBAL `RetryableException`) are opt-in |
+| `replay_on` | `[deadlock, lock_wait_timeout, serialization_failure]` | `serialization_failure` (PostgreSQL 40001, MariaDB 1020) is a default since 1.5.0; `retryable` (any other DBAL `RetryableException`) is opt-in. An explicit list replaces the default |
 | `controller_attribute` | `true` | `#[AsWriteUnit]` on a controller class or action |
 | `controller_routes` | `[]` | Exact route names; `*` is an explicit wildcard (`'*_app_invoice_pay'`) |
 | `commit_detection` | `true` | Registers `CommitTrackingMiddleware` (tag `doctrine.middleware`, all connections) and a `CommitLedger` |
@@ -83,9 +83,9 @@ nowo_transaction_doctrine:
 | `conflict_response.status` | `409` | `409` or `503` only |
 | `conflict_response.retry_after` | `1` | ≥ 0 |
 | `conflict_response.template` | `@NowoTransactionDoctrine/conflict.html.twig` | Or override the file in `templates/bundles/NowoTransactionDoctrineBundle/` |
-| `conflict_response.json_error` | `concurrency_conflict` | Stable JSON code; `<json_error>_partial` (no `Retry-After`) when part of the unit committed |
+| `conflict_response.json_error` | `concurrency_conflict` | Stable JSON `error` key; `<json_error>_partial` (no `Retry-After`) when part of the unit committed. The `code` key (`CONFLICT_001` / `CONFLICT_002`, 1.5.0) is fixed |
 | `conflict_response.json_path_prefixes` | `['/api/']` | Empty entries are ignored |
-| `conflict_response.map_transient_failures` | `false` | Runs before the bundles' own mappers: turning it on replaces their JSON shapes with this one |
+| `conflict_response.map_transient_failures` | `false` | Runs before the bundles' own mappers: turning it on replaces their JSON shapes with this one. Also maps a lost savepoint with no deadlock behind it (`CONFLICT_002`, 1.5.0) |
 
 Texts: translation domain `nowo_transaction_doctrine` (`conflict.title`, `conflict.lead`, `conflict.hint`,
 `conflict.retry`, and `conflict.partial.*` for a conflict after a commit), shipped in English, Spanish, French and German; override them in your own
