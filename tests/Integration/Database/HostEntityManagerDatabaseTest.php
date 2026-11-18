@@ -9,6 +9,7 @@ use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Counter;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
+use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\HostManagerScenarios;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Throwable;
 
@@ -22,6 +23,57 @@ use Throwable;
  */
 final class HostEntityManagerDatabaseTest extends DatabaseTestCase
 {
+    use HostManagerScenarios;
+
+    #[DataProvider('allServers')]
+    public function testADetachNeverCascadesIntoTheHostsEntity(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADetachNeverCascadesIntoTheHostsEntity();
+    }
+
+    #[DataProvider('allServers')]
+    public function testARolledBackChildLeavesTheHostsCollection(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARolledBackChildLeavesTheHostsCollection();
+    }
+
+    #[DataProvider('allServers')]
+    public function testARolledBackChildLeavesAnUninitializedCollection(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARolledBackChildLeavesAnUninitializedCollection();
+    }
+
+    #[DataProvider('allServers')]
+    public function testTheHostsOwnCollectionChangeStays(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioTheHostsOwnCollectionChangeStays();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAToOneGetsItsOriginalValueBack(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAToOneGetsItsOriginalValueBack();
+    }
+
+    #[DataProvider('allServers')]
+    public function testNewHostEntities(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioNewHostEntities();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFieldTheRunChangedStaysWithANotice(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFieldTheRunChangedStaysWithANotice();
+    }
+
     /**
      * A storage failure (a duplicate key written through DBAL) with the manager still open: same manager, nothing
      * cleared, the host's entity and its pending edit kept; the run's persisted and loaded entities are forgotten.

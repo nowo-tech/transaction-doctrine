@@ -43,6 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed one through the registry and detaches only what the failed run brought in (entities that entered the
   identity map or were scheduled for insertion during the run). `forEntityManager()` is unchanged and now documented
   as the factory for bundle-owned managers.
+  - The detach never cascades (`cascade: detach`) into an entity the host managed before the run (audit TA3-1).
+  - The brought entities are removed from the host entities' initialized collections, and a host to-one pointing at
+    one gets its original value back, so the host's next flush cannot re-insert them (audit TA3-2).
+  - A notice is logged when host entities still have pending changes after the failure (audit TA3-3).
+
+### Changed
+
+- Commit detection: `WITH`, `VALUES` and `TABLE` statements outside a transaction are reads and no longer count as a
+  commit; a `WITH` naming `INSERT`, `UPDATE`, `DELETE` or `MERGE` (a data-modifying CTE) still counts (audit TA3-4).
+  Fewer `CONFLICT_002` answers and refused replays after a plain read.
 
 ## [1.5.0] - 2026-11-18
 

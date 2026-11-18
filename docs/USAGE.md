@@ -95,13 +95,13 @@ Both flush the manager before the commit and repair the connection the same way.
 | Manager after the failure | What the runner does |
 |---------------------------|----------------------|
 | Closed (the ORM closed it, for example a lock wait timeout in the flush) | Replaced through the registry (`resetManager()`; a closed manager is unusable anyway). Without a registry it is left for the host, and `WorkerConnectionHygiene` resets it at the next request |
-| Open, any failure (storage or domain) | **Never closed, cleared or reset.** Only what the failed run brought in is detached: entities that entered the identity map during the run (loaded, `getReference()` proxies, flushed and rolled back) and new entities scheduled for insertion during the run. A later flush by the host therefore cannot write the rolled-back work, and the identity map does not serve its rows |
+| Open, any failure (storage or domain) | **Never closed, cleared or reset.** Only what the failed run brought in is forgotten: entities that entered the identity map during the run (loaded, `getReference()` proxies, flushed and rolled back) and new entities scheduled for insertion during the run. They are detached **without cascading into the caller's entities** (a `cascade: ['detach']` association never detaches a host entity), removed from the caller's initialized collections (a clean collection is clean again), and a caller's to-one pointing at one gets its original value back. A later flush by the host therefore cannot write the rolled-back entities, and the identity map does not serve their rows |
 
-What stays the caller's call: entities the caller managed before the run stay managed **with whatever the operation
-changed on them** (a changed property stays pending; a value flushed and rolled back stays in the object). Write the
-unit so it does not modify the host's entities, or `refresh()` them after a failure. A detach follows
-`cascade: ['detach']` mappings, so a run-loaded entity with such an association to a caller's entity detaches that
-entity too.
+That is all it covers. Entities the caller managed before the run keep **any other change the operation made to
+them** (a field, an element removed from a collection, a value flushed and rolled back), and a to-one of a caller's
+entity that was itself new before the run has no original value to restore. When caller entities still have pending
+changes after the failure, the runner logs a notice (`entities` = how many); it cannot tell the host's own edits from
+the run's. Write the unit so it does not modify the host's entities, or `refresh()` them after a failure.
 
 Transient failures (1213, 1205, MariaDB 1020, SQLSTATE 40001 / 40P01 / 55P03, any DBAL `RetryableException`) become
 `TransientStorageFailure` with the storage error as `previous`; anything else is rethrown unchanged. A 1305 lost

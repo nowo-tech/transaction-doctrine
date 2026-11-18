@@ -11,6 +11,7 @@ use Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder;
 use Nowo\TransactionDoctrine\Symfony\EventListener\RequestCommitWatermark;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -111,6 +112,40 @@ final class RequestWatermarkDatabaseTest extends DatabaseTestCase
 
         $this->assertAnswer($kernel->handle(Request::create('/page', 'POST')), 'CONFLICT_002', null);
         $this->assertAnswer($kernel->handle(Request::create('/quiet-page', 'POST')), 'CONFLICT_001', '1');
+    }
+
+    /**
+     * Audit TA3-4: reads outside a transaction never move the mark (WITH, VALUES, TABLE included); a data-modifying
+     * CTE (PostgreSQL) or a WITH … UPDATE (MySQL, MariaDB) does.
+     */
+    #[DataProvider('allServers')]
+    public function testReadsNeverMoveTheMark(string $server): void
+    {
+        $this->prepare($server);
+        self::assertSame('OK', $this->otherSession()->execute('ROLLBACK'));   // no peer lock here
+        $ledger = $this->ledger;
+        self::assertInstanceOf(CommitLedger::class, $ledger);
+        $mark = new CommitMark($ledger);
+
+        $reads = match ($server) {
+            'TD_POSTGRES_URL' => ['VALUES (1)', 'TABLE ddrb_counter', 'SHOW search_path'],
+            'TD_MYSQL_URL'    => ['VALUES ROW(1)', 'TABLE ddrb_counter', 'SHOW TABLES'],
+            default           => ['VALUES (1)', 'SHOW TABLES'],   // MariaDB has no TABLE statement
+        };
+
+        foreach (['SELECT 1', 'WITH x AS (SELECT 1 AS a) SELECT a FROM x', '(SELECT 1) UNION (SELECT 2)', ...$reads] as $sql) {
+            $this->connection->fetchAllAssociative($sql);
+            self::assertFalse($mark->committedSince(), $sql);
+        }
+
+        // MariaDB has no WITH before UPDATE: a plain UPDATE there.
+        $this->connection->executeStatement(match ($server) {
+            'TD_POSTGRES_URL' => 'WITH moved AS (UPDATE ddrb_counter SET counter_value = 3 WHERE id = 2 RETURNING id) SELECT id FROM moved',
+            'TD_MYSQL_URL'    => 'WITH x AS (SELECT 2 AS id) UPDATE ddrb_counter SET counter_value = 3 WHERE id IN (SELECT id FROM x)',
+            default           => 'UPDATE ddrb_counter SET counter_value = 3 WHERE id = 2',
+        });
+        self::assertTrue($mark->committedSince());
+        self::assertSame(3, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
     }
 
     protected function tearDown(): void

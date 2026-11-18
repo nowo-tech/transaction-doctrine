@@ -148,7 +148,10 @@ process):
   sub-request reads the main request's mark; every answer carries `X-Conflict-Code`;
 - `forHostEntityManager()` (1.6.0): a storage failure and a flushed refusal leave the host's open manager in place
   (same instance, not cleared, its entity and pending edit kept, the run's entities detached), and a manager the ORM
-  closed in a real lock wait timeout is replaced;
+  closed in a real lock wait timeout is replaced; a detach never cascades into a host entity, a rolled-back child
+  leaves the host's collection, a to-one gets its original value back, and the host's own changes stay with a
+  notice (audit TA3; the same scenarios also run on SQLite in the unit suite);
+- reads (`WITH`, `VALUES`, `TABLE` included) never move the request mark; a data-modifying CTE does;
 - a real lost savepoint (`ROLLBACK TO SAVEPOINT` unknown: 1305 / 3B001) answered `CONFLICT_002` with no
   `Retry-After`, also with localized server messages; a real 1305 for a missing function, a real unique violation and a real killed session not mapped;
 - nested deadlocks and failed savepoint rollbacks repaired to nesting level 0;
@@ -163,9 +166,15 @@ process):
 - The request watermark is conservative too: any tracked commit after the mark counts, including one unrelated to
   the failed work (a Doctrine Messenger transport send, an audit row). The client is told to read again; it is never
   invited to repeat work that may be committed.
-- `forHostEntityManager()` leaves the caller's own entities as the operation left them (a changed property stays
-  pending, a value flushed and rolled back stays in the object): the caller decides whether to `refresh()` or
-  `clear()`. A detach follows `cascade: ['detach']` mappings into caller entities.
+- `forHostEntityManager()` forgets only what the run brought in (detached without cascading into the caller's
+  entities, removed from their collections, to-ones restored): any other change the operation made to the caller's
+  entities stays (a changed field, a removed element, a value flushed and rolled back), with a notice in the log. The
+  caller decides whether to `refresh()` or `clear()`.
+- The ledger over-counts on purpose: outside a transaction any statement that is not a plain read (`SELECT`, `SHOW`,
+  `SET`, `EXPLAIN`, `DESCRIBE`, `PRAGMA`, `WITH`, `VALUES`, `TABLE`) counts as a commit, and so does a `WITH` that
+  names `INSERT`, `UPDATE`, `DELETE` or `MERGE` anywhere (a data-modifying CTE, or only an identifier spelled that
+  way). An over-count turns a `CONFLICT_001` into `CONFLICT_002` (read again instead of retry); it never invites a
+  retry of committed work.
 - Commit detection sees commits on the connections wrapped by `CommitTrackingMiddleware`; a commit made through
   another connection (a second DBAL connection without the middleware, an HTTP call) is invisible to it, so a unit
   must commit at most once or be idempotent as a whole.
