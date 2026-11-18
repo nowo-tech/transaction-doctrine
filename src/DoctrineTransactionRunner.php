@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine;
 
+use Closure;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
 use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Events;
+use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\ManagerRegistry;
+use LogicException;
 use Nowo\TransactionContract\TransactionRunnerInterface;
 use Nowo\TransactionContract\TransientStorageFailure;
 use PDOException;
@@ -20,7 +23,11 @@ use Throwable;
 
 use function array_diff_key;
 use function array_intersect_key;
+use function array_key_exists;
 use function assert;
+use function count;
+use function is_object;
+use function ksort;
 use function spl_object_id;
 
 /**
@@ -46,6 +53,9 @@ use function spl_object_id;
  *     the caller's own pending changes: a nested refusal clears them too.
  *   Clearing or resetting a shared manager also discards the caller's own pending changes, as
  *   EntityManager::wrapInTransaction() does.
+ *   That is the contract of forEntityManager(), for managers the bundle owns. With the host application's manager
+ *   use forHostEntityManager(): it never closes, clears or resets an open manager (REQ-RUNTIME-003 rule 2), replaces
+ *   a closed one through the registry, and only forgets what the failed run brought in.
  *
  * Transient failures (deadlock, lock wait timeout, serialization failure, lost savepoint) are rethrown as
  * TransientStorageFailure with the storage error as previous; anything else is rethrown unchanged.
@@ -62,6 +72,8 @@ use function spl_object_id;
  */
 final readonly class DoctrineTransactionRunner implements TransactionRunnerInterface
 {
+    public const HOST_PENDING_MESSAGE = 'The host entity manager has pending changes (scheduled insertions, updates or deletions): flush or clear them before running a unit of work with forHostEntityManager(); a failed run would otherwise discard them.';
+
     private TransientFailureClassifier $classifier;
 
     private ConnectionRepairer $repairer;
@@ -73,6 +85,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         private ?string $managerName,
         private ?int $retryAfterSeconds,
         private LoggerInterface $logger,
+        private bool $hostManager = false,
     ) {
         $this->classifier = new TransientFailureClassifier();
         $this->repairer   = new ConnectionRepairer(null, $logger);
@@ -87,8 +100,12 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * Runs ORM units of work: flushes the manager before the commit. After a failure the manager is closed and reset
-     * through the registry (fetched from it on every call), or cleared when no registry is given.
+     * Runs ORM units of work on a manager the bundle owns: flushes the manager before the commit. After a failure the
+     * manager is closed and reset through the registry (fetched from it on every call), or cleared when no registry is
+     * given (see the class description).
+     *
+     * For the host application's manager use forHostEntityManager(): this factory may clear or reset an open manager,
+     * which REQ-RUNTIME-003 rule 2 forbids on the host's.
      */
     public static function forEntityManager(
         EntityManagerInterface $entityManager,
@@ -100,9 +117,52 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds, $logger ?? new NullLogger());
     }
 
+    /**
+     * Runs ORM units of work on the host application's manager (REQ-RUNTIME-003 rule 2): flushes it before the commit
+     * like forEntityManager(), but after a failure it never closes, clears or resets an open manager.
+     *
+     * The manager must be clean when run() starts (audit TA3-6): with pending changes (scheduled insertions, updates
+     * or deletions, after UnitOfWork::computeChangeSets(), which scans the identity map and cascade-persists new
+     * entities it reaches) run() throws LogicException before opening a transaction, since a flush inside the run
+     * would carry the host's work into a transaction that may roll back. Flush or clear first.
+     *
+     * After a failure it only:
+     *
+     * - replaces a closed manager through the registry (resetManager(); without a registry a closed manager is left
+     *   for the host, or for WorkerConnectionHygiene at the next request);
+     * - forgets what the failed run brought into an open manager (entities that entered the identity map or were
+     *   scheduled for insertion during the run): they are detached without cascading into the caller's entities,
+     *   removed from the caller's initialized collections, and a to-one of a caller's entity pointing at one gets its
+     *   original value back. A later flush by the host therefore cannot write the rolled-back entities again, and the
+     *   identity map does not serve their rows.
+     *
+     * That is all it covers. Any other change the operation made to the caller's entities (a field, a removed
+     * element, a value flushed and rolled back) stays, and a notice is logged when they have pending changes: the
+     * caller decides whether to refresh() or clear().
+     */
+    public static function forHostEntityManager(
+        EntityManagerInterface $entityManager,
+        ?ManagerRegistry $registry = null,
+        ?string $managerName = null,
+        ?int $retryAfterSeconds = 1,
+        ?LoggerInterface $logger = null,
+    ): self {
+        return new self(null, $entityManager, $registry, $managerName, $retryAfterSeconds, $logger ?? new NullLogger(), true);
+    }
+
+    /**
+     * With forHostEntityManager(), throws LogicException (HOST_PENDING_MESSAGE) when the host's manager has pending
+     * changes before the run.
+     */
     public function run(callable $operation): mixed
     {
-        $manager    = $this->manager();
+        $manager = $this->manager();
+        // Audit TA3-6: a flush inside the run (or the runner's own) would carry the host's pending work into a
+        // transaction that may roll back, and forgetting the run's entities would then silently lose it.
+        if ($this->hostManager && $manager instanceof EntityManagerInterface && $this->hasPendingChanges($manager)) {
+            throw new LogicException(self::HOST_PENDING_MESSAGE);
+        }
+
         $connection = $manager?->getConnection() ?? $this->connection;
         assert($connection instanceof Connection);
         $entryLevel = $connection->getTransactionNestingLevel();
@@ -148,6 +208,12 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      */
     private function discardPendingChanges(EntityManagerInterface $manager, Throwable $failure, RunObserver $observer, array $before): void
     {
+        if ($this->hostManager) {
+            $this->releaseHostManager($manager, $before);
+
+            return;
+        }
+
         if (!$manager->isOpen() || $this->isStorageFailure($failure)) {
             if ($this->registry instanceof ManagerRegistry) {
                 SafeLog::log($this->logger, 'notice', 'Closing and resetting the entity manager after a storage failure.', [
@@ -200,6 +266,140 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
             SafeLog::log($this->logger, 'debug', 'Clearing the entity manager: changes were left pending.', []);
             $manager->clear();
         }
+    }
+
+    /**
+     * The host's manager after a failed run: a closed one is replaced, an open one is never closed, cleared or reset.
+     * Only what the run brought in is forgotten: it is detached without cascading into the caller's entities (audit
+     * TA3-1), and unlinked from them (TA3-2): removed from their initialized collections and replaced, on a to-one
+     * association, by the association's original value. Anything else the operation changed on the caller's entities
+     * stays; a notice says so.
+     *
+     * @param array<int, object> $before The entities managed or scheduled for insertion when the run started
+     */
+    private function releaseHostManager(EntityManagerInterface $manager, array $before): void
+    {
+        if (!$manager->isOpen()) {
+            if ($this->registry instanceof ManagerRegistry) {
+                SafeLog::log($this->logger, 'notice', 'Replacing the closed host entity manager.', [
+                    'manager' => $this->managerName,
+                ]);
+                $this->registry->resetManager($this->managerName);
+            }
+
+            return;
+        }
+
+        $unitOfWork = $manager->getUnitOfWork();
+        $brought    = array_diff_key($this->managedEntities($manager) + $unitOfWork->getScheduledEntityInsertions(), $before);
+        // UnitOfWork::detach() follows cascade: detach into any entity; doDetach() with the caller's entities already
+        // "visited" stops there. Same private signature in ORM 2.20 and 3.x.
+        $detach = Closure::bind(static function (UnitOfWork $unitOfWork, object $entity, array $visited): void {
+            $unitOfWork->doDetach($entity, $visited);
+        }, null, UnitOfWork::class);
+        foreach ($brought as $entity) {
+            $detach($unitOfWork, $entity, $before);
+        }
+
+        $changed = 0;
+        foreach ($before as $entity) {
+            if ($manager->contains($entity) && !$unitOfWork->isUninitializedObject($entity)
+                && $this->unlinkBrought($manager, $entity, $brought)) {
+                ++$changed;
+            }
+        }
+
+        SafeLog::log($this->logger, 'debug', 'Detached what the failed run brought into the host entity manager.', [
+            'manager'  => $this->managerName,
+            'detached' => count($brought),
+        ]);
+
+        if ($changed > 0) {
+            SafeLog::log($this->logger, 'notice', 'Entities the host managed before the failed run still have pending changes (the host\'s own or the run\'s); the host decides whether to refresh() or clear().', [
+                'manager'  => $this->managerName,
+                'entities' => $changed,
+            ]);
+        }
+    }
+
+    /**
+     * Removes the brought entities from one caller entity's associations and tells whether it still differs from its
+     * original data (a field, a to-one, a dirty collection). Reads only loaded state: no query, no change-set
+     * computation (which would cascade-persist).
+     *
+     * @param array<int, object> $brought
+     */
+    private function unlinkBrought(EntityManagerInterface $manager, object $entity, array $brought): bool
+    {
+        $metadata = $manager->getClassMetadata($entity::class);
+        $original = $manager->getUnitOfWork()->getOriginalEntityData($entity);
+        $changed  = false;
+
+        foreach ($metadata->getAssociationNames() as $field) {
+            $value = $metadata->getFieldValue($entity, $field);
+
+            if ($value instanceof PersistentCollection) {
+                $changed = $this->unlinkFromCollection($value, $brought) || $changed;
+
+                continue;
+            }
+
+            // The run started clean (TA3-6), so a managed caller entity has original data; null otherwise (TA3-7).
+            if (is_object($value) && isset($brought[spl_object_id($value)])) {
+                $metadata->setFieldValue($entity, $field, $value = $original[$field] ?? null);
+            }
+
+            $changed = $changed || (array_key_exists($field, $original) && $value !== $original[$field]);
+        }
+
+        foreach ($metadata->getFieldNames() as $field) {
+            $changed = $changed || (array_key_exists($field, $original) && $metadata->getFieldValue($entity, $field) !== $original[$field]);
+        }
+
+        return $changed;
+    }
+
+    /**
+     * @param PersistentCollection<array-key, mixed> $collection
+     * @param array<int, object> $brought
+     *
+     * @return bool Whether the collection still has changes to flush
+     */
+    private function unlinkFromCollection(PersistentCollection $collection, array $brought): bool
+    {
+        // unwrap(): no orphan-removal scheduling of a detached element, and no load of an uninitialized collection
+        // (add() on one keeps the new element in the wrapped collection without initializing it).
+        $elements = $collection->unwrap();
+        foreach ($elements->toArray() as $key => $element) {
+            if (is_object($element) && isset($brought[spl_object_id($element)])) {
+                $elements->remove($key);
+            }
+        }
+
+        $snapshot = [];
+        foreach ($collection->getSnapshot() as $element) {
+            if (is_object($element) && !isset($brought[spl_object_id($element)])) {
+                $snapshot[spl_object_id($element)] = true;
+            }
+        }
+
+        $current = [];
+        foreach ($elements->toArray() as $element) {
+            if (is_object($element)) {
+                $current[spl_object_id($element)] = true;
+            }
+        }
+
+        // Only the run's elements made it differ from what was loaded: back to clean.
+        ksort($current);
+        ksort($snapshot);
+        if ($current === $snapshot) {
+            $collection->isInitialized() ? $collection->takeSnapshot() : $collection->setDirty(false);
+
+            return false;
+        }
+
+        return $collection->isDirty();
     }
 
     /**

@@ -9,10 +9,14 @@ use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use stdClass;
+use Symfony\Component\HttpFoundation\Request;
 use Throwable;
 
 /**
@@ -59,5 +63,57 @@ final class ConflictCodeTest extends TestCase
     public function testForFailure(Throwable $failure, ConflictCode $expected): void
     {
         self::assertSame($expected, ConflictCode::forFailure($failure));
+    }
+
+    public function testACommitSinceTheMarkMakesAnyConflictCommitted(): void
+    {
+        $ledger = new CommitLedger();
+        $ledger->record();
+        $mark     = new CommitMark($ledger);
+        $conflict = new ConcurrencyConflict(3, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock());
+
+        self::assertSame(1, $mark->count);
+        self::assertFalse($mark->committedSince(), 'A commit before the mark does not count.');
+        self::assertSame(ConflictCode::RetrySafe, $this->code($conflict, $mark));
+        self::assertSame(ConflictCode::RetrySafe, $this->code($conflict));
+
+        $ledger->record();
+
+        self::assertTrue($mark->committedSince());
+        self::assertSame(ConflictCode::Committed, $this->code($conflict, $mark));
+        self::assertSame(ConflictCode::Committed, $this->code(FakeDriverException::deadlock(), $mark));
+        self::assertSame(ConflictCode::RetrySafe, $this->code($conflict), 'Without the mark the failure alone decides.');
+    }
+
+    public function testForRequestReadsTheRequestsMark(): void
+    {
+        $ledger   = new CommitLedger();
+        $conflict = new ConcurrencyConflict(3, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock());
+        $request  = Request::create('/x', 'POST');
+
+        self::assertSame(ConflictCode::RetrySafe, $this->codeFor($request, $conflict), 'No mark.');
+
+        $request->attributes->set(CommitMark::REQUEST_ATTRIBUTE, new stdClass());
+        $ledger->record();
+        self::assertSame(ConflictCode::RetrySafe, $this->codeFor($request, $conflict), 'Anything but a CommitMark is ignored.');
+
+        $request->attributes->set(CommitMark::REQUEST_ATTRIBUTE, new CommitMark($ledger));
+        self::assertSame(ConflictCode::RetrySafe, $this->codeFor($request, $conflict));
+
+        $ledger->record();
+        self::assertSame(ConflictCode::Committed, $this->codeFor($request, $conflict));
+        self::assertSame(ConflictCode::Committed, $this->codeFor(Request::create('/y'), new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true)));
+    }
+
+    /** @phpstan-impure the answer depends on the ledger, which moves between calls */
+    private function code(Throwable $failure, ?CommitMark $since = null): ConflictCode
+    {
+        return ConflictCode::forFailure($failure, $since);
+    }
+
+    /** @phpstan-impure the answer depends on the ledger, which moves between calls */
+    private function codeFor(Request $request, Throwable $failure): ConflictCode
+    {
+        return ConflictCode::forRequest($request, $failure);
     }
 }

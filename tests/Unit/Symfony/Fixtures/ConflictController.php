@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\TransientFailureKind;
 use Nowo\TransactionDoctrine\WriteUnit\AsWriteUnit;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,8 +18,16 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final readonly class ConflictController
 {
-    public function __construct(private Attempts $attempts)
+    public function __construct(private Attempts $attempts, private ?CommitLedger $ledger = null)
     {
+    }
+
+    /** Commits (as the ledger sees it), then meets a conflict that itself committed nothing. */
+    public function committed(): Response
+    {
+        $this->ledger?->record();
+
+        throw new ConcurrencyConflict(3, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock());
     }
 
     public function conflict(): Response

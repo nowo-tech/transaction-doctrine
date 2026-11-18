@@ -41,15 +41,16 @@ use const PHP_URL_SCHEME;
  * implementing LockConflictExceptionInterface in the previous chain, or whatever a tagged
  * ConflictExceptionMapperInterface accepts (the exception-mapping hook: no route-name matching here).
  *
- * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCode): CONFLICT_001 when nothing was committed
- * (with `Retry-After`), CONFLICT_002 when part of the unit was (ConcurrencyConflict::$committed, or a lost savepoint
- * with no deadlock behind it; no `Retry-After`). It is the first tagged ConflictResponseFormatterInterface that returns
+ * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCode::forRequest()): CONFLICT_001 when nothing
+ * was committed (with `Retry-After`), CONFLICT_002 when part of the request was (ConcurrencyConflict::$committed, a
+ * lost savepoint with no deadlock behind it, or a commit since the request's CommitMark, taken at kernel.request when
+ * `commit_detection` is on; no `Retry-After`). It is the first tagged ConflictResponseFormatterInterface that returns
  * one (a bundle's own API shape; the context carries the code); else JSON
  * `{"error": "<json_error>", "code": "CONFLICT_00n", "message": "<text>"}` for JSON, XHR and API-path requests; else the
  * branded HTML page with *Try again* and `data-conflict-code="CONFLICT_00n"` (Twig template
  * `@NowoTransactionDoctrine/conflict.html.twig`, overridable through the bundle path or
  * `conflict_response.template`; it extends UiKit's error page when UiKit is installed). Every answer gets the
- * policy's status, `Retry-After` and `Cache-Control: no-store`. Without Twig (or when the template fails) a plain page
+ * policy's status, `Retry-After`, `X-Conflict-Code: CONFLICT_00n` and `Cache-Control: no-store`. Without Twig (or when the template fails) a plain page
  * is built here.
  *
  * Runs on kernel.exception at priority 64, before the bundles' own exception mappers. Logs one constant warning with
@@ -111,7 +112,7 @@ final readonly class ConcurrencyConflictResponder
 
         $request  = $event->getRequest();
         $attempts = $this->attempts($failure);
-        $code     = ConflictCode::forFailure($failure);
+        $code     = ConflictCode::forRequest($request, $failure);
         SafeLog::log($this->logger, 'warning', 'A write gave up after repeated database lock conflicts; answered the conflict status.', [
             'route'     => $this->route($request),
             'method'    => $request->getMethod(),
@@ -142,7 +143,7 @@ final readonly class ConcurrencyConflictResponder
 
     public function respond(Request $request, Throwable $failure): Response
     {
-        $code      = ConflictCode::forFailure($failure);
+        $code      = ConflictCode::forRequest($request, $failure);
         $committed = !$code->retrySafe();
         $context   = new ConflictResponseContext(
             $this->policy->status,
@@ -174,6 +175,7 @@ final readonly class ConcurrencyConflictResponder
             $response->headers->set('Retry-After', (string) $context->retryAfterSeconds);
         }
 
+        $response->headers->set(ConflictResponsePolicy::CODE_HEADER, $context->code->value);
         $response->headers->set('Cache-Control', 'no-store, private');
 
         return $response;

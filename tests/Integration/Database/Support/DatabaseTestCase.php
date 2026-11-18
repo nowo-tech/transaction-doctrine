@@ -69,8 +69,16 @@ abstract class DatabaseTestCase extends TestCase
             self::markTestSkipped($environmentVariable . ' is not set.');
         }
 
+        $this->bootUrl($url);
+    }
+
+    /** Boots on a DSN given directly (the unit suite's SQLite file). */
+    protected function bootUrl(string $url): void
+    {
         $this->url        = $url;
         $this->connection = $this->connect();
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_card');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_board');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_note');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_counter');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ballast');
@@ -79,6 +87,9 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
         $this->connection->executeStatement('CREATE TABLE ddrb_note (id INT NOT NULL PRIMARY KEY, counter_id INT NOT NULL)');
         $this->connection->executeStatement('INSERT INTO ddrb_note (id, counter_id) VALUES (1, 1)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_board (id INT NOT NULL PRIMARY KEY)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_card (id INT NOT NULL PRIMARY KEY, board_id INT NOT NULL)');
+        $this->connection->executeStatement('INSERT INTO ddrb_board (id) VALUES (1)');
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }
@@ -160,6 +171,6 @@ abstract class DatabaseTestCase extends TestCase
             $configuration->setMiddlewares([new CommitTrackingMiddleware($this->ledger)]);
         }
 
-        return DriverManager::getConnection((new DsnParser(['mysql' => 'pdo_mysql', 'pgsql' => 'pdo_pgsql']))->parse($this->url), $configuration);
+        return DriverManager::getConnection((new DsnParser(['mysql' => 'pdo_mysql', 'pgsql' => 'pdo_pgsql', 'sqlite' => 'pdo_sqlite']))->parse($this->url), $configuration);
     }
 }

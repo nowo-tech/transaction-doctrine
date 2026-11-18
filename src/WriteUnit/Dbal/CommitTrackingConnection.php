@@ -38,7 +38,13 @@ use function str_contains;
 final class CommitTrackingConnection extends AbstractConnectionMiddleware
 {
     /** Statements that never write: anything else run outside a transaction counts as a durable write. */
-    private const READ_ONLY = '/^(?:SELECT|SHOW|SET|EXPLAIN|DESCRIBE|DESC|PRAGMA)\b/i';
+    private const READ_ONLY = '/^(?:SELECT|SHOW|SET|EXPLAIN|DESCRIBE|DESC|PRAGMA|WITH|VALUES|TABLE)\b/i';
+
+    /**
+     * A `WITH` that names a write anywhere (PostgreSQL data-modifying CTEs, MySQL / MariaDB `WITH … UPDATE` /
+     * `DELETE`): counted. Conservative: an identifier or literal spelled like one of the keywords also counts.
+     */
+    private const WRITING_WITH = '/^WITH\b.*\b(?:INSERT|UPDATE|DELETE|MERGE)\b/is';
 
     /** EXPLAIN ANALYZE executes the statement it explains (PostgreSQL, MariaDB ANALYZE): a write. */
     private const EXPLAIN_ANALYZE = '/^EXPLAIN\s*(?:ANALY[SZ]E\b|\([^)]*\bANALY[SZ]E\b)/i';
@@ -111,7 +117,8 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
         $statement = (string) preg_replace(self::LEADING_COMMENTS, '', $sql, 1);
 
         if ($this->isMultiStatement($sql)
-            || (!$this->inTransaction && (preg_match(self::READ_ONLY, $statement) !== 1 || preg_match(self::EXPLAIN_ANALYZE, $statement) === 1))
+            || (!$this->inTransaction && (preg_match(self::READ_ONLY, $statement) !== 1 || preg_match(self::EXPLAIN_ANALYZE, $statement) === 1
+                || preg_match(self::WRITING_WITH, $statement) === 1))
             || ($this->inTransaction && preg_match(self::IMPLICIT_COMMIT, $statement) === 1 && $this->isMySql())) {
             $this->ledger->record();
         }

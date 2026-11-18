@@ -125,18 +125,30 @@ final class TransientFailureClassifier
      */
     private function codes(Throwable $throwable): ?array
     {
-        if ($throwable instanceof DriverExceptionInterface) {
-            return [$throwable->getCode(), $throwable->getSQLState()];
-        }
-
+        // First: DBAL 3's Driver\PDO\PDOException is both a PDOException and a driver exception, and its getCode() is
+        // the SQLSTATE string ('40001'), never an int (audit TA3-5: a TypeError under strict_types lost the failure).
         if ($throwable instanceof PDOException) {
             $vendorCode = $throwable->errorInfo[1] ?? null;
             $sqlState   = $throwable->errorInfo[0] ?? $throwable->getCode();
 
+            if ($throwable instanceof DriverExceptionInterface && !is_string($sqlState)) {
+                $sqlState = $throwable->getSQLState();
+            }
+
             return [is_int($vendorCode) ? $vendorCode : 0, is_string($sqlState) ? $sqlState : null];
         }
 
+        if ($throwable instanceof DriverExceptionInterface) {
+            return [$this->intCode($throwable->getCode()), $throwable->getSQLState()];
+        }
+
         return null;
+    }
+
+    /** A vendor code is an int; anything else a driver put in getCode() (a SQLSTATE string) is no vendor code. */
+    private function intCode(mixed $code): int
+    {
+        return is_int($code) ? $code : 0;
     }
 
     /** Constraint violations (SQLSTATE class 23) and lost connections (class 08, MySQL / MariaDB 2006, 2013, 4031). */

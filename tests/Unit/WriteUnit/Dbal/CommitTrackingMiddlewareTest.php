@@ -112,6 +112,27 @@ final class CommitTrackingMiddlewareTest extends TestCase
         $connection->rollBack();
     }
 
+    /** Audit TA3-4: WITH, VALUES and TABLE read; a WITH naming INSERT, UPDATE, DELETE or MERGE is still counted. */
+    public function testReadOnlyCtesValuesAndTableAreNotCounted(): void
+    {
+        $ledger     = new CommitLedger();
+        $connection = $this->connect($ledger, 'pgsql');
+
+        $connection->query('WITH x AS (SELECT 1 AS a) SELECT a FROM x');
+        $connection->query("with recursive n(i) as (select 1 union all select i + 1 from n where i < 3)\nselect * from n");
+        $connection->query('VALUES (1), (2)');
+        $connection->query('TABLE ddrb_counter');
+        $connection->query('(WITH x AS (SELECT 1) SELECT * FROM x)');
+        $connection->query('WITH x AS (SELECT updated_at, last_update FROM t) SELECT * FROM x');
+        self::assertSame(0, $ledger->count());
+
+        $connection->query('WITH moved AS (DELETE FROM t RETURNING *) SELECT * FROM moved');
+        $connection->query("WITH x AS (SELECT 1)\nINSERT INTO t SELECT * FROM x");
+        $connection->exec('WITH x AS (SELECT id FROM t) UPDATE t SET a = 1 WHERE id IN (SELECT id FROM x)');
+        $connection->exec('with s as (select 1 as id) merge into t using s on t.id = s.id when matched then do nothing');
+        self::assertSame(4, $ledger->count());
+    }
+
     public function testImplicitCommitsAreMySqlOnly(): void
     {
         $servers = ['pgsql' => 0, 'mysql' => 1, 'unknown' => 1] + (class_exists(mysqli::class) ? ['mysqli' => 1] : []);

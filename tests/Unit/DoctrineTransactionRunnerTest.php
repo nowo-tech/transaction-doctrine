@@ -25,6 +25,8 @@ use PHPUnit\Framework\TestCase;
 use SplObjectStorage;
 use stdClass;
 
+use function array_column;
+
 use const PHP_INT_MAX;
 
 final class DoctrineTransactionRunnerTest extends TestCase
@@ -357,6 +359,90 @@ final class DoctrineTransactionRunnerTest extends TestCase
 
         DoctrineTransactionRunner::forEntityManager($manager)->run(static function () use ($refusal): never {
             throw $refusal;
+        });
+    }
+
+    public function testTheHostRunnerFlushesBeforeCommitLikeTheOwnedOne(): void
+    {
+        $connection = $this->connection([0]);
+        $manager    = $this->manager($connection, true);
+        $manager->expects($this->once())->method('flush');
+        $connection->expects($this->once())->method('commit');
+
+        $result = random_int(1, PHP_INT_MAX);
+
+        self::assertSame($result, DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): int => $result));
+    }
+
+    /** A domain failure after a flush inside the run: the owned runner clears, the host runner does not. */
+    public function testTheHostRunnerDoesNotClearAfterAFlushedRefusal(): void
+    {
+        $observers = [];
+        $events    = $this->capturingEvents($observers);
+        $manager   = $this->manager($this->connection([0, 1, 1]), true, events: $events);
+        $manager->method('contains')->willReturn(false);
+        $manager->expects($this->never())->method('clear');
+        $manager->expects($this->never())->method('detach');
+        $refusal = new DomainException('refused');
+
+        $this->expectExceptionObject($refusal);
+
+        DoctrineTransactionRunner::forHostEntityManager($manager)->run(static function () use (&$observers, $refusal): never {
+            foreach ($observers as $observer) {
+                $observer->postFlush();
+            }
+
+            throw $refusal;
+        });
+    }
+
+    /** Audit TA3-6: pending changes in the host's manager are refused before any transaction is opened. */
+    public function testTheHostRunnerRefusesAManagerWithPendingChanges(): void
+    {
+        $connection = $this->connection([0]);
+        $connection->expects($this->never())->method('beginTransaction');
+        $manager = $this->manager($connection, true, true);
+        $manager->expects($this->never())->method('flush');
+
+        $this->expectExceptionObject(new LogicException(DoctrineTransactionRunner::HOST_PENDING_MESSAGE));
+
+        DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): never => throw new LogicException('never runs'));
+    }
+
+    public function testTheHostRunnerReplacesOnlyAClosedManager(): void
+    {
+        $manager = $this->manager($this->connection([0, 1, 1]), false);
+        $manager->expects($this->never())->method('close');
+        $manager->expects($this->never())->method('clear');
+        $registry = $this->createMock(ManagerRegistry::class);
+        $registry->method('getManager')->with('orders')->willReturn($manager);
+        $registry->expects($this->once())->method('resetManager')->with('orders');
+        $logger = new RecordingLogger();
+        $bug    = new LogicException('bug');
+
+        $this->expectExceptionObject($bug);
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager, $registry, 'orders', 1, $logger)->run(static function () use ($bug): never {
+                throw $bug;
+            });
+        } finally {
+            self::assertContains('Replacing the closed host entity manager.', array_column($logger->records, 'message'));
+        }
+    }
+
+    public function testTheHostRunnerLeavesAClosedManagerWithoutARegistry(): void
+    {
+        $manager = $this->manager($this->connection([0, 1, 1]), false);
+        $manager->expects($this->never())->method('close');
+        $manager->expects($this->never())->method('clear');
+        $manager->expects($this->never())->method('detach');
+        $bug = new LogicException('bug');
+
+        $this->expectExceptionObject($bug);
+
+        DoctrineTransactionRunner::forHostEntityManager($manager)->run(static function () use ($bug): never {
+            throw $bug;
         });
     }
 

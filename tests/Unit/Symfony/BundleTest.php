@@ -127,6 +127,28 @@ final class BundleTest extends TestCase
         $kernel->shutdown();
     }
 
+    /** Audit TH X-1 / X-2 through the container: the watermark is wired at kernel.request, the header on every answer. */
+    public function testACommitEarlierInTheRequestAnswersConflict002(): void
+    {
+        $kernel = $this->boot();
+
+        $committed = $kernel->handle(Request::create('/api/committed', 'POST'));
+        self::assertSame(409, $committed->getStatusCode());
+        self::assertSame('CONFLICT_002', $committed->headers->get('X-Conflict-Code'));
+        self::assertFalse($committed->headers->has('Retry-After'));
+
+        $plain = $kernel->handle(Request::create('/api/conflict', 'POST'));
+        self::assertSame('CONFLICT_001', $plain->headers->get('X-Conflict-Code'));
+        self::assertSame('1', $plain->headers->get('Retry-After'));
+        self::assertTrue($this->testContainer($kernel)->has('nowo_transaction_doctrine.request_commit_watermark'));
+        $kernel->shutdown();
+
+        $off = $this->boot(['commit_detection' => false]);
+        self::assertSame('CONFLICT_001', $off->handle(Request::create('/api/committed', 'POST'))->headers->get('X-Conflict-Code'), 'Without commit detection the failure alone decides.');
+        self::assertFalse($this->testContainer($off)->has('nowo_transaction_doctrine.request_commit_watermark'));
+        $off->shutdown();
+    }
+
     public function testTransientFailuresCanBeMapped(): void
     {
         $kernel    = $this->boot(['conflict_response' => ['map_transient_failures' => true]]);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Symfony\Conflict;
 
 use InvalidArgumentException;
+use Nowo\TransactionDoctrine\ConflictCode;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
 
@@ -27,6 +28,12 @@ final readonly class ConflictResponsePolicy
     public const STATUS_SERVICE_UNAVAILABLE = 503;
     public const STATUSES                   = [self::STATUS_CONFLICT, self::STATUS_SERVICE_UNAVAILABLE];
     public const DEFAULT_RETRY_AFTER        = 1;
+
+    /**
+     * The platform's conflict-code header (REQ-RUNTIME-003 rule 6, audit TH X-2): `CONFLICT_001` or `CONFLICT_002`
+     * only. Cross-origin APIs list it in `Access-Control-Expose-Headers`.
+     */
+    public const CODE_HEADER = 'X-Conflict-Code';
 
     /**
      * @throws InvalidArgumentException When the status is not 409 or 503, or Retry-After is negative
@@ -53,6 +60,9 @@ final readonly class ConflictResponsePolicy
     }
 
     /**
+     * The `Retry-After` header alone. Kept for BC: prefer headersFor(), which also sends `X-Conflict-Code` and drops
+     * `Retry-After` for CONFLICT_002.
+     *
      * @return array{Retry-After: string}
      */
     public function headers(?int $hint = null): array
@@ -61,7 +71,37 @@ final readonly class ConflictResponsePolicy
     }
 
     /**
+     * The headers of a conflict answer with code $code: `X-Conflict-Code` always, `Retry-After` only for CONFLICT_001
+     * (a CONFLICT_002 answer must not invite a blind retry, whatever the failure's hint says).
+     *
+     * @param int|null $hint A failure's own hint; null = the configured value
+     *
+     * @return array{X-Conflict-Code: string, Retry-After?: string}
+     */
+    public function headersFor(ConflictCode $code, ?int $hint = null): array
+    {
+        if (!$code->retrySafe()) {
+            return [self::CODE_HEADER => $code->value];
+        }
+
+        return [self::CODE_HEADER => $code->value, 'Retry-After' => (string) $this->retryAfter($hint)];
+    }
+
+    /**
+     * An HTTP exception with the policy's status and headersFor($code), for routes rendered by the host's error page:
+     * the page then carries the code in `X-Conflict-Code` even when its body has none.
+     *
+     * @param string $message Generic, client-safe text
+     */
+    public function httpExceptionFor(ConflictCode $code, string $message, ?Throwable $previous = null, ?int $hint = null): HttpException
+    {
+        return new HttpException($this->status, $message, $previous, $this->headersFor($code, $hint));
+    }
+
+    /**
      * An HTTP exception with the policy's status and `Retry-After`, for HTML routes rendered by the host's error page.
+     * Kept for BC: prefer httpExceptionFor(), which also sends `X-Conflict-Code` and drops `Retry-After` for
+     * CONFLICT_002.
      *
      * @param string $message Generic, client-safe text
      */

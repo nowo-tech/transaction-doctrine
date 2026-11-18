@@ -18,6 +18,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Request commit watermark (audit TH X-1, REQ-RUNTIME-003 rule 6 request-level detection):** a conflict after a
+  commit earlier in the same request (the host, another bundle, an earlier unit) answers `CONFLICT_002` without
+  `Retry-After` instead of `CONFLICT_001` + `Retry-After`, which invited a blind retry of committed work.
+  - New `Nowo\TransactionDoctrine\WriteUnit\CommitMark` (a watermark on the `CommitLedger`, `committedSince()`).
+  - New `Nowo\TransactionDoctrine\Symfony\EventListener\RequestCommitWatermark`: with `commit_detection` on, takes the
+    mark at `kernel.request` (priority 4096) on the main request, in the request attribute
+    `CommitMark::REQUEST_ATTRIBUTE`; sub-requests carry the main request's mark.
+  - `ConflictCode::forRequest(Request $request, Throwable $failure)` for bundles answering in their own shape, and an
+    optional `?CommitMark $since` argument on `ConflictCode::forFailure()`.
+  - The responder (answer and log) uses `ConflictCode::forRequest()`.
+  - The `CommitLedger` service is aliased as `Nowo\TransactionDoctrine\WriteUnit\CommitLedger` (with
+    `commit_detection`), so a Messenger handler or command can take its own mark.
+- **`X-Conflict-Code` header (audit TH X-2, platform convention):** every responder answer carries
+  `X-Conflict-Code: CONFLICT_001|CONFLICT_002` (only those two values), whatever built the body.
+  `ConflictResponsePolicy::headersFor(ConflictCode $code, ?int $hint)` (the header, plus `Retry-After` only for
+  `CONFLICT_001`), `ConflictResponsePolicy::httpExceptionFor()` and the `ConflictResponsePolicy::CODE_HEADER` constant
+  let bundles send it too. Documented: cross-origin APIs add it to `Access-Control-Expose-Headers`; clients key on
+  `code` or the header, never on `error`.
+- **`DoctrineTransactionRunner::forHostEntityManager()` (audit TG delta, REQ-RUNTIME-003 rule 2):** a runner for the
+  host application's entity manager. After a failure it never closes, clears or resets an open manager; it replaces a
+  closed one through the registry and detaches only what the failed run brought in (entities that entered the
+  identity map or were scheduled for insertion during the run). `forEntityManager()` is unchanged and now documented
+  as the factory for bundle-owned managers.
+  - The detach never cascades (`cascade: detach`) into an entity the host managed before the run (audit TA3-1).
+  - The brought entities are removed from the host entities' initialized collections, and a host to-one pointing at
+    one gets its original value back, so the host's next flush cannot re-insert them (audit TA3-2).
+  - A notice is logged when host entities still have pending changes after the failure (audit TA3-3).
+  - `run()` refuses a host manager that already has pending changes (scheduled insertions, updates or deletions,
+    after `UnitOfWork::computeChangeSets()`) with a `LogicException`
+    (`DoctrineTransactionRunner::HOST_PENDING_MESSAGE`) before opening a transaction: a failure after a flush inside
+    the run would otherwise lose the host's work silently (audit TA3-6). A to-one restored on a host entity with no
+    original value is set to `null` (TA3-7).
+
+### Changed
+
+- Commit detection: `WITH`, `VALUES` and `TABLE` statements outside a transaction are reads and no longer count as a
+  commit; a `WITH` naming `INSERT`, `UPDATE`, `DELETE` or `MERGE` (a data-modifying CTE) still counts (audit TA3-4).
+  Fewer `CONFLICT_002` answers and refused replays after a plain read.
+
+### Fixed
+
+- **DBAL 3: a driver error whose code is a SQLSTATE string no longer crashes the classifier (audit TA3-5; affected
+  1.1.0 to 1.5.x on DBAL 3).** DBAL 3's `Doctrine\DBAL\Driver\PDO\PDOException` is both a `PDOException` and a driver
+  exception, and its `getCode()` is the SQLSTATE (`'40001'`, `'23505'`). `TransientFailureClassifier` passed it to an
+  `int` parameter under `strict_types`: a `TypeError` replaced the original failure, so the runner's repair and
+  cleanup did not finish and a write unit did not replay. A PostgreSQL serialization failure at COMMIT, for example,
+  answered a 500 instead of being replayed. The classifier now reads the vendor code from `errorInfo[1]` and the
+  SQLSTATE from `errorInfo[0]` (or `getSQLState()`), and treats any non-int code as no vendor code. `WriteUnit`
+  classifies through it, so it is fixed too. DBAL 4 was not affected. No GHSA (owner decision 2026-11-18).
+
 ## [1.5.0] - 2026-11-18
 
 ### Added

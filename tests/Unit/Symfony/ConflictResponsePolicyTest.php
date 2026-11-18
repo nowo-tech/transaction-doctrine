@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony;
 
 use InvalidArgumentException;
+use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -44,6 +45,33 @@ final class ConflictResponsePolicyTest extends TestCase
         self::assertSame('Retry later.', $exception->getMessage());
         self::assertSame($previous, $exception->getPrevious());
         self::assertSame(503, (new ConflictResponsePolicy(503))->httpException('x')->getStatusCode());
+    }
+
+    public function testHeadersForCarryTheCodeAndRetryAfterOnlyWhenRetrySafe(): void
+    {
+        $policy = new ConflictResponsePolicy(409, 3);
+
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_001', 'Retry-After' => '3'], $policy->headersFor(ConflictCode::RetrySafe));
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_001', 'Retry-After' => '7'], $policy->headersFor(ConflictCode::RetrySafe, 7));
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_002'], $policy->headersFor(ConflictCode::Committed, 7), 'A committed conflict never invites a blind retry.');
+        self::assertSame(['Retry-After' => '3'], $policy->headers(), 'headers() keeps its 1.5 shape.');
+    }
+
+    public function testHttpExceptionForCarriesTheCodeHeader(): void
+    {
+        $previous = new RuntimeException('storage');
+        $policy   = new ConflictResponsePolicy(503, 2);
+
+        $retrySafe = $policy->httpExceptionFor(ConflictCode::RetrySafe, 'Retry later.', $previous);
+        self::assertSame(503, $retrySafe->getStatusCode());
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_001', 'Retry-After' => '2'], $retrySafe->getHeaders());
+        self::assertSame('Retry later.', $retrySafe->getMessage());
+        self::assertSame($previous, $retrySafe->getPrevious());
+
+        $committed = $policy->httpExceptionFor(ConflictCode::Committed, 'Reload first.', null, 5);
+        self::assertSame(['X-Conflict-Code' => 'CONFLICT_002'], $committed->getHeaders());
+        self::assertNull($committed->getPrevious());
+        self::assertSame(['Retry-After' => '2'], $policy->httpException('x')->getHeaders(), 'httpException() keeps its 1.5 headers.');
     }
 
     public function testOnly409And503AreAccepted(): void

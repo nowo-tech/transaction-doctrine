@@ -76,7 +76,7 @@ nowo_transaction_doctrine:
 | `replay_on` | `[deadlock, lock_wait_timeout, serialization_failure]` | `serialization_failure` (PostgreSQL 40001, MariaDB 1020) is a default since 1.5.0; `retryable` (any other DBAL `RetryableException`) is opt-in. An explicit list replaces the default |
 | `controller_attribute` | `true` | `#[AsWriteUnit]` on a controller class or action |
 | `controller_routes` | `[]` | Exact route names; `*` is an explicit wildcard (`'*_app_invoice_pay'`) |
-| `commit_detection` | `true` | Registers `CommitTrackingMiddleware` (tag `doctrine.middleware`, all connections) and a `CommitLedger` |
+| `commit_detection` | `true` | Registers `CommitTrackingMiddleware` (tag `doctrine.middleware`, all connections), a `CommitLedger` (alias `Nowo\TransactionDoctrine\WriteUnit\CommitLedger`, 1.6.0) and `RequestCommitWatermark` (`kernel.request`, priority 4096, 1.6.0): a conflict after a commit earlier in the same request answers `CONFLICT_002` |
 | `messenger_middleware` | `true` | Only registered when `symfony/messenger` is installed |
 | `worker_hygiene` | `true` | kernel.request / exception / terminate and `WorkerMessageFailedEvent` |
 | `conflict_response.enabled` | `true` | `false` removes the responder; the policy service stays (bundles read it) |
