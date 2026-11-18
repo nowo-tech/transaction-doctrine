@@ -40,7 +40,7 @@ nowo_transaction_doctrine:
         base_ms: 100
         cap_ms: 200
     # Transient kinds a write unit replays: deadlock, lock_wait_timeout, serialization_failure, retryable.
-    replay_on: [deadlock, lock_wait_timeout]
+    replay_on: [deadlock, lock_wait_timeout, serialization_failure]
     # Run controllers marked #[AsWriteUnit] as write units.
     controller_attribute: true
     # Route names that run as write units (exact; "*" is an explicit wildcard): controllers you cannot annotate.
@@ -73,7 +73,7 @@ nowo_transaction_doctrine:
 |-----|---------|-------|
 | `max_attempts` | `3` | 1–10 |
 | `backoff.floor_ms` / `base_ms` / `cap_ms` | `20` / `100` / `200` | ≥ 0 |
-| `replay_on` | `[deadlock, lock_wait_timeout]` | `serialization_failure` (PostgreSQL 40001, MariaDB 1020) and `retryable` (any other DBAL `RetryableException`) are opt-in |
+| `replay_on` | `[deadlock, lock_wait_timeout, serialization_failure]` | `serialization_failure` (PostgreSQL 40001, MariaDB 1020) is a default since 1.5.0; `retryable` (any other DBAL `RetryableException`) is opt-in. An explicit list replaces the default |
 | `controller_attribute` | `true` | `#[AsWriteUnit]` on a controller class or action |
 | `controller_routes` | `[]` | Exact route names; `*` is an explicit wildcard (`'*_app_invoice_pay'`) |
 | `commit_detection` | `true` | Registers `CommitTrackingMiddleware` (tag `doctrine.middleware`, all connections) and a `CommitLedger` |

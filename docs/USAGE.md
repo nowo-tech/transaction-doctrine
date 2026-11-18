@@ -117,8 +117,8 @@ which is why a failed run never leaves pending changes behind (see the table abo
 ## Write units (1.3.0)
 
 A **write unit** is one host-level unit of work (a controller action, a consumed message, a command step) that is
-**replayed after a lock conflict**: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01) or a lock wait timeout (1205,
-PostgreSQL 55P03) by default. The conflict is found anywhere in the failure's previous chain (a bundle runner's
+**replayed after a lock conflict**: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01), a lock wait timeout (1205,
+PostgreSQL 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020; default since 1.5.0) by default. The conflict is found anywhere in the failure's previous chain (a bundle runner's
 `TransientStorageFailure` included) or inside a Messenger `HandlerFailedException`; the kind comes from
 `TransientFailureClassifier`.
 

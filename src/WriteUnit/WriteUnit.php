@@ -27,8 +27,8 @@ use function iterator_to_array;
 use function usleep;
 
 /**
- * Runs one write unit and replays it after a lock conflict: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01) or a
- * lock wait timeout (1205, 55P03) by default, found in the failure's previous chain (the contract's
+ * Runs one write unit and replays it after a lock conflict: a deadlock (MySQL / MariaDB 1213, PostgreSQL 40P01), a
+ * lock wait timeout (1205, 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020) by default, found in the failure's previous chain (the contract's
  * TransientStorageFailure of a bundle's runner included). At most WriteUnitPolicy::$maxAttempts attempts with a
  * full-jitter pause between them; between two attempts the levels the unit left open are rolled back, closed entity
  * managers reset and open ones cleared (DoctrineStateRepairer), so an attempt never sees what the failed one loaded.

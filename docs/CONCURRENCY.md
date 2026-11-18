@@ -21,7 +21,7 @@ The package owns no table: it writes only the host's or a bundle's data, inside 
 | Path | Transaction | Concurrency control | Conflict answer |
 |------|-------------|---------------------|-----------------|
 | `DoctrineTransactionRunner::run()` | One transaction (or a savepoint inside the caller's) | The caller's | Transient failure rethrown as the contract's `TransientStorageFailure`; nesting level repaired |
-| `WriteUnit::run()` (programmatic, `#[AsWriteUnit]`, `controller_routes`, `WriteUnitMiddleware`) | The unit's runners; never replayed inside a caller's transaction | Replays a deadlock or lock wait timeout (configurable kinds) with full-jitter backoff | `ConcurrencyConflict` after the last attempt, or at once with `committed: true` when the failed attempt had already committed |
+| `WriteUnit::run()` (programmatic, `#[AsWriteUnit]`, `controller_routes`, `WriteUnitMiddleware`) | The unit's runners; never replayed inside a caller's transaction | Replays a deadlock, lock wait timeout or serialization failure (configurable kinds) with full-jitter backoff | `ConcurrencyConflict` after the last attempt, or at once with `committed: true` when the failed attempt had already committed |
 | `ConcurrencyConflictResponder` | None | None | 409 (or 503) + `CONFLICT_001` + `Retry-After`, or `CONFLICT_002` without `Retry-After` |
 | `WorkerConnectionHygiene` | Rolls back leftover levels | None | Closed managers reset, dead connections closed between requests and messages |
 
@@ -109,7 +109,7 @@ reaches the kernel outside a write unit is answered only with `conflict_response
 | `conflict_response.json_error` | `concurrency_conflict` | The JSON `error` key (`_partial` suffix with `CONFLICT_002`); `code` is fixed |
 | `conflict_response.map_transient_failures` | `false` | Also answer raw transient failures and bare lost savepoints reaching the kernel |
 | `commit_detection` | `true` | Feeds `CommitLedger`, which turns a committed-then-conflict attempt into `CONFLICT_002` |
-| `replay_on`, `max_attempts`, `backoff` | `deadlock`, `lock_wait_timeout`; see [Configuration](CONFIGURATION.md) | Which kinds a write unit replays, and how |
+| `replay_on`, `max_attempts`, `backoff` | `deadlock`, `lock_wait_timeout`, `serialization_failure` (1.5.0); see [Configuration](CONFIGURATION.md) | Which kinds a write unit replays, and how; an explicit `replay_on` list replaces the default |
 
 See [Configuration](CONFIGURATION.md) for the full tree.
 
@@ -120,6 +120,8 @@ DBAL 3 + ORM 2 (CI job "Real databases"; no test may be skipped), with two conne
 process):
 
 - real deadlocks, lock wait timeouts and serialization failures, replayed or answered `CONFLICT_001` + `Retry-After`;
+- a real serialization failure inside a write unit (PostgreSQL 40001, MariaDB 1020) replayed by default, then answered
+  409 `CONFLICT_001` once the attempts are exhausted; an explicit `replay_on` without it rethrows it unchanged;
 - a committed-then-conflict unit, not replayed (`committed: true`, `CONFLICT_002`);
 - a real lost savepoint (`ROLLBACK TO SAVEPOINT` unknown: 1305 / 3B001) answered `CONFLICT_002` with no
   `Retry-After`; a real 1305 for a missing function, a real unique violation and a real killed session not mapped;
@@ -132,10 +134,6 @@ process):
 - `CONFLICT_002` from a bare lost savepoint is conservative: the savepoint may have vanished for a reason that
   committed nothing (for example the server rolled back the transaction for a reason the chain does not carry). The
   client is told to read again, never to repeat, which is safe either way.
-- A write unit replays only the kinds in `replay_on` (deadlock and lock wait timeout by default). A serialization
-  failure (PostgreSQL 40001, MariaDB 1020) inside a unit is rethrown unchanged, so by default it is answered as a
-  conflict only with `map_transient_failures: true` (or the bundle's own mapper), or by adding
-  `serialization_failure` to `replay_on`, which turns its last attempt into `ConcurrencyConflict`.
 - Commit detection sees commits on the connections wrapped by `CommitTrackingMiddleware`; a commit made through
   another connection (a second DBAL connection without the middleware, an HTTP call) is invisible to it, so a unit
   must commit at most once or be idempotent as a whole.

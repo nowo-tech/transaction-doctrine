@@ -39,6 +39,22 @@ is additive:
 - **Opt-in mapper**: with `map_transient_failures: true`, a lost savepoint with no deadlock behind it (MySQL / MariaDB
   1305 naming a SAVEPOINT, PostgreSQL 3B001) is now answered 409 `CONFLICT_002` instead of a 500. With the default
   `false` nothing changes for it.
+- **Serialization failures are replayed by default** (owner decision 2026-11-18): the default `replay_on` (and
+  `WriteUnitPolicy`'s default kinds, `WriteUnitPolicy::DEFAULT_REPLAY_KINDS`) is now `[deadlock, lock_wait_timeout,
+  serialization_failure]`. A PostgreSQL 40001 or MariaDB 1020 inside a write unit used to be rethrown at once as the
+  DBAL exception (or the runner's `TransientStorageFailure`), which the responder did not answer (a 500 unless
+  `map_transient_failures` was on). Now the unit is replayed; when every attempt fails it throws `ConcurrencyConflict`
+  (kind `serialization_failure`), answered 409 `CONFLICT_001` + `Retry-After`. Code that caught the DBAL
+  serialization exception around a write unit should catch `ConcurrencyConflict` (or the contract's
+  `TransientStorageFailure`, which it extends). To keep the 1.4 behaviour, list the kinds explicitly; an explicit
+  list replaces the default:
+
+  ```yaml
+  nowo_transaction_doctrine:
+      replay_on: [deadlock, lock_wait_timeout]
+  ```
+
+  Programmatic units: `new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout'])`.
 - **Write units (audit TA-6)**: when a `ResetBetweenAttemptsInterface` service or a `WriteUnitRetryEvent` listener
   throws, the unit now discards what it left (open transaction levels, pending entity changes) before throwing
   `ConcurrencyConflict`, so the connection is back at nesting level 0. The managers are cleared once more on that path.

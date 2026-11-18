@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/CONCURRENCY.md` (write paths, classification, codes, host options, residual risk) and a USAGE section on how
   bundles comply with REQ-RUNTIME-003 using this package.
 
+### Changed
+
+- **Serialization failures are replayed by default** (owner decision 2026-11-18): the default `replay_on` and
+  `WriteUnitPolicy` kinds now include `serialization_failure` (PostgreSQL 40001, MariaDB 1020), new constant
+  `WriteUnitPolicy::DEFAULT_REPLAY_KINDS`. A write unit replays them and, once the attempts are exhausted, throws
+  `ConcurrencyConflict`, answered 409 `CONFLICT_001` + `Retry-After` instead of a 500. An explicit `replay_on` list
+  keeps the 1.4 behaviour (see UPGRADING).
+
 ### Fixed
 
 - **Audit TA-6:** a reset-between-attempts service or retry listener that opened a transaction (or persisted an entity)

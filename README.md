@@ -6,8 +6,8 @@
 
 Safe plain-Doctrine default for [`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract):
 `DoctrineTransactionRunner` implements `TransactionRunnerInterface` with **one attempt and no retry**, for a bundle
-to use when the host wires no adapter. Since 1.3.0 also **write units** that replay a deadlock or lock wait timeout,
-and an **optional Symfony bundle** (`#[AsWriteUnit]`, Messenger middleware, one lock-conflict answer **409 +
+to use when the host wires no adapter. Since 1.3.0 also **write units** that replay a deadlock, lock wait timeout or
+(since 1.5.0) serialization failure, and an **optional Symfony bundle** (`#[AsWriteUnit]`, Messenger middleware, one lock-conflict answer **409 +
 `Retry-After`**, worker connection hygiene). `doctrine/dbal` required; `doctrine/orm`, `doctrine/persistence` and the
 Symfony packages optional.
 
@@ -46,7 +46,7 @@ Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `Connection
 ## Write units and the 409 lock-conflict answer (1.3.0)
 
 ```php
-// Programmatic: replayed up to 3 times (full jitter) after a deadlock or lock wait timeout, outermost unit only.
+// Programmatic: replayed up to 3 times (full jitter) after a deadlock, lock wait timeout or serialization failure, outermost unit only.
 $writeUnit->run(fn (int $attempt) => $runner->run(fn () => $tasks->get($id)->moveTo($column)));
 ```
 

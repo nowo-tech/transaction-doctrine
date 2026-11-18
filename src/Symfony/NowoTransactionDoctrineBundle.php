@@ -92,7 +92,7 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                             ->thenInvalid('Unknown transient kind %s.')
                         ->end()
                     ->end()
-                    ->defaultValue([TransientFailureKind::Deadlock->value, TransientFailureKind::LockWaitTimeout->value])
+                    ->defaultValue(array_map(static fn (TransientFailureKind $kind): string => $kind->value, WriteUnitPolicy::DEFAULT_REPLAY_KINDS))
                 ->end()
                 ->booleanNode('controller_attribute')->defaultTrue()
                     ->info('Run controllers marked #[AsWriteUnit] as write units.')->end()
