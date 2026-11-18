@@ -409,6 +409,43 @@ final class DoctrineTransactionRunnerTest extends TestCase
         DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): never => throw new LogicException('never runs'));
     }
 
+    /** Audit TA-3 final, Info 1: the refusal keeps what computeChangeSets() threw as its previous exception. */
+    public function testTheHostRefusalKeepsTheChangeSetFailureAsPrevious(): void
+    {
+        $connection = $this->connection([0]);
+        $connection->expects($this->never())->method('beginTransaction');
+        $cause      = new LogicException('new entity found through a relationship');
+        $unitOfWork = $this->createMock(UnitOfWork::class);
+        $unitOfWork->method('computeChangeSets')->willThrowException($cause);
+        $unitOfWork->method('getScheduledEntityInsertions')->willReturn([]);
+        $unitOfWork->method('getScheduledEntityUpdates')->willReturn([]);
+        $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);
+        $unitOfWork->method('getScheduledCollectionDeletions')->willReturn([]);
+        $unitOfWork->method('getScheduledCollectionUpdates')->willReturn([]);
+        $manager = $this->manager($connection, true, unitOfWork: $unitOfWork);
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): string => 'never runs');
+            self::fail('The host runner must refuse a manager whose change sets cannot be computed.');
+        } catch (LogicException $refused) {
+            self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
+            self::assertSame($cause, $refused->getPrevious());
+        }
+    }
+
+    public function testAHostRefusalForScheduledWorkHasNoPrevious(): void
+    {
+        $manager = $this->manager($this->connection([0]), true, true);
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): string => 'never runs');
+            self::fail('The host runner must refuse a manager with pending changes.');
+        } catch (LogicException $refused) {
+            self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
+            self::assertNull($refused->getPrevious());
+        }
+    }
+
     public function testTheHostRunnerReplacesOnlyAClosedManager(): void
     {
         $manager = $this->manager($this->connection([0, 1, 1]), false);

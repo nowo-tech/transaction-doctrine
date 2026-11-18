@@ -19,6 +19,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`forHostEntityManager()` keeps the cause of a refusal (audit TA-3 final, Info 1):** when the pending-changes check
+  calls `UnitOfWork::computeChangeSets()` and it throws (a `prePersist` listener or callback of an entity reached by
+  cascade persist, for example), the `LogicException` (`DoctrineTransactionRunner::HOST_PENDING_MESSAGE`) now carries
+  that exception as `getPrevious()`. The message is unchanged; a refusal for scheduled work has no previous, as
+  before.
+- **`ConflictCode::forFailure()` answers `CONFLICT_002` for more committed work (audits TA-3 / TJ, same rules as
+  `nowo-tech/doctrine-deadlock-retry-bundle` 3.2.0):** it used to walk only `getPrevious()` and let the first
+  `ConcurrencyConflict` decide. It now also answers `CONFLICT_002` (no `Retry-After`) when:
+  - a `ConcurrencyConflict` with `committed: true` is anywhere in the failure: behind an uncommitted one, or (with
+    `symfony/messenger`) inside a wrapper's `getWrappedExceptions()`, at any depth;
+  - (with `symfony/messenger`) a `HandlerFailedException` whose envelope carries a `HandledStamp` (another handler of
+    the message already succeeded), or any `DelayedMessageHandlingException` (the outer dispatch, and its transaction,
+    already committed).
+  The walk visits each throwable once and at most 256 of them (a cyclic custom wrapper cannot hang a worker). Without
+  `symfony/messenger` the Messenger rules are skipped (`interface_exists()` guard). `ConflictCode::forRequest()` and
+  the 409 responder inherit the change.
+- **`forEntityManager()` is documented as bundle-owned only (audit TG delta follow-up):** the factory docblock, the
+  README logging example, the Usage example and the Configuration table used or described it with the host's
+  `default` manager, or said only a closed manager is reset. After any storage failure it closes and resets the
+  manager through the registry even when it is still open; for the host's manager use `forHostEntityManager()`. No
+  behaviour change.
+
 ## [1.6.0] - 2026-11-18
 
 ### Added

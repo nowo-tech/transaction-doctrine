@@ -104,8 +104,12 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      * manager is closed and reset through the registry (fetched from it on every call), or cleared when no registry is
      * given (see the class description).
      *
-     * For the host application's manager use forHostEntityManager(): this factory may clear or reset an open manager,
-     * which REQ-RUNTIME-003 rule 2 forbids on the host's.
+     * Only for managers the bundle owns (its own manager name / connection). After ANY storage failure (a DBAL or
+     * driver error in the chain: a unique violation, a deadlock, a lost connection) it closes and resets the manager
+     * through the registry even when the ORM left it open, and it clears an open manager after some domain failures.
+     * Never pass the host application's manager (the default one, shared with the application): use
+     * forHostEntityManager(), which never closes, clears or resets an open manager (REQ-RUNTIME-003 rule 2) and
+     * replaces it only when it is closed.
      */
     public static function forEntityManager(
         EntityManagerInterface $entityManager,
@@ -152,15 +156,17 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
     /**
      * With forHostEntityManager(), throws LogicException (HOST_PENDING_MESSAGE) when the host's manager has pending
-     * changes before the run.
+     * changes before the run; when UnitOfWork::computeChangeSets() itself threw, that exception is its previous.
      */
     public function run(callable $operation): mixed
     {
         $manager = $this->manager();
         // Audit TA3-6: a flush inside the run (or the runner's own) would carry the host's pending work into a
         // transaction that may roll back, and forgetting the run's entities would then silently lose it.
-        if ($this->hostManager && $manager instanceof EntityManagerInterface && $this->hasPendingChanges($manager)) {
-            throw new LogicException(self::HOST_PENDING_MESSAGE);
+        // A unit of work that cannot compute its change sets counts as pending; its exception is kept as previous.
+        $cause = null;
+        if ($this->hostManager && $manager instanceof EntityManagerInterface && $this->hasPendingChanges($manager, $cause)) {
+            throw new LogicException(self::HOST_PENDING_MESSAGE, 0, $cause);
         }
 
         $connection = $manager?->getConnection() ?? $this->connection;
@@ -433,10 +439,14 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      * The cheap signals first (scheduled insertions, deletions and collection changes); only then
      * UnitOfWork::computeChangeSets(), which scans the whole identity map and, through cascade-persist associations,
      * persists new entities it reaches (their prePersist callbacks run, generated ids may be assigned). A unit of work
-     * that cannot even compute its change sets counts as pending.
+     * that cannot even compute its change sets counts as pending, and what computeChangeSets() threw is handed back in
+     * $cause (kept as the previous exception of the host runner's LogicException, audit TA-3 Info 1).
+     *
+     * @param-out Throwable|null $cause
      */
-    private function hasPendingChanges(EntityManagerInterface $manager): bool
+    private function hasPendingChanges(EntityManagerInterface $manager, ?Throwable &$cause = null): bool
     {
+        $cause      = null;
         $unitOfWork = $manager->getUnitOfWork();
 
         if ($this->hasScheduledWork($unitOfWork)) {
@@ -445,7 +455,9 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
         try {
             $unitOfWork->computeChangeSets();
-        } catch (Throwable) {
+        } catch (Throwable $throwable) {
+            $cause = $throwable;
+
             return true;
         }
 

@@ -14,7 +14,8 @@ The library reads no environment variables. Everything is passed in code:
 | Where | Option | Default | Meaning |
 |-------|--------|---------|---------|
 | `forConnection()` / `forEntityManager()` | `$retryAfterSeconds` | `1` | Hint carried by `TransientStorageFailure::retryAfterSeconds()` (`null`: no hint) |
-| `DoctrineTransactionRunner::forEntityManager()` | `$registry`, `$managerName` | `null` | Reset a closed manager through the registry; without one the manager is cleared |
+| `DoctrineTransactionRunner::forEntityManager()` (bundle-owned managers only) | `$registry`, `$managerName` | `null` | After a storage failure (or a manager the ORM closed) close and reset it through the registry, even when still open; without one an open manager is cleared |
+| `DoctrineTransactionRunner::forHostEntityManager()` | `$registry`, `$managerName` | `null` | Replace the host's manager through the registry only when it is closed; an open one is never closed, cleared or reset |
 | `ConnectionRepairer::__construct()` | `$emulatedNesting` | `null` (detect) | Force DBAL 3 emulated-nesting handling on or off |
 | `WriteUnitPolicy::__construct()` | `$maxAttempts` | `3` | Attempts of a write unit, the first one included |
 | `WriteUnitPolicy::__construct()` | `$floorMs`, `$baseMs`, `$capMs` | `20`, `100`, `200` | Full-jitter pause: uniform between the floor and `min(cap, base × 2^(attempt − 1))` ms |

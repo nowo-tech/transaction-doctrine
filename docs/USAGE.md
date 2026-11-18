@@ -27,9 +27,15 @@
 ```php
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 
-$runner = DoctrineTransactionRunner::forEntityManager($entityManager, $managerRegistry, 'default');
+// A manager the bundle owns (its own manager name / connection)
+$runner = DoctrineTransactionRunner::forEntityManager($ownManager, $managerRegistry, 'my_bundle');
 $runner->run(fn () => $orders->get($id)->pay($amount));   // begin, run, flush, commit
 ```
+
+`forEntityManager()` is **only for entity managers the bundle owns**: after any storage failure (a unique violation,
+a deadlock, a lost connection) it closes and resets the manager through the registry **even when it is still open**.
+With the host's manager (the `default` one, shared with the application) use `forHostEntityManager()`
+([below](#the-hosts-entity-manager-forhostentitymanager-160)), which replaces the manager only when it is closed.
 
 ## Behaviour after a failure
 
