@@ -19,38 +19,10 @@ final class RepairDatabaseTest extends DatabaseTestCase
     use RepairScenarios;
 
     #[DataProvider('allServers')]
-    public function testTheFlagDoesNotOutliveAClosedConnectionAfterAFailure(string $server): void
-    {
-        $this->boot($server);
-        $this->scenarioTheFlagDoesNotOutliveAClosedConnection(false);
-    }
-
-    #[DataProvider('allServers')]
-    public function testTheFlagDoesNotOutliveAClosedConnectionBetweenRequests(string $server): void
-    {
-        $this->boot($server);
-        $this->scenarioTheFlagDoesNotOutliveAClosedConnection(true);
-    }
-
-    #[DataProvider('allServers')]
-    public function testTheRunnerClearsAStaleFlag(string $server): void
-    {
-        $this->boot($server);
-        $this->scenarioTheRunnerClearsAStaleFlag();
-    }
-
-    #[DataProvider('allServers')]
     public function testAReplayKeepsTheHostsEntities(string $server): void
     {
         $this->boot($server);
         $this->scenarioAReplayKeepsTheHostsEntities();
-    }
-
-    #[DataProvider('allServers')]
-    public function testAnUnrestorableHostEntityStopsTheReplay(string $server): void
-    {
-        $this->boot($server);
-        $this->scenarioAnUnrestorableHostEntityStopsTheReplay();
     }
 
     #[DataProvider('allServers')]
@@ -79,5 +51,82 @@ final class RepairDatabaseTest extends DatabaseTestCase
     {
         $this->boot($server);
         $this->scenarioACollectionTheAttemptLoadedIsReloaded();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFlushedHostEntityIsReloaded(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushedHostEntityIsReloaded();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFlushedIncrementIsNotCountedTwice(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushedIncrementIsNotCountedTwice();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAVersionedHostEntityKeepsItsStoredVersion(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAVersionedHostEntityKeepsItsStoredVersion();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFlushedRemovalIsUndone(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushedRemovalIsUndone();
+    }
+
+    #[DataProvider('allServers')]
+    public function testARolledBackOrphanRemovalIsCancelledRemoveElement(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARolledBackOrphanRemovalIsCancelled(false);
+    }
+
+    #[DataProvider('allServers')]
+    public function testARolledBackOrphanRemovalIsCancelledClear(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARolledBackOrphanRemovalIsCancelled(true);
+    }
+
+    #[DataProvider('allServers')]
+    public function testAnUnflushedRemovalIsCancelled(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUnflushedRemovalIsCancelled();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAnUnrestorableHostEntityStillRestoresTheRest(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUnrestorableHostEntityStillRestoresTheRest(false);
+    }
+
+    #[DataProvider('allServers')]
+    public function testAnUnrestorableHostEntityStillRestoresTheRestWithAnInitialisedCollection(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUnrestorableHostEntityStillRestoresTheRest(true);
+    }
+
+    #[DataProvider('allServers')]
+    public function testAToOneToABroughtEntityIsReloaded(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAToOneToABroughtEntityIsReloaded();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAGoneRowStopsTheReplay(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAGoneRowStopsTheReplay();
     }
 }

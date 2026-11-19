@@ -4,78 +4,24 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
-use Composer\InstalledVersions;
-use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\ORM\Events;
-use Nowo\TransactionDoctrine\ConnectionRepairer;
-use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
-use ReflectionMethod;
 use RuntimeException;
 
-use function version_compare;
-
 /**
- * 1.8 repairs, shared by the real-database suite (MySQL, MariaDB, PostgreSQL) and the unit suite (SQLite file):
- *
- * - the rollback-only flag survives Connection::close() on DBAL 3 and DBAL 4: after the repairer closes a connection
- *   whose nested rollback failed (the server dropped the savepoints), the next transaction must still commit;
- * - audit VD2-4: a write unit's replay never clears the host's open entity manager; the host's entities stay managed
- *   and the ones the failed attempt changed are refreshed.
+ * 1.8, audits VD2-4 / VQ: a write unit's replay never clears the host's open entity manager; it is put back to what
+ * the database holds (the attempt's entities detached, the host's reloaded), or the unit gives up with
+ * ConcurrencyConflict after restoring all it can. Shared by the real-database suite (MySQL, MariaDB, PostgreSQL) and the
+ * unit suite (SQLite file).
  *
  * @phpstan-require-extends DatabaseTestCase
  */
 trait RepairScenarios
 {
-    /**
-     * A nested unit marked the transaction rollback-only, then the server dropped its savepoints (a MySQL / MariaDB
-     * deadlock does; here the savepoint is released by hand): the nested rollback fails, the repairer closes.
-     */
-    private function scenarioTheFlagDoesNotOutliveAClosedConnection(bool $betweenRequests): void
-    {
-        $connection = $this->connection;
-        $this->useSavepoints($connection);
-        $connection->beginTransaction();
-        $connection->beginTransaction();
-        if ($betweenRequests) {
-            $connection->beginTransaction();
-        }
-
-        $connection->setRollbackOnly();
-        $connection->executeStatement('RELEASE SAVEPOINT ' . $this->savepoint($connection));
-
-        $repairer = new ConnectionRepairer();
-        $action   = $betweenRequests ? $repairer->betweenRequests($connection) : $repairer->afterFailure($connection, 0);
-
-        self::assertSame(ConnectionRepairer::ACTION_CLOSED, $action);
-        self::assertSame(0, $connection->getTransactionNestingLevel());
-
-        // A plain transaction on the reopened connection: before 1.8, CommitFailedRollbackOnly.
-        $connection->beginTransaction();
-        $connection->insert('ddrb_counter', ['id' => 6, 'counter_value' => 6]);
-        $connection->commit();
-        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 6'));
-    }
-
-    /** A flag left by a connection closed without the repairer: the runner clears it after its own BEGIN. */
-    private function scenarioTheRunnerClearsAStaleFlag(): void
-    {
-        $this->connection->beginTransaction();
-        $this->connection->setRollbackOnly();
-        $this->connection->close();
-
-        DoctrineTransactionRunner::forConnection($this->connection)->run(function (): void {
-            $this->connection->insert('ddrb_counter', ['id' => 7, 'counter_value' => 7]);
-        });
-
-        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 7'));
-        self::assertSame(0, $this->connection->getTransactionNestingLevel());
-    }
-
     /**
      * Audit VD2-4: the host loaded counter 2 and a board before the unit. The failed attempt changes counter 2, loads
      * counter 1 and the board's cards, and persists a new card; the replay starts from the committed state with the
@@ -122,38 +68,6 @@ trait RepairScenarios
         self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
         self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
         self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card'));
-        self::assertSame(0, $this->registry->resets);
-    }
-
-    /**
-     * Audit VD2-4: the failed attempt removed a host entity. It cannot be brought back without clearing the manager,
-     * so the unit gives up (nothing committed: Retry-After set) and the manager keeps the host's other entity.
-     */
-    private function scenarioAnUnrestorableHostEntityStopsTheReplay(): void
-    {
-        $manager = $this->manager();
-        $kept    = $manager->find(Counter::class, 1);
-        $removed = $manager->find(Counter::class, 2);
-        self::assertInstanceOf(Counter::class, $kept);
-        self::assertInstanceOf(Counter::class, $removed);
-        $attempts = 0;
-
-        try {
-            (new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0)))->run(static function () use ($manager, $removed, &$attempts): never {
-                ++$attempts;
-                $manager->remove($removed);
-
-                throw new DeadlockException(FakeDriverException::deadlock(), null);
-            });
-        } catch (ConcurrencyConflict $conflict) {
-            self::assertSame(1, $conflict->attempts);
-            self::assertFalse($conflict->committed);
-            self::assertNotNull($conflict->retryAfterSeconds());
-        }
-
-        self::assertSame(1, $attempts);
-        self::assertTrue($manager->isOpen());
-        self::assertTrue($manager->contains($kept), 'The manager was not cleared.');
         self::assertSame(0, $this->registry->resets);
     }
 
@@ -292,17 +206,289 @@ trait RepairScenarios
         self::assertFalse($this->manager()->contains($host));
     }
 
-    private function useSavepoints(Connection $connection): void
+    /**
+     * Audits VQ-1 / P1, P1c: the attempt re-finds the host's entity (the same object), changes it and flushes inside
+     * its transaction, then fails. The flush moved Doctrine's original data to the rolled-back value, so the entity is
+     * reloaded: the replay starts from 0 and its own write of 5 is not lost (1.7.1 wrote it; the first 1.8 draft did not).
+     */
+    private function scenarioAFlushedHostEntityIsReloaded(): void
     {
-        // DBAL 3 nests without savepoints unless told otherwise; DBAL 4 always uses them.
-        if (version_compare((string) InstalledVersions::getVersion('doctrine/dbal'), '4.0.0', '<')) {
-            $connection->setNestTransactionsWithSavepoints(true);
-        }
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager, $host): int {
+            $counter = $manager->find(Counter::class, 2);
+            self::assertSame($host, $counter);
+            self::assertSame(0, $host->value, 'Attempt ' . $attempt . ' starts from the stored value.');
+            $this->connection->beginTransaction();
+            $host->value = 5;
+            $manager->flush();
+            if ($attempt === 1) {
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $this->connection->commit();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($host));
+        self::assertSame(5, $host->value);
+        self::assertSame(5, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
     }
 
-    /** The savepoint DBAL created for the current level (its name differs between DBAL versions). */
-    private function savepoint(Connection $connection): string
+    /** Audit VQ-1 / P1b: an increment flushed by the failed attempt is not counted twice. */
+    private function scenarioAFlushedIncrementIsNotCountedTwice(): void
     {
-        return (string) (new ReflectionMethod(Connection::class, '_getNestedTransactionSavePointName'))->invoke($connection);
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $this->unit()->run(function (int $attempt) use ($manager, $host): void {
+            $this->connection->beginTransaction();
+            ++$host->value;
+            $manager->flush();
+            if ($attempt === 1) {
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $this->connection->commit();
+        });
+
+        self::assertSame(1, $host->value);
+        self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /** Audit VQ-1 / P4: a versioned host entity flushed by the failed attempt is reloaded with the stored version. */
+    private function scenarioAVersionedHostEntityKeepsItsStoredVersion(): void
+    {
+        $manager = $this->manager();
+        $doc     = $manager->find(Doc::class, 1);
+        self::assertInstanceOf(Doc::class, $doc);
+
+        $this->unit()->run(function (int $attempt) use ($manager, $doc): void {
+            self::assertSame(1, $doc->version);
+            self::assertSame('a', $doc->label);
+            $this->connection->beginTransaction();
+            $doc->label = 'b' . $attempt;
+            $manager->flush();
+            if ($attempt === 1) {
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $this->connection->commit();
+        });
+
+        self::assertSame('b2', $this->freshValue('SELECT label FROM ddrb_doc WHERE id = 1'));
+        self::assertSame(2, (int) $this->freshValue('SELECT version FROM ddrb_doc WHERE id = 1'));
+        self::assertSame(2, $doc->version);
+    }
+
+    /** A host entity a flush of the failed attempt deleted: the rollback restored its row, it is managed again. */
+    private function scenarioAFlushedRemovalIsUndone(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager, $host): int {
+            self::assertTrue($manager->contains($host));
+            if ($attempt === 1) {
+                $this->connection->beginTransaction();
+                $manager->remove($host);
+                $manager->flush();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            ++$host->value;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /**
+     * Audit VQ-2 / P2, P9: removeElement() or clear() on an orphanRemoval collection schedules the orphan's removal at
+     * once. The failed attempt's removal is cancelled: the replay's flush does not delete the host's card.
+     */
+    private function scenarioARolledBackOrphanRemovalIsCancelled(bool $clear): void
+    {
+        $this->connection->insert('ddrb_card', ['id' => 9, 'board_id' => 1]);
+        $manager = $this->manager();
+        $board   = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $board);
+        self::assertCount(1, $board->cards);
+        $card = $board->cards->first();
+        self::assertInstanceOf(Card::class, $card);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $board, $card, $clear): int {
+            if ($attempt === 1) {
+                $clear ? $board->cards->clear() : $board->cards->removeElement($card);
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $counter = $manager->find(Counter::class, 1);
+            self::assertInstanceOf(Counter::class, $counter);
+            ++$counter->value;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 9'));
+        self::assertTrue($manager->contains($card));
+        self::assertCount(1, $board->cards);
+    }
+
+    /**
+     * Audit VQ-3 / P3: the failed attempt removed one host entity and changed another without flushing. The removal is
+     * cancelled and the change reverted; the replay starts clean and commits; nothing of the attempt is written.
+     */
+    private function scenarioAnUnflushedRemovalIsCancelled(): void
+    {
+        $manager = $this->manager();
+        $removed = $manager->find(Counter::class, 1);
+        $changed = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $removed);
+        self::assertInstanceOf(Counter::class, $changed);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $removed, $changed): int {
+            if ($attempt === 1) {
+                $manager->remove($removed);
+                $changed->value = 7;
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            self::assertTrue($manager->contains($removed));
+            self::assertSame(0, $changed->value);
+            self::assertSame([], $manager->getUnitOfWork()->getScheduledEntityDeletions());
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(2, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id IN (1, 2)'));
+        self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /**
+     * Audits VQ-3 / P7, P10: the failed attempt detached a host entity (it cannot be managed again: its original data is
+     * gone), changed another one and added a new card to the host's board. The unit gives up with ConcurrencyConflict,
+     * but only after restoring everything else: the change reverted, the card unlinked and detached. A later flush by
+     * the host writes nothing of the attempt.
+     */
+    private function scenarioAnUnrestorableHostEntityStillRestoresTheRest(bool $initialised): void
+    {
+        $manager  = $this->manager();
+        $detached = $manager->find(Counter::class, 1);
+        $changed  = $manager->find(Counter::class, 2);
+        $board    = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Counter::class, $detached);
+        self::assertInstanceOf(Counter::class, $changed);
+        self::assertInstanceOf(Board::class, $board);
+        if ($initialised) {
+            self::assertCount(0, $board->cards);
+        }
+
+        $conflict = null;
+        try {
+            $this->unit()->run(static function () use ($manager, $detached, $changed, $board): never {
+                $manager->detach($detached);
+                $changed->value = 9;
+                $card           = new Card(5, $board);
+                $board->cards->add($card);
+                $manager->persist($card);
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            });
+        } catch (ConcurrencyConflict $caught) {
+            $conflict = $caught;
+        }
+
+        self::assertSame(1, $conflict->attempts);
+        self::assertFalse($conflict->committed);
+        self::assertNotNull($conflict->retryAfterSeconds());
+        self::assertTrue($manager->isOpen());
+        self::assertTrue($manager->contains($changed), 'The manager was not cleared.');
+        self::assertSame(0, $changed->value);
+        self::assertTrue($manager->contains($board));
+        self::assertCount(0, $board->cards);
+
+        $manager->flush(); // the host's own next flush
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card'));
+        self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+        self::assertSame(0, $this->registry->resets);
+    }
+
+    /**
+     * Audits VQ-4 / P5, P8: a host card's board pointed at a new board the attempt persisted (detached afterwards). The
+     * card is reloaded through its persister (EntityManager::refresh() would cascade into the detached board and fail):
+     * the replay sees the stored board and commits.
+     */
+    private function scenarioAToOneToABroughtEntityIsReloaded(): void
+    {
+        $this->connection->insert('ddrb_card', ['id' => 9, 'board_id' => 1]);
+        $manager = $this->manager();
+        $card    = $manager->find(Card::class, 9);
+        self::assertInstanceOf(Card::class, $card);
+        $board = $card->board;
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $card, $board): int {
+            if ($attempt === 1) {
+                $other = new Board(2);
+                $manager->persist($other);
+                $card->board = $other;
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            self::assertSame($board, $card->board);
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($card));
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_board'));
+        self::assertSame(1, (int) $this->freshValue('SELECT board_id FROM ddrb_card WHERE id = 9'));
+    }
+
+    /** A host entity changed by the attempt whose row is gone: it cannot be reloaded, the unit gives up (409). */
+    private function scenarioAGoneRowStopsTheReplay(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $conflict = null;
+        try {
+            $this->unit()->run(function () use ($host): never {
+                $host->value = 5;
+                $this->connection->executeStatement('DELETE FROM ddrb_counter WHERE id = 2'); // auto-committed
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            });
+        } catch (ConcurrencyConflict $caught) {
+            $conflict = $caught;
+        }
+
+        self::assertTrue($manager->isOpen());
+        self::assertTrue($manager->contains($host), 'The manager was not cleared.');
+    }
+
+    private function unit(): WriteUnit
+    {
+        return new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0));
     }
 }

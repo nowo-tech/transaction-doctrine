@@ -8,28 +8,40 @@ use Closure;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
+use RuntimeException;
 use Throwable;
 
+use function array_combine;
 use function array_diff_key;
 use function array_key_exists;
 use function is_object;
 use function spl_object_id;
 
 /**
- * Between two attempts of a write unit, brings an open entity manager that already managed entities before the
- * unit's first attempt (the host's, typically) back to that state WITHOUT clearing it (1.8, audit VD2-4,
- * REQ-RUNTIME-003 rule 2: an open host entity manager is never cleared or reset):
+ * Between two attempts of a write unit (after the unit's rollback), brings an open entity manager that already managed
+ * entities before the unit's first attempt (the host's, typically) back to what the database holds, WITHOUT clearing it
+ * (1.8, audits VD2-4 / VQ, REQ-RUNTIME-003 rule 2: an open host entity manager is never cleared or reset).
  *
- * - every entity the failed attempt brought in (loaded, referenced or persisted) is detached, without cascading into
- *   the kept entities;
- * - a kept entity the attempt changed (a field, a to-one, a collection, or a link to a brought entity) or re-hydrated
- *   (refresh(), a proxy initialised: its state came from the rolled-back transaction) is refreshed from the database;
- *   the run started without pending changes, so nothing of the caller's is lost;
- * - a kept entity the attempt removed or detached, or one whose refresh fails, cannot be brought back: restore()
- *   answers false and the write unit gives up (ConcurrencyConflict) instead of clearing the manager.
+ * The unit only starts when no manager holds pending work, so everything pending or changed now is the failed attempt's.
+ * Every step runs, whatever an earlier one could not do (audit VQ-3), in this order:
  *
- * Reads only loaded state to decide (no change-set computation, which would cascade-persist); the refresh issues one
- * query per changed entity. Stateless.
+ * 1. kept entities a flush of the attempt deleted are managed again (the rollback restored their rows);
+ * 2. what the attempt scheduled and did not flush is forgotten: removals of kept entities cancelled (managed again, no
+ *    cascade), orphan removals cancelled (audit VQ-2: removeElement() / clear() on an orphanRemoval collection), and
+ *    computed entity / collection updates dropped;
+ * 3. what the attempt brought in (loaded, referenced, persisted) is unlinked from the kept entities (their to-one
+ *    associations get their original value, their collections lose it) and detached without cascading into them;
+ * 4. kept entities are reloaded from the database through their persister, never EntityManager::refresh(), which
+ *    cascades first and stops at a detached entity (audit VQ-4): every initialised one when a flush wrote during the
+ *    attempt (audit VQ-1: a flush moves the original data to the rolled-back values, so nothing would look changed;
+ *    a version would be stale), else the ones the attempt changed, re-hydrated or un-removed. A reload brings back
+ *    fields, version, to-one associations and fresh (uninitialised) collections.
+ *
+ * restore() answers false when a kept entity could not be brought back (the attempt detached it, or a step threw for it:
+ * a row gone, a readonly property): the write unit then gives up with ConcurrencyConflict instead of replaying, and the
+ * manager keeps whatever could be restored, still open and never cleared.
+ *
+ * Stateless: every call works on the manager it is given.
  *
  * @internal
  *
@@ -60,46 +72,74 @@ final class KeptEntitiesRestorer
     }
 
     /**
-     * @param array<int, object> $kept The entities the manager managed before the unit's first attempt
-     * @param array<int, object> $reloaded The entities hydrated during the failed attempt (RunObserver)
+     * @param bool $everything Reload every initialised kept entity (an abandoned replay: the pending-work check may have
+     *                         computed change sets, which moves the original data)
      *
      * @return bool Whether every kept entity is managed again with its database state
      */
-    public static function restore(EntityManagerInterface $manager, array $kept, array $reloaded): bool
+    public static function restore(AttemptObserver $attempt, bool $everything = false): bool
     {
+        $manager    = $attempt->manager;
         $unitOfWork = $manager->getUnitOfWork();
-        $brought    = array_diff_key(self::managed($manager), $kept);
-        // UnitOfWork::detach() follows cascade: detach into any entity; doDetach() with the kept entities already
-        // "visited" stops there. Same private signature in ORM 2.20 and 3.x (DoctrineTransactionRunner does the same).
+        $kept       = $attempt->kept;
+        $restored   = true;
+
+        // 1. Deleted by a flush of the attempt: the rollback restored the rows.
+        foreach ($attempt->deleted as [$entity, $identifier, $data]) {
+            $restored = self::safely(static function () use ($manager, $unitOfWork, $entity, $identifier, $data): void {
+                if (!$unitOfWork->isInIdentityMap($entity)
+                    && $unitOfWork->tryGetById($identifier, $manager->getClassMetadata($entity::class)->rootEntityName) === false) {
+                    $unitOfWork->registerManaged($entity, $identifier, $data);
+                }
+            }) && $restored;
+        }
+
+        // 2. What the attempt scheduled without flushing. Decide what to reload first: the unlinking below changes it.
+        $brought = array_diff_key(self::managed($manager), $kept);
+        $reload  = [];
+        foreach ($kept as $oid => $entity) {
+            if ($everything || $attempt->flushed || isset($attempt->loaded[$oid]) || $unitOfWork->isScheduledForDelete($entity)
+                || ($unitOfWork->isInIdentityMap($entity) && !$unitOfWork->isUninitializedObject($entity) && self::differs($manager, $entity, $brought))) {
+                $reload[$oid] = $entity;
+            }
+        }
+
+        self::forgetScheduledWork($unitOfWork, $kept);
+
+        // 3. What the attempt brought in.
+        foreach ($kept as $entity) {
+            if ($unitOfWork->isInIdentityMap($entity) && !$unitOfWork->isUninitializedObject($entity)) {
+                $restored = self::safely(static fn () => self::unlink($manager, $entity, $brought)) && $restored;
+            }
+        }
+
         $detach = Closure::bind(static function (UnitOfWork $unitOfWork, object $entity, array $visited): void {
             $unitOfWork->doDetach($entity, $visited);
         }, null, UnitOfWork::class);
         foreach ($brought as $entity) {
-            $detach($unitOfWork, $entity, $kept);
+            $restored = self::safely(static fn () => $detach($unitOfWork, $entity, $kept)) && $restored;
         }
 
+        // 4. Back to what the database holds.
         foreach ($kept as $oid => $entity) {
-            if (!$manager->contains($entity)) {
-                return false;
-            }
+            if (!$unitOfWork->isInIdentityMap($entity)) {
+                $restored = false; // detached by the attempt: its original data is gone
 
-            if ($unitOfWork->isUninitializedObject($entity)
-                || (!isset($reloaded[$oid]) && !self::differs($manager, $entity, $brought))) {
                 continue;
             }
 
-            try {
-                $manager->refresh($entity);
-            } catch (Throwable) {
-                return false;
+            if (isset($reload[$oid]) && !$unitOfWork->isUninitializedObject($entity)) {
+                $restored = self::safely(static fn () => self::reload($manager, $entity)) && $restored;
             }
         }
 
-        return true;
+        return $restored;
     }
 
     /**
-     * Whether a kept entity differs from its original data, or links to a brought (now detached) entity.
+     * Whether a kept entity differs from its original data (a field, a to-one association, a to-many collection that is
+     * dirty or no longer the managed one) or holds a brought entity (a to-one, or a collection the attempt loaded or
+     * added to). Reads only (no change-set computation, no collection load).
      *
      * @param array<int, object> $brought
      */
@@ -116,10 +156,11 @@ final class KeptEntitiesRestorer
 
         foreach ($metadata->getAssociationNames() as $field) {
             $value = $metadata->getFieldValue($entity, $field);
-
-            if ((array_key_exists($field, $original) && $value !== $original[$field])
-                || (is_object($value) && isset($brought[spl_object_id($value)]))
-                || ($value instanceof PersistentCollection && ($value->isDirty() || self::holdsBrought($value, $brought)))) {
+            if ($metadata->isCollectionValuedAssociation($field)
+                ? !$value instanceof PersistentCollection || $value->isDirty() || self::holdsBrought($value, $brought)
+                    // clear() on an inverse side leaves it clean but emptied (audit VQ-2): compare with the snapshot.
+                    || $value->getDeleteDiff() !== [] || $value->getInsertDiff() !== []
+                : (array_key_exists($field, $original) && $value !== $original[$field]) || (is_object($value) && isset($brought[spl_object_id($value)]))) {
                 return true;
             }
         }
@@ -133,7 +174,6 @@ final class KeptEntitiesRestorer
      */
     private static function holdsBrought(PersistentCollection $collection, array $brought): bool
     {
-        // unwrap(): never loads an uninitialized collection.
         foreach ($collection->unwrap()->toArray() as $element) {
             if (is_object($element) && isset($brought[spl_object_id($element)])) {
                 return true;
@@ -141,5 +181,96 @@ final class KeptEntitiesRestorer
         }
 
         return false;
+    }
+
+    /**
+     * Drops the attempt's unflushed work from the unit of work: kept entities scheduled for removal are managed again
+     * (no cascade), orphan removals cancelled, computed updates and collection work forgotten. Nothing of it existed
+     * before the unit (it only starts without pending work). Same private properties in ORM 2.20 and 3.x.
+     *
+     * @param array<int, object> $kept
+     */
+    private static function forgetScheduledWork(UnitOfWork $unitOfWork, array $kept): void
+    {
+        Closure::bind(static function (UnitOfWork $unitOfWork, array $kept): void {
+            foreach ($unitOfWork->entityDeletions as $oid => $entity) {
+                if (isset($kept[$oid])) {
+                    unset($unitOfWork->entityDeletions[$oid]);
+                    $unitOfWork->entityStates[$oid] = UnitOfWork::STATE_MANAGED;
+                    $unitOfWork->addToIdentityMap($entity);
+                }
+            }
+
+            $unitOfWork->orphanRemovals      = [];
+            $unitOfWork->entityUpdates       = [];
+            $unitOfWork->entityChangeSets    = [];
+            $unitOfWork->collectionUpdates   = [];
+            $unitOfWork->collectionDeletions = [];
+        }, null, UnitOfWork::class)($unitOfWork, $kept);
+    }
+
+    /**
+     * Removes the brought entities from one kept entity's associations: a to-one pointing at one gets its original value
+     * back, a collection loses them (unwrap(): no orphan removal scheduled, no load of an uninitialised collection).
+     *
+     * @param array<int, object> $brought
+     */
+    private static function unlink(EntityManagerInterface $manager, object $entity, array $brought): void
+    {
+        $metadata = $manager->getClassMetadata($entity::class);
+        $original = $manager->getUnitOfWork()->getOriginalEntityData($entity);
+
+        foreach ($metadata->getAssociationNames() as $field) {
+            $value = $metadata->getFieldValue($entity, $field);
+
+            if ($value instanceof PersistentCollection) {
+                $elements = $value->unwrap();
+                foreach ($elements->toArray() as $key => $element) {
+                    if (is_object($element) && isset($brought[spl_object_id($element)])) {
+                        $elements->remove($key);
+                    }
+                }
+
+                continue;
+            }
+
+            if (is_object($value) && isset($brought[spl_object_id($value)])) {
+                $previous = $original[$field] ?? null;
+                $metadata->setFieldValue($entity, $field, is_object($previous) && isset($brought[spl_object_id($previous)]) ? null : $previous);
+            }
+        }
+    }
+
+    /**
+     * Reloads a managed entity from the database through its persister (load() with the entity: Doctrine's refresh
+     * hints): fields, version, to-one associations and fresh to-many collections come back, with no cascade. Only
+     * postLoad runs.
+     *
+     * @throws RuntimeException When the database no longer has the row
+     */
+    private static function reload(EntityManagerInterface $manager, object $entity): void
+    {
+        $unitOfWork = $manager->getUnitOfWork();
+        $metadata   = $manager->getClassMetadata($entity::class);
+        $criteria   = array_combine($metadata->getIdentifierFieldNames(), $unitOfWork->getEntityIdentifier($entity));
+        if ($unitOfWork->getEntityPersister($metadata->name)->load($criteria, $entity) === null) {
+            throw new RuntimeException('The row of a kept entity is gone.');
+        }
+    }
+
+    /**
+     * Runs one restore step; a failure skips that step only.
+     *
+     * @return bool Whether the step completed
+     */
+    private static function safely(callable $step): bool
+    {
+        try {
+            $step();
+
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 }

@@ -12,7 +12,6 @@ use Doctrine\Persistence\ManagerRegistry;
 use Generator;
 use InvalidArgumentException;
 use LogicException;
-use Nowo\TransactionDoctrine\RunObserver;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
@@ -188,8 +187,8 @@ final readonly class WriteUnit implements WriteUnitInterface
         try {
             return $this->attempts($work, $unit, $kept);
         } finally {
-            foreach ($kept as [$manager, , $observer]) {
-                $manager->getEventManager()->removeEventListener([Events::postLoad], $observer);
+            foreach ($kept as $observer) {
+                $observer->manager->getEventManager()->removeEventListener([Events::postLoad, Events::onFlush], $observer);
             }
         }
     }
@@ -198,7 +197,7 @@ final readonly class WriteUnit implements WriteUnitInterface
      * @template T
      *
      * @param callable(int, ?Throwable): T $work
-     * @param array<string, array{EntityManagerInterface, array<int, object>, RunObserver}> $kept
+     * @param array<string, AttemptObserver> $kept
      *
      * @return T
      */
@@ -220,8 +219,10 @@ final readonly class WriteUnit implements WriteUnitInterface
                 $failure = $caught;
             }
 
-            [$entities, $reloaded] = $this->kept($kept);
-            $unrestored            = $this->repairer->discardUnitOfWork($this->managers, $entities, $reloaded);
+            $unrestored = $this->repairer->discardUnitOfWork($this->managers, $this->kept($kept));
+            foreach ($kept as $observer) {
+                $observer->start();
+            }
 
             if ($this->ledger instanceof CommitLedger && $this->ledger->count() !== $writes) {
                 SafeLog::log($this->logger, 'warning', 'Write unit not replayed: the failed attempt had already committed.', [
@@ -343,7 +344,7 @@ final readonly class WriteUnit implements WriteUnitInterface
      * entity changes pending: the replay would run nested (its flush never committing) or write them; they are
      * discarded first.
      *
-     * @param array<string, array{EntityManagerInterface, array<int, object>, RunObserver}> $kept
+     * @param array<string, AttemptObserver> $kept
      */
     private function prepareReplay(int $next, Throwable $failure, TransientFailureKind $kind, ?string $unit, array $kept): void
     {
@@ -371,19 +372,19 @@ final readonly class WriteUnit implements WriteUnitInterface
      * no manager had pending changes, so whatever is pending now was left by the unit or by those services. A manager
      * that managed entities before the unit is not cleared either (1.8, audit VD2-4).
      *
-     * @param array<string, array{EntityManagerInterface, array<int, object>, RunObserver}> $kept
+     * @param array<string, AttemptObserver> $kept
      */
     private function discardAbandoned(array $kept): void
     {
-        [$entities, $reloaded] = $this->kept($kept);
-        $this->repairer->discardUnitOfWork($this->managers !== null && $this->hasPendingChanges($this->managers) ? null : $this->managers, $entities, $reloaded);
+        // The pending-work check computed change sets (they move the original data): every kept entity is reloaded.
+        $this->repairer->discardUnitOfWork($this->managers !== null && $this->hasPendingChanges($this->managers) ? null : $this->managers, $this->kept($kept), true);
     }
 
     /**
-     * The open entity managers that already manage entities before the first attempt (the host's), with those entities
-     * and an observer of what each attempt hydrates (1.8, audit VD2-4): a replay restores them instead of clearing.
+     * The open entity managers that already manage entities before the first attempt (the host's), each with an
+     * observer of what every attempt does to it (1.8, audits VD2-4 / VQ): a replay restores them instead of clearing.
      *
-     * @return array<string, array{EntityManagerInterface, array<int, object>, RunObserver}>
+     * @return array<string, AttemptObserver>
      */
     private function keep(): array
     {
@@ -399,38 +400,33 @@ final readonly class WriteUnit implements WriteUnitInterface
                 continue;
             }
 
-            $observer = new RunObserver();
-            $manager->getEventManager()->addEventListener([Events::postLoad], $observer);
-            $kept[$name] = [$manager, $entities, $observer];
+            $observer = new AttemptObserver($manager, $entities);
+            $manager->getEventManager()->addEventListener([Events::postLoad, Events::onFlush], $observer);
+            $kept[$name] = $observer;
         }
 
         return $kept;
     }
 
     /**
-     * The kept entities and what the last attempt hydrated, per manager name, for the managers the registry still
-     * serves (a manager reset after it was closed is a new one: nothing of the old one is kept); the observers start
-     * over for the next attempt.
+     * The observers of the managers the registry still serves (a manager reset after it was closed is a new one:
+     * nothing of the old one is kept).
      *
-     * @param array<string, array{EntityManagerInterface, array<int, object>, RunObserver}> $kept
+     * @param array<string, AttemptObserver> $kept
      *
-     * @return array{array<string, array<int, object>>, array<string, array<int, object>>}
+     * @return array<string, AttemptObserver>
      */
     private function kept(array $kept): array
     {
-        $entities = [];
-        $reloaded = [];
+        $current = [];
 
-        foreach ($kept as $name => [$manager, $managed, $observer]) {
-            if ($this->registry->getManager($name) === $manager) {
-                $entities[$name] = $managed;
-                $reloaded[$name] = $observer->loaded;
+        foreach ($kept as $name => $observer) {
+            if ($this->registry->getManager($name) === $observer->manager) {
+                $current[$name] = $observer;
             }
-
-            $observer->loaded = [];
         }
 
-        return [$entities, $reloaded];
+        return $current;
     }
 
     private function abandonReplay(int $attempts, Throwable $failure, TransientFailureKind $kind, Throwable $resetFailure): never

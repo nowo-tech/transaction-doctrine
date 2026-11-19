@@ -82,6 +82,7 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_note');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_counter');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ballast');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_doc');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
@@ -90,6 +91,8 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('CREATE TABLE ddrb_board (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('CREATE TABLE ddrb_card (id INT NOT NULL PRIMARY KEY, board_id INT NOT NULL)');
         $this->connection->executeStatement('INSERT INTO ddrb_board (id) VALUES (1)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_doc (id INT NOT NULL PRIMARY KEY, label VARCHAR(20) NOT NULL, version INT NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_doc (id, label, version) VALUES (1, 'a', 1)");
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }

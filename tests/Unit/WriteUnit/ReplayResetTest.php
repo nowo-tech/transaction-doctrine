@@ -299,6 +299,8 @@ final class ReplayResetTest extends TestCase
         $manager->method('isOpen')->willReturn(true);
         $unitOfWork = $this->createStub(UnitOfWork::class);
         $unitOfWork->method('getScheduledEntityInsertions')->willReturnCallback(static fn (): array => $state->pending);
+        // ORM 2 declares no native return type: the stub would hand the write unit's snapshot null.
+        $unitOfWork->method('getIdentityMap')->willReturn([]);
         $unitOfWork->method('getScheduledEntityUpdates')->willReturn([]);
         $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);
         $unitOfWork->method('getScheduledCollectionDeletions')->willReturn([]);

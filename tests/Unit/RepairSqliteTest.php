@@ -13,7 +13,7 @@ use function sys_get_temp_dir;
 use function unlink;
 
 /**
- * The 1.8 repair scenarios (rollback-only flag after a close, audit VD2-4 replays that keep the host's entities) on a
+ * The 1.8 replay scenarios (audits VD2-4 / VQ: replays that restore the host's entities instead of clearing them) on a
  * real ORM over a SQLite file, so the unit suite covers them; RepairDatabaseTest runs them on MySQL, MariaDB and
  * PostgreSQL.
  *
@@ -40,29 +40,9 @@ final class RepairSqliteTest extends DatabaseTestCase
         }
     }
 
-    public function testTheFlagDoesNotOutliveAClosedConnectionAfterAFailure(): void
-    {
-        $this->scenarioTheFlagDoesNotOutliveAClosedConnection(false);
-    }
-
-    public function testTheFlagDoesNotOutliveAClosedConnectionBetweenRequests(): void
-    {
-        $this->scenarioTheFlagDoesNotOutliveAClosedConnection(true);
-    }
-
-    public function testTheRunnerClearsAStaleFlag(): void
-    {
-        $this->scenarioTheRunnerClearsAStaleFlag();
-    }
-
     public function testAReplayKeepsTheHostsEntities(): void
     {
         $this->scenarioAReplayKeepsTheHostsEntities();
-    }
-
-    public function testAnUnrestorableHostEntityStopsTheReplay(): void
-    {
-        $this->scenarioAnUnrestorableHostEntityStopsTheReplay();
     }
 
     public function testAReinitialisedHostProxyIsRefreshed(): void
@@ -83,5 +63,60 @@ final class RepairSqliteTest extends DatabaseTestCase
     public function testACollectionTheAttemptLoadedIsReloaded(): void
     {
         $this->scenarioACollectionTheAttemptLoadedIsReloaded();
+    }
+
+    public function testAFlushedHostEntityIsReloaded(): void
+    {
+        $this->scenarioAFlushedHostEntityIsReloaded();
+    }
+
+    public function testAFlushedIncrementIsNotCountedTwice(): void
+    {
+        $this->scenarioAFlushedIncrementIsNotCountedTwice();
+    }
+
+    public function testAVersionedHostEntityKeepsItsStoredVersion(): void
+    {
+        $this->scenarioAVersionedHostEntityKeepsItsStoredVersion();
+    }
+
+    public function testAFlushedRemovalIsUndone(): void
+    {
+        $this->scenarioAFlushedRemovalIsUndone();
+    }
+
+    public function testARolledBackOrphanRemovalIsCancelledRemoveElement(): void
+    {
+        $this->scenarioARolledBackOrphanRemovalIsCancelled(false);
+    }
+
+    public function testARolledBackOrphanRemovalIsCancelledClear(): void
+    {
+        $this->scenarioARolledBackOrphanRemovalIsCancelled(true);
+    }
+
+    public function testAnUnflushedRemovalIsCancelled(): void
+    {
+        $this->scenarioAnUnflushedRemovalIsCancelled();
+    }
+
+    public function testAnUnrestorableHostEntityStillRestoresTheRest(): void
+    {
+        $this->scenarioAnUnrestorableHostEntityStillRestoresTheRest(false);
+    }
+
+    public function testAnUnrestorableHostEntityStillRestoresTheRestWithAnInitialisedCollection(): void
+    {
+        $this->scenarioAnUnrestorableHostEntityStillRestoresTheRest(true);
+    }
+
+    public function testAToOneToABroughtEntityIsReloaded(): void
+    {
+        $this->scenarioAToOneToABroughtEntityIsReloaded();
+    }
+
+    public function testAGoneRowStopsTheReplay(): void
+    {
+        $this->scenarioAGoneRowStopsTheReplay();
     }
 }
