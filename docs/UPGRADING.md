@@ -4,6 +4,7 @@
 
 - [Unreleased](#unreleased)
 - [To 1.7.1](#to-171)
+- [To 1.7.1](#to-171-1)
 - [To 1.7.0](#to-170)
 - [To 1.6.1](#to-161)
 - [To 1.6.0](#to-160)
@@ -25,6 +26,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.7.1
+
+From **1.7.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 ## To 1.7.1
 
