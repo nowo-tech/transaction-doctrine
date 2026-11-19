@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.7.1](#to-171)
 - [To 1.7.0](#to-170)
 - [To 1.6.1](#to-161)
 - [To 1.6.0](#to-160)
@@ -24,6 +25,28 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.7.1
+
+From **1.7.0**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
+
+- **`DoctrineStateRepairer::discardUnitOfWork()` rolls back every connection (audit UI2-2).** With or without a list
+  of managers, it rolls back every open transaction level on every connection of the registry, not only those of the
+  named managers. It is meant for the gap between two attempts of a unit that started outside any transaction. A
+  bundle calling it from its own repair code must call it only outside a caller's transaction: called while the host
+  (or an outer unit) has a transaction open, it rolls that transaction back. This was already the case in 1.6.1 and
+  1.7.0; only the documentation is new. There is no runtime guard: the repairer cannot tell a caller's open level from
+  the one a failed attempt left.
+- **Messenger wrappers in write units (audit UI2-4).** `WriteUnit::conflictKind()` (and so `run()` and the
+  Messenger middleware) now reads `getWrappedExceptions()` through the same bounded walk as
+  `TransientFailureClassifier::findConflict()`. A custom wrapper whose `getWrappedExceptions()` throws, returns
+  something that is not a `Throwable`, or wraps itself no longer replaces the failure or hangs the worker: the failure
+  is not replayed and is rethrown unchanged. A failure carrying more than 256 throwables is not replayed either (what
+  the walk could not read may hold an inner unit's `ConcurrencyConflict`). Nothing to do for ordinary failures.
+- **Worker hygiene (audit UI2-5).** `WorkerConnectionHygiene::isDatabaseFailure()` reads wrappers through the same
+  bounded walk. A failure whose walk is truncated (more than 256 throwables, or a `getWrappedExceptions()` that throws)
+  now counts as a database failure and triggers the repair (reset closed managers, roll back leftover levels, ping);
+  before, a throwing wrapper escaped the listener. Nothing to do.
 
 ## To 1.7.0
 
@@ -51,7 +74,8 @@ signature change (new optional arguments and new methods only).
   abandoned with pending changes outside the scope, every manager is repaired): a replay that would start inside a transaction or over pending changes on any connection or
   manager is abandoned (`ConcurrencyConflict`), never run nested. The checks before the first attempt still read every
   connection and manager. `DoctrineStateRepairer::discardUnitOfWork(['my_bundle'])` does the same for a bundle's own
-  repair code. Without a scope nothing changes. See [Concurrency](CONCURRENCY.md#nested-transactions-and-replays).
+  repair code; it rolls back every connection, so call it only outside a caller's transaction (see
+  [To 1.7.1](#to-171)). Without a scope nothing changes. See [Concurrency](CONCURRENCY.md#nested-transactions-and-replays).
 - **Conflicts inside Messenger wrappers (audits TA42-3 / UA2-5).** A `ConcurrencyConflict` (or any
   `LockConflictExceptionInterface`) in a later wrapped exception of a synchronous `HandlerFailedException` now
   answers 409 instead of 500; with `map_transient_failures: true` so does a raw deadlock, lock wait timeout,

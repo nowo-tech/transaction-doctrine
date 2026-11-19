@@ -74,6 +74,9 @@ final readonly class DoctrineStateRepairer
      * Between two attempts of a write unit: leftover levels rolled back on every connection, closed managers reset,
      * open ones cleared.
      *
+     * Call it only outside a caller's transaction (audit UI2-2): it rolls back every open level on every connection,
+     * so called while the host or an outer unit has a transaction open, it rolls that transaction back.
+     *
      * @param list<string>|null $managers Null (the default): every manager of the registry, the host's default one
      *                                    included. A list of manager names (transaction-doctrine >= 1.7, audit UD2-L-2):
      *                                    only those managers are reset or cleared; every other manager keeps its

@@ -59,9 +59,8 @@ final class ThrowableWalk
 
             $children = [[$current->getPrevious(), false]];
             if ($messenger && $current instanceof WrappedExceptionsInterface) {
-                try {
-                    $wrappedExceptions = $current->getWrappedExceptions();
-                } catch (Throwable) {
+                $wrappedExceptions = self::wrappedOf($current);
+                if ($wrappedExceptions === null) {
                     // A broken custom wrapper (audit UI-5): what it hides is unknown, so the walk counts as truncated
                     // (CONFLICT_002 when looking for proof of a commit), and nothing escapes the walk.
                     $wrappedExceptions = [];
@@ -99,6 +98,63 @@ final class ThrowableWalk
     }
 
     /**
+     * The exceptions a Messenger wrapper carries, flattened as getWrappedExceptions(null, true) flattens them (a
+     * wrapped wrapper is replaced by its own wrapped exceptions, in order), but bounded like of(): each throwable once
+     * (a wrapper that wraps itself or an ancestor ends; a duplicate keeps the place where it was first met), at most
+     * MAX_NODES of them. Without duplicates the order is getWrappedExceptions(null, true)'s.
+     *
+     * Null when the list cannot be read whole (audit UI2-4): a getWrappedExceptions() threw, returned something that
+     * is not a Throwable, or the cap was reached. A caller deciding whether to replay must then not replay. Never
+     * throws.
+     *
+     * @return list<Throwable>|null
+     */
+    public static function leaves(WrappedExceptionsInterface $wrapper): ?array
+    {
+        $known  = [spl_object_id($wrapper) => true];
+        $stack  = [$wrapper];
+        $leaves = [];
+
+        while ($stack !== []) {
+            $current = array_pop($stack);
+            if (!$current instanceof WrappedExceptionsInterface) {
+                $leaves[] = $current;
+
+                continue;
+            }
+
+            $wrappedExceptions = self::wrappedOf($current);
+            if ($wrappedExceptions === null) {
+                return null;
+            }
+
+            $queued = [];
+            foreach ($wrappedExceptions as $wrapped) {
+                if (!$wrapped instanceof Throwable) {
+                    return null;
+                }
+
+                if (isset($known[$id = spl_object_id($wrapped)])) {
+                    continue;
+                }
+
+                if (count($known) >= self::MAX_NODES) {
+                    return null;
+                }
+
+                $known[$id] = true;
+                $queued[]   = $wrapped;
+            }
+
+            while ($queued !== []) {
+                $stack[] = array_pop($queued);
+            }
+        }
+
+        return $leaves;
+    }
+
+    /**
      * The first throwable of the walk that is an instance of $class.
      *
      * @template T of object
@@ -116,5 +172,19 @@ final class ThrowableWalk
         }
 
         return null;
+    }
+
+    /**
+     * A wrapper's getWrappedExceptions(), or null when it throws (a broken custom implementation).
+     *
+     * @return array<mixed>|null
+     */
+    private static function wrappedOf(WrappedExceptionsInterface $wrapper): ?array
+    {
+        try {
+            return $wrapper->getWrappedExceptions();
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

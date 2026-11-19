@@ -12,6 +12,7 @@ use Generator;
 use InvalidArgumentException;
 use LogicException;
 use Nowo\TransactionDoctrine\SafeLog;
+use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -236,10 +237,15 @@ final readonly class WriteUnit implements WriteUnitInterface
      * The kind under which this unit replays a failure, or null when it must not be replayed: no replayable conflict
      * in it, a ConcurrencyConflict anywhere in it, or a Messenger wrapper with a non-conflict (or a succeeded handler)
      * among its wrapped exceptions.
+     *
+     * Messenger wrappers are read through the bounded ThrowableWalk, as TransientFailureClassifier::findConflict()
+     * reads them (audit UI2-4): a cycle of wrappers ends, and what cannot be read whole (a getWrappedExceptions() that
+     * throws or returns something that is not a Throwable, more than ThrowableWalk::MAX_NODES throwables) makes the
+     * failure not replayable: it is rethrown unchanged, never replaced.
      */
     public function conflictKind(Throwable $failure): ?TransientFailureKind
     {
-        if (self::containsConcurrencyConflict($failure)) {
+        if ($this->mayHoldConcurrencyConflict($failure)) {
             return null;
         }
 
@@ -261,7 +267,7 @@ final readonly class WriteUnit implements WriteUnitInterface
         }
 
         $kind = null;
-        foreach ($wrapper->getWrappedExceptions(null, true) as $wrapped) {
+        foreach (ThrowableWalk::leaves($wrapper) ?? [] as $wrapped) {
             $one = $this->classifier->classify($wrapped);
             if (!$one instanceof TransientFailureKind || !$this->policy->replays($one)) {
                 return null;
@@ -273,23 +279,21 @@ final readonly class WriteUnit implements WriteUnitInterface
         return $kind;
     }
 
-    private static function containsConcurrencyConflict(Throwable $failure): bool
+    /**
+     * Whether a ConcurrencyConflict sits anywhere in the failure (getPrevious() and Messenger's wrapped exceptions),
+     * or may sit in what the bounded walk could not read (truncated: an inner unit's conflict must never be replayed
+     * again, so the unknown counts as one).
+     */
+    private function mayHoldConcurrencyConflict(Throwable $failure): bool
     {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
+        $walk = ThrowableWalk::of($failure);
+        foreach ($walk as $current => $chainStart) {
             if ($current instanceof ConcurrencyConflict) {
                 return true;
             }
-
-            if ($current instanceof WrappedExceptionsInterface) {
-                foreach ($current->getWrappedExceptions(null, true) as $wrapped) {
-                    if (self::containsConcurrencyConflict($wrapped)) {
-                        return true;
-                    }
-                }
-            }
         }
 
-        return false;
+        return $walk->getReturn();
     }
 
     /**
@@ -381,8 +385,7 @@ final readonly class WriteUnit implements WriteUnitInterface
     /**
      * Whether an open entity manager holds work the caller has not flushed (the cheap scheduled signals first, then
      * the change sets of the managed entities, as DoctrineTransactionRunner does). An unreadable unit of work counts.
-     */
-    /**
+     *
      * @param list<string> $except Managers not checked (by name)
      */
     private function hasPendingChanges(array $except = []): bool
