@@ -10,8 +10,10 @@ use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Exception\EntityManagerClosed;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WorkerConnectionHygiene;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\CyclicWrapper;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
+use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -76,6 +78,69 @@ final class WorkerConnectionHygieneTest extends TestCase
         self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure(new ConnectionLost(FakeDriverException::deadlock(), null)));
         self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure(EntityManagerClosed::create()));
         self::assertFalse(WorkerConnectionHygiene::isDatabaseFailure(new RuntimeException('bug')));
+    }
+
+    /** Audit UI2-5: database failures inside Messenger wrappers, nested ones included. */
+    public function testADatabaseFailureInsideAWrapperIsFound(): void
+    {
+        $envelope = new Envelope(new stdClass());
+        $nested   = new HandlerFailedException($envelope, [new RuntimeException('a'), EntityManagerClosed::create()]);
+
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure(new HandlerFailedException($envelope, [new RuntimeException('a'), FakeDriverException::deadlock()])));
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure(new RuntimeException('outer', 0, new HandlerFailedException($envelope, [$nested]))));
+        self::assertFalse(WorkerConnectionHygiene::isDatabaseFailure(new HandlerFailedException($envelope, [new RuntimeException('a'), new RuntimeException('b')])));
+    }
+
+    /** Audit UI2-5: a cycle of wrappers ends. */
+    public function testAWrapperCycleEnds(): void
+    {
+        $outer          = new CyclicWrapper();
+        $inner          = new CyclicWrapper();
+        $outer->wrapped = [$outer, $inner];
+        $inner->wrapped = [$outer, $inner, new RuntimeException('a')];
+
+        self::assertFalse(WorkerConnectionHygiene::isDatabaseFailure($outer));
+
+        $inner->wrapped[] = FakeDriverException::deadlock();
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure($outer));
+    }
+
+    /**
+     * Audit UI2-5: a getWrappedExceptions() that throws never escapes the listener; what it hides is unknown, so it
+     * counts as a database failure (the repair is cheap, a missed one leaves a broken connection to the next unit).
+     */
+    public function testAThrowingWrapperCountsAsADatabaseFailureAndNeverThrows(): void
+    {
+        $broken         = new CyclicWrapper();
+        $broken->throws = true;
+
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure($broken));
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure(new RuntimeException('outer', 0, $broken)));
+
+        // The listener repairs (one ping) instead of throwing.
+        $hygiene = new WorkerConnectionHygiene(new DoctrineStateRepairer(new RecordingRegistry(['default' => $this->pingedConnection(1)])));
+        $hygiene->onMessageFailed(new WorkerMessageFailedEvent(new Envelope(new stdClass()), 'async', $broken));
+    }
+
+    /** Audit UI2-5: beyond the walk's cap the failure counts as a database failure; under it, only what it holds. */
+    public function testTheCapCountsAsADatabaseFailure(): void
+    {
+        $wide = new CyclicWrapper();
+        for ($i = 1; $i < ThrowableWalk::MAX_NODES; ++$i) {
+            $wide->wrapped[] = new RuntimeException('x' . $i);
+        }
+
+        self::assertFalse(WorkerConnectionHygiene::isDatabaseFailure($wide));
+
+        $wide->wrapped[] = new RuntimeException('one too many');
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure($wide));
+
+        $chain = new RuntimeException('0');
+        for ($i = 1; $i <= ThrowableWalk::MAX_NODES + 10; ++$i) {
+            $chain = new RuntimeException((string) $i, 0, $chain);
+        }
+
+        self::assertTrue(WorkerConnectionHygiene::isDatabaseFailure($chain));
     }
 
     private function registry(bool $open): RecordingRegistry

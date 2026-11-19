@@ -43,6 +43,10 @@ From **1.7.0**: `composer update nowo-tech/transaction-doctrine`. No configurati
   something that is not a `Throwable`, or wraps itself no longer replaces the failure or hangs the worker: the failure
   is not replayed and is rethrown unchanged. A failure carrying more than 256 throwables is not replayed either (what
   the walk could not read may hold an inner unit's `ConcurrencyConflict`). Nothing to do for ordinary failures.
+- **Worker hygiene (audit UI2-5).** `WorkerConnectionHygiene::isDatabaseFailure()` reads wrappers through the same
+  bounded walk. A failure whose walk is truncated (more than 256 throwables, or a `getWrappedExceptions()` that throws)
+  now counts as a database failure and triggers the repair (reset closed managers, roll back leftover levels, ping);
+  before, a throwing wrapper escaped the listener. Nothing to do.
 
 ## To 1.7.0
 

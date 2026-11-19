@@ -8,13 +8,13 @@ use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\ORM\Exception\ManagerException;
 use Doctrine\ORM\Exception\ORMException;
+use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
 use PDOException;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Event\TerminateEvent;
 use Symfony\Component\Messenger\Event\WorkerMessageFailedEvent;
-use Symfony\Component\Messenger\Exception\WrappedExceptionsInterface;
 use Throwable;
 
 /**
@@ -69,23 +69,27 @@ final readonly class WorkerConnectionHygiene
         }
     }
 
+    /**
+     * Whether the failure carries a DBAL, driver, PDO or ORM failure (getPrevious() and Messenger's wrapped
+     * exceptions), read through the bounded ThrowableWalk (audit UI2-5): each throwable once, at most
+     * ThrowableWalk::MAX_NODES, and never throwing (a broken custom wrapper used to replace the failure inside the
+     * kernel.exception / WorkerMessageFailedEvent listener, and a wrapper that wrapped itself recursed without end).
+     *
+     * A truncated walk (the cap reached, or a getWrappedExceptions() that threw) counts as a database failure: the
+     * repair it triggers only resets closed managers, rolls back leftover levels after the unit is over and pings the
+     * connected connections, so a needless one costs a ping; a missed one would let a closed manager or a broken
+     * connection reach the next request or message of the worker.
+     */
     public static function isDatabaseFailure(Throwable $failure): bool
     {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
+        $walk = ThrowableWalk::of($failure);
+        foreach ($walk as $current => $chainStart) {
             if ($current instanceof DbalException || $current instanceof DriverException || $current instanceof PDOException
                 || $current instanceof ORMException || $current instanceof ManagerException) {
                 return true;
             }
-
-            if ($current instanceof WrappedExceptionsInterface) {
-                foreach ($current->getWrappedExceptions(null, true) as $wrapped) {
-                    if (self::isDatabaseFailure($wrapped)) {
-                        return true;
-                    }
-                }
-            }
         }
 
-        return false;
+        return $walk->getReturn();
     }
 }

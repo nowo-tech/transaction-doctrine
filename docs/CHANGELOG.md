@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TransientFailureClassifier::findConflict()` and `findLockConflict()` do: each throwable once, at most 256. What
   cannot be read whole (a throwing or broken wrapper, the cap reached) makes the failure not replayable; it is
   rethrown unchanged.
+- **Worker hygiene reads Messenger wrappers through the bounded walk (audit UI2-5).**
+  `WorkerConnectionHygiene::isDatabaseFailure()` (same signature) called `getWrappedExceptions(null, true)` unguarded:
+  a throwing custom wrapper escaped the `kernel.exception` / `WorkerMessageFailedEvent` listener and a self-wrapping
+  one recursed without end. It now uses `ThrowableWalk` (each throwable once, at most 256). A truncated walk (the cap
+  reached, or a wrapper that threw) counts as a database failure, the conservative side: the repair only resets
+  closed managers, rolls back leftover levels and pings the connected connections, while a missed repair would let a
+  broken connection reach the next request or message.
 
 ### Changed
 
