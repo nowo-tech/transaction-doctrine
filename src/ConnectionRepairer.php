@@ -26,10 +26,11 @@ use function version_compare;
  * reopened connection fail. Only a ROLLBACK of the outermost level clears it. With emulated nesting the repairer never
  * closes a nested leftover: it rolls back level by level (the level-1 ROLLBACK clears the flag). Whenever it does
  * close a connection whose transaction was rollback-only (or whose flag could not be read, or with emulated nesting),
- * it then begins and rolls back once, to clear the flag (1.8: before, only with emulated nesting).
+ * it then begins and rolls back every level that BEGIN left open (one, or two with auto-commit disabled), to clear the
+ * flag (1.7.2: before, only with emulated nesting).
  *
  * Nesting levels are read as `(int)`: DBAL 3 declares getTransactionNestingLevel() without a native return type, so a
- * test double of DBAL 3's Connection returns null (1.8).
+ * test double of DBAL 3's Connection returns null (1.7.2).
  *
  * Stateless: safe as a shared service in a long-running worker. An optional PSR-3 logger (default NullLogger) receives
  * the repair actions (notice: levels rolled back; warning: connection closed) with structured context only: levels,
@@ -168,12 +169,18 @@ final readonly class ConnectionRepairer
 
     /**
      * Clears the rollback-only flag of a closed connection: only a ROLLBACK of the outermost level resets it.
+     *
+     * With auto-commit disabled (audit VQ-6) the reconnect inside BEGIN makes DBAL open level 1 by itself, so that
+     * BEGIN only adds a savepoint (level 2): one ROLLBACK would release the savepoint and keep the flag. Every level
+     * open after the BEGIN is therefore rolled back; DBAL then opens level 1 again on its own (auto-commit off).
      */
     private function clearRollbackOnly(Connection $connection): void
     {
         try {
             $connection->beginTransaction();
-            $connection->rollBack();
+            for ($level = (int) $connection->getTransactionNestingLevel(); $level > 0; --$level) {
+                $connection->rollBack();
+            }
         } catch (Throwable $failure) {
             SafeLog::log($this->logger, 'debug', 'Could not clear the rollback-only flag after closing.', SafeLog::throwable($failure));
 

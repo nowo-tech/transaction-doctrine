@@ -27,23 +27,13 @@
 
 ## Unreleased
 
-From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configuration change. Behaviour changes:
+From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
 
-- **A write-unit replay keeps the host's entities (audit VD2-4).** Before, a replay cleared every open entity manager
-  (the host's default one included, unless the unit was scoped with `forManagers()`), so entities loaded before
-  `run()` were detached afterwards and had to be loaded again. Now an open manager that managed entities before the
-  unit is never cleared: they stay managed, and the ones the failed attempt changed or re-hydrated are refreshed from
-  the database (one query each). Code that relied on the clear (re-loading after the unit, or expecting
-  `contains()` to be false) keeps working; code that kept using the caller's entities after a replay now gets managed,
-  current objects instead of detached ones. A unit whose failed attempt removed or detached a host entity is no longer
-  replayed: it ends with `ConcurrencyConflict` (409, `Retry-After`, `CONFLICT_001`), the manager left as it is.
-  Entities the failed attempt loaded are still detached, so request memos still need `ResetBetweenAttemptsInterface`.
-- **The rollback-only flag is cleared after the repairer closes a connection (DBAL 4 too).** Nothing to change; a
-  host that worked around `CommitFailedRollbackOnly` after a deadlock-and-close can drop the workaround.
-- `DoctrineStateRepairer::discardUnitOfWork()` now returns a list (the managers it could not restore) and takes two
-  optional arguments; a caller that ignored the (void) result is unaffected.
-- DBAL 3 test doubles of `Connection` (whose `getTransactionNestingLevel()` returns `null`) no longer make the runner
-  throw a `TypeError`.
+- After the repairer closes a connection whose transaction was rollback-only, the next transaction commits again
+  (DBAL 4, and DBAL 3 with savepoints; before, `CommitFailedRollbackOnly`). A host that worked around that error after
+  a deadlock-and-close can drop the workaround.
+- A DBAL 3 test double of `Connection` (whose `getTransactionNestingLevel()` returns `null`) no longer makes the
+  runner throw a `TypeError`: the test sees the run's own failure.
 
 ## To 1.7.1
 

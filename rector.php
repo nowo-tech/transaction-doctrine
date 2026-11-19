@@ -19,7 +19,7 @@ return RectorConfig::configure()
         typeDeclarations: true,
     )
     // DBAL 3 declares the transaction getters without native return types (a test double returns null): the casts
-    // that read them stay, although DBAL 4's types make them look redundant (1.8).
+    // that read them stay, although DBAL 4's types make them look redundant (1.7.2).
     ->withSkip([
         RecastingRemovalRector::class => [
             __DIR__ . '/src/ConnectionRepairer.php',

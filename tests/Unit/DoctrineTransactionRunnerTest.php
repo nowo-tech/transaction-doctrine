@@ -255,7 +255,7 @@ final class DoctrineTransactionRunnerTest extends TestCase
     }
 
     /**
-     * ChatKit's DBAL 3 unit tests (1.8): a DBAL 3 double of Connection returns null from getTransactionNestingLevel()
+     * ChatKit's DBAL 3 unit tests (1.7.2): a DBAL 3 double of Connection returns null from getTransactionNestingLevel()
      * (no native return type); the failed run is classified and rethrown, never a TypeError from the repairer.
      */
     public function testADbal3DoubleWithoutANestingLevelFailsWithItsOwnException(): void

@@ -171,7 +171,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
         $connection = $manager?->getConnection() ?? $this->connection;
         assert($connection instanceof Connection);
-        // (int): DBAL 3 declares no native return type, so a DBAL 3 test double returns null (1.8).
+        // (int): DBAL 3 declares no native return type, so a DBAL 3 test double returns null (1.7.2).
         $entryLevel = (int) $connection->getTransactionNestingLevel();
         $observer   = new RunObserver();
         // Entities managed before the run: one the run re-hydrates (refresh(), a proxy initialised) belongs to the caller.
@@ -218,6 +218,8 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      * A transaction this runner just began at the outermost level cannot be rollback-only yet: a set flag was left by
      * an earlier transaction on a connection that was closed (Connection::close() keeps the flag on DBAL 3 and 4), and
      * it would make this run's commit fail. One ROLLBACK of the fresh transaction clears it; the run then begins again.
+     * Only at the outermost level: with auto-commit disabled the run enters at level 1 (DBAL's own transaction), where a
+     * set flag may be the caller's, so it is left to ConnectionRepairer, which clears it when it closes (audit VQ-6).
      */
     private function clearStaleRollbackOnly(Connection $connection): void
     {

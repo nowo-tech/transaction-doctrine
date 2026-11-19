@@ -130,9 +130,11 @@ With DBAL 3's emulated nesting (the DBAL 3 default) a nested rollback issues no 
 rollback-only: the repairer therefore rolls such leftovers back level by level (the real level-1 `ROLLBACK` clears the
 flag) and never closes them. The rollback-only flag (also set by `Connection::setRollbackOnly()`) survives
 `Connection::close()` on DBAL 3 and DBAL 4, and only a level-1 `ROLLBACK` clears it: whenever the repairer closes a
-connection whose transaction was rollback-only (or with emulated nesting), it then begins and rolls back once to clear
-the flag (1.8: on DBAL 4 and with savepoints too). If the server is still unreachable then, the runner clears a stale
-flag right after its own outermost `BEGIN`, so the next run commits. Register the runner under **your own service id** and alias
+connection whose transaction was rollback-only (or with emulated nesting), it then begins and rolls back every level
+that `BEGIN` opened, to clear the flag (1.7.2: on DBAL 4 and with savepoints too). With auto-commit disabled the
+reconnect opens level 1 itself, so two levels are rolled back and DBAL opens level 1 again. If the server is still
+unreachable then, the runner clears a stale flag right after its own outermost `BEGIN` (auto-commit on), so the next
+run commits. Register the runner under **your own service id** and alias
 `TransactionRunnerInterface` to it only when the interface is not defined yet, so a host's retrying adapter wins.
 
 Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as
@@ -182,23 +184,15 @@ PostgreSQL 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020; de
   and `min(cap_ms, base_ms × 2^(attempt − 1))` (20–100 ms, then 20–200 ms).
 - Between two attempts the transaction levels the unit left open are rolled back (`ConnectionRepairer`), closed
   entity managers are reset and open ones cleared (`DoctrineStateRepairer`): an attempt never sees what the failed one
-  loaded. An open manager that already managed entities before `run()` (the host's) is **not** cleared (1.8): see
-  below.
+  loaded.
 - **Outermost unit only:** when any connection of the registry is already inside a transaction (the caller's or an
   outer unit's), the work runs once and a failure propagates unchanged, because the database may have rolled back the
   caller's whole transaction. A `ConcurrencyConflict` of an inner unit, even wrapped (in the previous chain or inside
   a Messenger `HandlerFailedException`), is never replayed again by an outer one.
 - **Pending changes:** when an open entity manager already holds unflushed work before the first attempt (a caller's
   edits or `persist()` calls), the work runs once without replay: clearing the manager would lose them silently.
-- **A replay keeps what the caller loaded (1.8, audit VD2-4, REQ-RUNTIME-003 rule 2):** an open manager that managed
-  entities before `run()` is never cleared between attempts. What the failed attempt brought in (loaded, referenced,
-  persisted) is detached without cascading into the caller's entities, and a caller's entity the attempt changed (a
-  field, an association, a collection, a link to a detached entity) or re-hydrated (`refresh()`, a proxy initialised)
-  is refreshed from the database: the same objects stay managed and the next attempt starts from their committed
-  state. When one cannot be restored (the attempt removed or detached it, or its refresh failed) the unit is not
-  replayed: `ConcurrencyConflict` (nothing committed: `CONFLICT_001`, `Retry-After`), the manager left open and not
-  cleared. A manager that managed nothing before `run()` is still cleared. (Before 1.8 every open manager was cleared,
-  detaching the caller's entities.)
+- **A replay detaches everything the caller loaded:** between two attempts the open entity managers are cleared, so
+  entities the caller held before `run()` are no longer managed afterwards. Load again what you change after the unit.
 - **Messenger wrappers:** a `HandlerFailedException` (or `DelayedMessageHandlingException`) is replayed only when
   **every** wrapped exception is a replayable conflict and no handler already succeeded (`HandledStamp`); a domain
   error next to a deadlock goes out unchanged, so the failure transport and `ErrorDetailsStamp` keep the real error.
@@ -250,9 +244,8 @@ depend on it; `WriteUnit` is the Doctrine adapter behind it.
 
 #### A bundle's own entity manager (1.7)
 
-A replay repairs every entity manager by default, the host's default one included (since 1.8 without clearing the
-entities it managed before the unit, see above). A bundle whose unit writes only through its own manager scopes the
-repair, so the host's manager is not even inspected (audit UD2-L-2):
+A replay clears every open entity manager by default, the host's default one included. A bundle whose unit writes
+only through its own manager scopes the repair, so the host's entities stay managed (audit UD2-L-2):
 
 ```php
 $unit = $writeUnit->forManagers('my_bundle');              // WriteUnit (the Doctrine adapter)
@@ -330,9 +323,8 @@ transport see the usual shape.
 
 ### Request memos between attempts (1.4.0)
 
-Between two attempts the unit clears every open entity manager (or resets a closed one; a manager that managed
-entities before the unit is restored instead of cleared, 1.8): every entity loaded by the failed attempt is
-**detached**. A per-request (or per-message) memo that kept one of them hands the replay a detached
+Between two attempts the unit clears every open entity manager (or resets a closed one): every entity loaded by the
+failed attempt is **detached**. A per-request (or per-message) memo that kept one of them hands the replay a detached
 entity: writing it into an association fails the flush with `ORMInvalidArgumentException` (a 500 instead of the
 conflict answer), and changes made to it are silently never written.
 
