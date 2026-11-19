@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony\Conflict;
 
-use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Throwable;
 
@@ -13,7 +12,8 @@ use Throwable;
  * kernel (the contract's TransientStorageFailure, or a deadlock / lock wait / serialization failure no runner wrapped)
  * is answered as a conflict instead of a 500 (CONFLICT_001), and so is a lost savepoint with no deadlock behind it
  * (TransientFailureClassifier::isCommitOutcomeUnknown(): CONFLICT_002, no Retry-After). Unique violations and lost
- * connections are never mapped. Off by default, because the responder runs before the bundles' own
+ * connections are never mapped. Since 1.7 it also looks inside Messenger wrappers (a deadlock in the second handler
+ * of a synchronous HandlerFailedException), through TransientFailureClassifier::findTransientFailure(). Off by default, because the responder runs before the bundles' own
  * mappers and would take over their JSON shapes. Stateless.
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -21,21 +21,8 @@ use Throwable;
  */
 final readonly class TransientFailureConflictMapper implements ConflictExceptionMapperInterface
 {
-    private TransientFailureClassifier $classifier;
-
-    public function __construct()
-    {
-        $this->classifier = new TransientFailureClassifier();
-    }
-
     public function isConflict(Throwable $failure): bool
     {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
-            if ($current instanceof TransientStorageFailure) {
-                return true;
-            }
-        }
-
-        return $this->classifier->isTransient($failure) || $this->classifier->isCommitOutcomeUnknown($failure);
+        return TransientFailureClassifier::findTransientFailure($failure) instanceof Throwable;
     }
 }

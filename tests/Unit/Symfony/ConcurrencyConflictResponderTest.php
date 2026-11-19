@@ -23,12 +23,15 @@ use Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use stdClass;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Translation\Loader\YamlFileLoader;
 use Symfony\Component\Translation\Translator;
 use Throwable;
@@ -367,6 +370,39 @@ final class ConcurrencyConflictResponderTest extends TestCase
         $deadlock = $mapped->respond(Request::create('/api/x', 'POST'), new DriverException(FakeDriverException::deadlock(), null));
         self::assertSame('1', $deadlock->headers->get('Retry-After'));
         self::assertSame('CONFLICT_001', json_decode((string) $deadlock->getContent(), true)['code'] ?? null);
+    }
+
+    /**
+     * Audits TA42-3 / UA2-5 (1.7): a conflict in the second wrapped exception of a synchronous Messenger
+     * HandlerFailedException answers 409, not 500: a write unit's ConcurrencyConflict by default (its own attempts and
+     * Retry-After hint used), a raw deadlock with `map_transient_failures`.
+     */
+    public function testAConflictInALaterWrappedMessengerExceptionAnswers409(): void
+    {
+        $envelope = new Envelope(new stdClass());
+        $conflict = new ConcurrencyConflict(3, TransientFailureKind::Deadlock, 7, FakeDriverException::deadlock());
+        $failure  = new HandlerFailedException($envelope, [new RuntimeException('business rule'), $conflict]);
+        $logger   = new RecordingLogger();
+        $default  = new ConcurrencyConflictResponder(new ConflictResponsePolicy(409, 1), [], [], null, null, $logger);
+        $event    = $this->event(Request::create('/api/x', 'POST'), $failure);
+
+        $default($event);
+
+        $response = $event->getResponse();
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('7', $response->headers->get('Retry-After'));
+        self::assertSame('CONFLICT_001', $response->headers->get('X-Conflict-Code'));
+        self::assertSame(3, $logger->records[0]['context']['attempts']);
+
+        $deadlock = new HandlerFailedException($envelope, [new RuntimeException('business rule'), new DriverException(FakeDriverException::deadlock(), null)]);
+        $mapped   = new ConcurrencyConflictResponder(new ConflictResponsePolicy(), [new TransientFailureConflictMapper()]);
+        self::assertFalse($default->isConflict($deadlock));
+        self::assertTrue($mapped->isConflict($deadlock));
+        self::assertSame(409, $mapped->respond(Request::create('/api/x', 'POST'), $deadlock)->getStatusCode());
+
+        $unique = new HandlerFailedException($envelope, [new RuntimeException('business rule'), new DriverException(FakeDriverException::uniqueViolation(), null)]);
+        self::assertFalse($mapped->isConflict($unique));
     }
 
     /** A host rendering the template without `conflict_code` (an override's include, 1.4 variables) still gets it. */

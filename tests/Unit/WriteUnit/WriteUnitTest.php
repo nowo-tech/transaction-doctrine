@@ -8,6 +8,8 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\UnitOfWork;
+use InvalidArgumentException;
+use LogicException;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
@@ -17,6 +19,7 @@ use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Random\Engine\Mt19937;
 use Random\Randomizer;
@@ -79,6 +82,94 @@ final class WriteUnitTest extends TestCase
         self::assertLessThanOrEqual(0.1001, $paused);
         self::assertSame('Write unit met a database lock conflict; replaying it.', $logger->records[0]['message']);
         self::assertSame('deadlock', $logger->records[0]['context']['kind']);
+    }
+
+    /**
+     * Audit UD2-L-2 (1.7): a unit scoped to the bundle's own manager replays without clearing the host's default
+     * manager; the same unit unscoped clears both (the default, unchanged).
+     */
+    public function testAUnitScopedToNamedManagersClearsOnlyThose(): void
+    {
+        foreach ([[['private'], 0], [null, 1]] as [$scope, $hostClears]) {
+            $host    = $this->openManager($this->idleConnection());
+            $private = $this->openManager($this->idleConnection());
+            $host->expects($this->exactly($hostClears))->method('clear');
+            $private->expects($this->once())->method('clear');
+            $registry = new RecordingRegistry(['default' => $this->idleConnection()], ['default' => $host, 'private' => $private]);
+            $unit     = new WriteUnit($registry, new WriteUnitPolicy(), null, new MockClock());
+            $unit     = $scope === null ? $unit : $unit->forManagers(...$scope);
+
+            self::assertSame('saved 2', $unit->run(static function (int $attempt): string {
+                if ($attempt === 1) {
+                    throw new DeadlockException(FakeDriverException::deadlock(), null);
+                }
+
+                return 'saved ' . $attempt;
+            }));
+        }
+    }
+
+    public function testTheManagersArgumentScopesLikeForManagers(): void
+    {
+        $host    = $this->openManager($this->idleConnection());
+        $private = $this->openManager($this->idleConnection());
+        $host->expects($this->never())->method('clear');
+        $private->expects($this->exactly(2))->method('clear');
+        $registry = new RecordingRegistry([], ['default' => $host, 'private' => $private]);
+        $unit     = new WriteUnit($registry, new WriteUnitPolicy(2, 0, 0, 0), null, new MockClock(), managers: ['private']);
+
+        $this->expectException(ConcurrencyConflict::class);
+        $unit->run(static function (): never {
+            throw new DeadlockException(FakeDriverException::deadlock(), null);
+        });
+    }
+
+    public function testAScopeNamingAnUnknownManagerIsRefused(): void
+    {
+        $registry = new RecordingRegistry([], ['default' => $this->createMock(EntityManagerInterface::class)]);
+        $unit     = new WriteUnit($registry);
+
+        try {
+            $unit->forManagers();
+            self::fail('An empty scope was accepted.');
+        } catch (InvalidArgumentException $failure) {
+            self::assertSame('A write unit scoped to managers needs at least one manager name.', $failure->getMessage());
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('The write unit names the entity manager "private", which the registry does not have.');
+        $unit->forManagers('default', 'private');
+    }
+
+    /**
+     * A scoped replay never runs nested: when the failed attempt left a transaction open on a connection outside the
+     * scope (the unit wrote through a manager it did not name), the replay is abandoned.
+     */
+    public function testAScopedReplayIsAbandonedWhenAConnectionOutsideTheScopeIsStillInATransaction(): void
+    {
+        $hostConnection = $this->createMock(Connection::class);
+        $hostConnection->method('isTransactionActive')->willReturnOnConsecutiveCalls(false, true, true);
+        $host    = $this->openManager($hostConnection);
+        $private = $this->openManager($this->idleConnection());
+        $host->expects($this->never())->method('clear');
+        $registry = new RecordingRegistry(['default' => $hostConnection], ['default' => $host, 'private' => $private]);
+        $unit     = (new WriteUnit($registry, new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock()))->forManagers('private');
+        $calls    = 0;
+        $caught   = null;
+
+        try {
+            $unit->run(static function () use (&$calls): never {
+                ++$calls;
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            });
+        } catch (ConcurrencyConflict $conflict) {
+            $caught = $conflict;
+        }
+
+        self::assertSame(1, $calls);
+        self::assertSame(1, $caught->attempts);
+        self::assertInstanceOf(LogicException::class, $caught->resetFailure);
     }
 
     public function testAClosedManagerIsResetBetweenAttempts(): void
@@ -423,6 +514,23 @@ final class WriteUnitTest extends TestCase
         }
 
         self::assertLessThan(256 * 1024, memory_get_usage() - $before);
+    }
+
+    private function openManager(Connection $connection): EntityManagerInterface&MockObject
+    {
+        $manager = $this->createMock(EntityManagerInterface::class);
+        $manager->method('isOpen')->willReturn(true);
+        $manager->method('getConnection')->willReturn($connection);
+        // ORM 2 declares no return types: an unconfigured stub would answer null.
+        $manager->method('getUnitOfWork')->willReturn($this->createConfiguredStub(UnitOfWork::class, [
+            'getScheduledEntityInsertions'    => [],
+            'getScheduledEntityUpdates'       => [],
+            'getScheduledEntityDeletions'     => [],
+            'getScheduledCollectionDeletions' => [],
+            'getScheduledCollectionUpdates'   => [],
+        ]));
+
+        return $manager;
     }
 
     private function idleConnection(): Connection

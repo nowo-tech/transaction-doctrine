@@ -164,7 +164,8 @@ abstract class DatabaseTestCase extends TestCase
         usleep(300_000);
     }
 
-    private function connect(): Connection
+    /** A new connection to the test's server (commit tracking on when $ledger is set). */
+    protected function connect(): Connection
     {
         $configuration = new DbalConfiguration();
         if ($this->ledger instanceof CommitLedger) {

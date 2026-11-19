@@ -28,4 +28,15 @@ final class FakeDriverException extends AbstractException
     {
         return new self('could not serialize access', '40001', 0);
     }
+
+    /** A lone lost savepoint (an implicit commit): commit outcome unknown. */
+    public static function lostSavepoint(): self
+    {
+        return new self('SQLSTATE[42000]: Syntax error or access violation: 1305 SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305);
+    }
+
+    public static function uniqueViolation(): self
+    {
+        return new self('Duplicate entry', '23000', 1062);
+    }
 }

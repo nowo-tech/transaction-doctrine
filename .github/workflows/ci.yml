@@ -173,6 +173,8 @@ jobs:
           vendor/bin/phpunit --no-coverage tests/Unit/ConflictCodeTest.php
           vendor/bin/phpunit --no-coverage tests/Unit/DoctrineTransactionRunnerTest.php
           vendor/bin/phpunit --no-coverage tests/Unit/HostEntityManagerSqliteTest.php
+          vendor/bin/phpunit --no-coverage tests/Unit/ThrowableWalkTest.php
+          vendor/bin/phpunit --no-coverage tests/Unit/TransientFailureClassifierTest.php
 
   static-analysis:
     name: PHPStan

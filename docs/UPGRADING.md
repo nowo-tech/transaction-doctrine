@@ -24,6 +24,42 @@
 
 ## Unreleased
 
+From **1.6.1**: `composer update nowo-tech/transaction-doctrine`. Everything is additive: no configuration change, no
+signature change (new optional arguments and new methods only).
+
+- **Bundles with their own entity manager can stop clearing the host's (audit UD2-L-2).** A replay of
+  `WriteUnit::run()` clears every open manager by default, the host's default manager included, so every entity the
+  host loaded before the unit is detached. A bundle whose write unit writes only through its own manager can scope the
+  repair:
+
+  ```php
+  $unit = $writeUnit->forManagers('my_bundle'); // or new WriteUnit(..., managers: ['my_bundle'])
+  $unit->run(fn (int $attempt) => $this->save($command));
+  ```
+
+  Only the named managers are reset or cleared; leftover transaction levels are still rolled back on every
+  connection. Name every manager the unit writes through (when one outside the scope is found closed, or a replay is
+  abandoned with pending changes outside the scope, every manager is repaired): a replay that would start inside a transaction or over pending changes on any connection or
+  manager is abandoned (`ConcurrencyConflict`), never run nested. The checks before the first attempt still read every
+  connection and manager. `DoctrineStateRepairer::discardUnitOfWork(['my_bundle'])` does the same for a bundle's own
+  repair code. Without a scope nothing changes. See [Concurrency](CONCURRENCY.md#nested-transactions-and-replays).
+- **Conflicts inside Messenger wrappers (audits TA42-3 / UA2-5).** A `ConcurrencyConflict` (or any
+  `LockConflictExceptionInterface`) in a later wrapped exception of a synchronous `HandlerFailedException` now
+  answers 409 instead of 500; with `map_transient_failures: true` so does a raw deadlock, lock wait timeout,
+  serialization failure or lost savepoint there. A bundle with its own conflict subscriber that walks `getPrevious()`
+  can switch to `TransientFailureClassifier::findConflict($failure)` (or `findLockConflict()` /
+  `findTransientFailure()`), which returns the conflict or null.
+- **More `CONFLICT_002`.** A failure carrying more than 256 throwables (the walk's cap), and a lost savepoint in a
+  later wrapped exception, answer `CONFLICT_002` without `Retry-After` instead of `CONFLICT_001`. A test that
+  asserted `CONFLICT_001` for one of these needs `CONFLICT_002`.
+- **DBAL 3 with commit tracking: `Connection::commit()` returns `true` again (audit UE-CF-1).** It returned `null`
+  since commit tracking was added. Nothing to do; code that worked around it (`!== false` instead of `=== true`) keeps
+  working. The new class `Nowo\TransactionDoctrine\WriteUnit\Dbal\Dbal3\CommitResultConnection` lives in
+  `compat/dbal3/` (PSR-4 autoload entry in `composer.json`) and is loaded only on DBAL 3. DBAL 4 is unchanged.
+- **Preloading:** a hand-written preload script that compiles every file of the class map must skip
+  `vendor/nowo-tech/transaction-doctrine/compat/dbal3/` on DBAL 4 (its class is incompatible with DBAL 4 and is never
+  loaded there). Symfony's generated preload file only lists classes the container uses, so it needs nothing.
+
 ## To 1.6.1
 
 From **1.6.0**:
