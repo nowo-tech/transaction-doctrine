@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit;
 
+use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Nowo\TransactionDoctrine\ConnectionRepairer;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+
+use function version_compare;
 
 /**
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -143,7 +146,8 @@ final class ConnectionRepairerTest extends TestCase
         $connection = $this->connectionAt(1);
         $connection->method('rollBack')->willThrowException(new RuntimeException('server has gone away'));
         $connection->method('beginTransaction')->willThrowException(new RuntimeException('connection refused'));
-        $connection->expects($this->once())->method('close');
+        // The double keeps reporting level 1 after the failed BEGIN: rolled back (fails), then closed once more (1.8).
+        $connection->expects($this->exactly(2))->method('close');
 
         self::assertSame(ConnectionRepairer::ACTION_CLOSED, (new ConnectionRepairer(true))->afterFailure($connection, 0));
     }
@@ -155,6 +159,85 @@ final class ConnectionRepairerTest extends TestCase
         $connection->expects($this->never())->method('beginTransaction');
 
         self::assertSame(ConnectionRepairer::ACTION_CLOSED, (new ConnectionRepairer(false))->betweenRequests($connection));
+    }
+
+    /** 1.8: a closed connection whose transaction was rollback-only has the flag cleared, savepoints or not. */
+    public function testARollbackOnlyConnectionHasItsFlagClearedAfterTheClose(): void
+    {
+        $connection = $this->connectionAt(2);
+        $connection->method('isRollbackOnly')->willReturn(true);
+        $calls = 0;
+        $connection->method('rollBack')->willReturnCallback(static function () use (&$calls): void {
+            if (++$calls === 1) {
+                throw new RuntimeException('1305 SAVEPOINT DOCTRINE_2 does not exist');
+            }
+        });
+        $connection->expects($this->once())->method('close');
+        $connection->expects($this->once())->method('beginTransaction');
+
+        self::assertSame(ConnectionRepairer::ACTION_CLOSED, (new ConnectionRepairer(false))->afterFailure($connection, 0));
+        self::assertSame(2, $calls);
+    }
+
+    /** 1.8: an unreadable flag counts as set (clearing it is harmless). */
+    public function testAnUnreadableFlagIsCleared(): void
+    {
+        $connection = $this->connectionAt(3);
+        $connection->method('isRollbackOnly')->willThrowException(new RuntimeException('no active transaction'));
+        $connection->expects($this->once())->method('close');
+        $connection->expects($this->once())->method('beginTransaction');
+        $connection->expects($this->once())->method('rollBack');
+
+        self::assertSame(ConnectionRepairer::ACTION_CLOSED, (new ConnectionRepairer(false))->betweenRequests($connection));
+    }
+
+    /** 1.8: a BEGIN that reached the driver and failed leaves a level: it is rolled back, else closed again. */
+    public function testAFailedBeginWhileClearingTheFlagDropsItsLevel(): void
+    {
+        foreach ([false, true] as $rollbackFails) {
+            $level      = 3;
+            $connection = $this->createMock(Connection::class);
+            $connection->method('getNestTransactionsWithSavepoints')->willReturn(true);
+            $connection->method('isRollbackOnly')->willReturn(true);
+            $connection->method('getTransactionNestingLevel')->willReturnCallback(static function () use (&$level): int {
+                return $level;
+            });
+            $connection->method('close')->willReturnCallback(static function () use (&$level): void {
+                $level = 0;
+            });
+            $connection->method('beginTransaction')->willReturnCallback(static function () use (&$level): never {
+                $level = 1;
+
+                throw new RuntimeException('connection refused');
+            });
+            $connection->expects($this->once())->method('rollBack')->willReturnCallback(static function () use (&$level, $rollbackFails): void {
+                $level = 0;
+                if ($rollbackFails) {
+                    throw new RuntimeException('server has gone away');
+                }
+            });
+            $connection->expects($this->exactly($rollbackFails ? 2 : 1))->method('close');
+
+            self::assertSame(ConnectionRepairer::ACTION_CLOSED, (new ConnectionRepairer(false))->betweenRequests($connection));
+            self::assertSame(0, $level);
+        }
+    }
+
+    /**
+     * DBAL 3 declares getTransactionNestingLevel() without a native return type, so a test double returns null
+     * (ChatKit's unit tests): no TypeError, nothing to repair (1.8).
+     */
+    public function testADbal3DoubleWithoutANestingLevelIsLeftAlone(): void
+    {
+        if (version_compare((string) InstalledVersions::getVersion('doctrine/dbal'), '4.0.0', '>=')) {
+            self::markTestSkipped('DBAL 4 declares int: a double cannot return null.');
+        }
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects($this->never())->method('rollBack');
+
+        self::assertSame(ConnectionRepairer::ACTION_NONE, (new ConnectionRepairer())->afterFailure($connection, 0));
+        self::assertSame(ConnectionRepairer::ACTION_NONE, (new ConnectionRepairer())->betweenRequests($connection));
     }
 
     private function connectionAt(int $level): Connection&MockObject

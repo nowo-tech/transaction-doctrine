@@ -69,7 +69,7 @@ final class FollowUpsDatabaseTest extends DatabaseTestCase
 
             $label = $scoped ? 'scoped' : 'unscoped';
             self::assertSame(2, $result, $label);
-            self::assertSame($scoped, $registry->entityManager('default')->contains($hostCounter), $label);
+            self::assertTrue($registry->entityManager('default')->contains($hostCounter), $label); // 1.8 (VD2-4): never cleared, scoped or not
             self::assertFalse($registry->entityManager('private')->contains($loaded[0]), $label);
             self::assertSame(8, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), $label);
             self::assertSame(0, $privateConnection->getTransactionNestingLevel(), $label);

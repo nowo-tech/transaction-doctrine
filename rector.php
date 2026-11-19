@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Rector\Config\RectorConfig;
+use Rector\DeadCode\Rector\Cast\RecastingRemovalRector;
 
 return RectorConfig::configure()
     ->withPaths([
@@ -16,4 +17,12 @@ return RectorConfig::configure()
         deadCode: true,
         codeQuality: true,
         typeDeclarations: true,
-    );
+    )
+    // DBAL 3 declares the transaction getters without native return types (a test double returns null): the casts
+    // that read them stay, although DBAL 4's types make them look redundant (1.8).
+    ->withSkip([
+        RecastingRemovalRector::class => [
+            __DIR__ . '/src/ConnectionRepairer.php',
+            __DIR__ . '/src/DoctrineTransactionRunner.php',
+        ],
+    ]);

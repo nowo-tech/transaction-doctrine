@@ -22,6 +22,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **No TypeError with DBAL 3 test doubles.** DBAL 3 declares `Connection::getTransactionNestingLevel()` without a
+  native return type, so a PHPUnit double of DBAL 3's `Connection` returns `null`; `DoctrineTransactionRunner::run()`
+  passed it to `ConnectionRepairer::afterFailure(Connection, int)`, which threw a `TypeError` instead of the run's own
+  failure (seen in ChatKit's DBAL 3 unit tests). Nesting levels are now read as `(int)` in the runner and the repairer.
+- **The rollback-only flag no longer outlives a closed connection (DBAL 3 and DBAL 4).** DBAL keeps the flag set by
+  `Connection::setRollbackOnly()` (or, on DBAL 3 without savepoints, by an inner `rollBack()`) across
+  `Connection::close()`; only a level-1 `ROLLBACK` resets it. When `ConnectionRepairer` closed a connection whose
+  nested rollback failed (the server dropped the savepoints after a deadlock or a lost connection), it cleared the
+  flag only with DBAL 3's emulated nesting, so on DBAL 4 (or DBAL 3 with savepoints) the next transaction on the
+  reopened connection failed at commit with `CommitFailedRollbackOnly`. The repairer now reads the flag before
+  closing (`afterFailure()` and `betweenRequests()`) and, when it was set (or could not be read), begins and rolls
+  back once after the close; a `BEGIN` that fails there is rolled back or closed again, so no level is left counted.
+  As a second line, `DoctrineTransactionRunner::run()` clears a stale flag right after its own outermost `BEGIN` (one
+  `ROLLBACK` and a new `BEGIN`, with a notice), for a flag left on a connection closed elsewhere.
+- **A write-unit replay no longer clears the host's entity manager (audit VD2-4, REQ-RUNTIME-003 rule 2).** Between
+  two attempts `WriteUnit` cleared every open entity manager (unless scoped with `forManagers()`), so every entity the
+  host had loaded before `run()` was detached, even when the unit wrote only through DBAL. An open manager that
+  managed entities before the first attempt is now restored instead of cleared (internal `KeptEntitiesRestorer`):
+  what the failed attempt brought in (loaded, referenced, persisted) is detached without cascading into the host's
+  entities, and a host entity the attempt changed (a field, an association, a collection, a link to a detached
+  entity) or re-hydrated (`refresh()`, a proxy initialised) is refreshed from the database, so the same objects stay
+  managed and the next attempt starts from their committed state. When one cannot be restored (the attempt removed or
+  detached it, or its refresh failed) the unit is not replayed: `ConcurrencyConflict` with `Retry-After` (nothing
+  committed: `CONFLICT_001`), the manager left open and not cleared, with a warning. A manager that managed nothing
+  before `run()` is cleared as before; a closed manager is still reset.
+
+### Changed
+
+- `DoctrineStateRepairer::discardUnitOfWork()` takes two optional arguments, `$kept` and `$reloaded` (per manager
+  name, the entities to keep and those hydrated during the attempt), and returns the list of managers whose kept
+  entities could not be restored (it returned nothing before). Called without them it behaves as before.
+
 ## [1.7.1] - 2026-11-19
 
 ### Fixed

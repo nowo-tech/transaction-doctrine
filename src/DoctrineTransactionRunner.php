@@ -171,7 +171,8 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
         $connection = $manager?->getConnection() ?? $this->connection;
         assert($connection instanceof Connection);
-        $entryLevel = $connection->getTransactionNestingLevel();
+        // (int): DBAL 3 declares no native return type, so a DBAL 3 test double returns null (1.8).
+        $entryLevel = (int) $connection->getTransactionNestingLevel();
         $observer   = new RunObserver();
         // Entities managed before the run: one the run re-hydrates (refresh(), a proxy initialised) belongs to the caller.
         $before = $manager instanceof EntityManagerInterface ? $this->managedEntities($manager) : [];
@@ -179,6 +180,10 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
         try {
             $connection->beginTransaction();
+            if ($entryLevel === 0) {
+                $this->clearStaleRollbackOnly($connection);
+            }
+
             $result = $operation();
             $manager?->flush();
             $connection->commit();
@@ -207,6 +212,22 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         } finally {
             $manager?->getEventManager()->removeEventListener([Events::postFlush, Events::postLoad], $observer);
         }
+    }
+
+    /**
+     * A transaction this runner just began at the outermost level cannot be rollback-only yet: a set flag was left by
+     * an earlier transaction on a connection that was closed (Connection::close() keeps the flag on DBAL 3 and 4), and
+     * it would make this run's commit fail. One ROLLBACK of the fresh transaction clears it; the run then begins again.
+     */
+    private function clearStaleRollbackOnly(Connection $connection): void
+    {
+        if (!$connection->isRollbackOnly()) {
+            return;
+        }
+
+        SafeLog::log($this->logger, 'notice', 'Cleared a rollback-only flag left on a closed connection.', []);
+        $connection->rollBack();
+        $connection->beginTransaction();
     }
 
     /**

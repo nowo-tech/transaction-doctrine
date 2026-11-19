@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit;
 
+use Composer\InstalledVersions;
 use Doctrine\Common\EventManager;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverExceptionInterface;
@@ -20,12 +21,14 @@ use LogicException;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\RunObserver;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use SplObjectStorage;
 use stdClass;
 
 use function array_column;
+use function version_compare;
 
 use const PHP_INT_MAX;
 
@@ -249,6 +252,25 @@ final class DoctrineTransactionRunnerTest extends TestCase
         $result = uniqid('result', true);
 
         self::assertSame($result, DoctrineTransactionRunner::forEntityManager($manager, $registry)->run(static fn (): string => $result));
+    }
+
+    /**
+     * ChatKit's DBAL 3 unit tests (1.8): a DBAL 3 double of Connection returns null from getTransactionNestingLevel()
+     * (no native return type); the failed run is classified and rethrown, never a TypeError from the repairer.
+     */
+    public function testADbal3DoubleWithoutANestingLevelFailsWithItsOwnException(): void
+    {
+        if (version_compare((string) InstalledVersions::getVersion('doctrine/dbal'), '4.0.0', '>=')) {
+            self::markTestSkipped('DBAL 4 declares int: a double cannot return null.');
+        }
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects($this->never())->method('rollBack');
+
+        $this->expectException(TransientStorageFailure::class);
+        DoctrineTransactionRunner::forConnection($connection)->run(static function (): never {
+            throw new DeadlockException(FakeDriverException::deadlock(), null);
+        });
     }
 
     /**
