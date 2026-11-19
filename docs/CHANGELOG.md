@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Write units read Messenger wrappers through the bounded walk (audit UI2-4).** `WriteUnit::conflictKind()` (used
+  by `run()` and the Messenger middleware) called `getWrappedExceptions()` unguarded and recursively: a custom
+  `WrappedExceptionsInterface` that threw replaced the failure, one that returned a non-`Throwable` raised a
+  `TypeError`, and one that wrapped itself recursed without end. It now reads them through `ThrowableWalk`, as
+  `TransientFailureClassifier::findConflict()` and `findLockConflict()` do: each throwable once, at most 256. What
+  cannot be read whole (a throwing or broken wrapper, the cap reached) makes the failure not replayable; it is
+  rethrown unchanged.
+
+### Changed
+
+- **Docs: `DoctrineStateRepairer::discardUnitOfWork()` rolls back every connection (audit UI2-2).** UPGRADING,
+  CONCURRENCY and the method's docblock now say to call it only outside a caller's transaction. Behaviour unchanged.
+- The two stacked docblocks above the private `WriteUnit::hasPendingChanges()` are merged (audit UI2-3).
+
 ## [1.7.0] - 2026-11-19
 
 ### Added

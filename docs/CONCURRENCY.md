@@ -129,6 +129,8 @@ reaches the kernel outside a write unit is answered only with `conflict_response
   left poisoned. A failed rollback is never reported as success.
 - Between two attempts `DoctrineStateRepairer::discardUnitOfWork()` rolls back leftover levels, resets closed managers
   and clears open ones; then the `ResetBetweenAttemptsInterface` services and `WriteUnitRetryEvent` listeners run.
+  It rolls back every open level on every connection, so a bundle calling it from its own repair code calls it only
+  outside a caller's transaction (audit UI2-2): inside one, it rolls the caller's transaction back.
 - By default that covers every manager and connection of the registry, the host's default manager included: a replay
   detaches every entity the host loaded before the unit (audit UD2-L-2). A bundle whose unit writes only through its
   own manager scopes it (1.7): `WriteUnit::forManagers('my_bundle')`, or `new WriteUnit(..., managers: ['my_bundle'])`.

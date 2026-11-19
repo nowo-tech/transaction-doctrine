@@ -12,8 +12,10 @@ use InvalidArgumentException;
 use LogicException;
 use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\CyclicWrapper;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
+use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\TransientFailureKind;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
@@ -350,6 +352,113 @@ final class WriteUnitTest extends TestCase
         self::assertNull($unit->conflictKind(new HandlerFailedException($handled, [FakeDriverException::deadlock()])));
         self::assertNull($unit->conflictKind(new RuntimeException('plain')));
         self::assertNull($unit->conflictKind(FakeDriverException::serializationFailure()));
+    }
+
+    /**
+     * Audit UI2-4: a broken custom wrapper (getWrappedExceptions() throws, or returns a non-Throwable) is never
+     * replayed and never replaced: the failure is rethrown unchanged after one attempt, wherever the wrapper sits.
+     */
+    public function testABrokenWrapperIsRethrownUnchanged(): void
+    {
+        $unit                  = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(3, 0, 0, 0), null, new MockClock());
+        $broken                = new CyclicWrapper();
+        $broken->throws        = true;
+        $notThrowable          = new CyclicWrapper();
+        $notThrowable->wrapped = [FakeDriverException::deadlock(), 'not a throwable'];
+
+        $failures = [
+            'throwing wrapper'           => $broken,
+            'throwing wrapper, previous' => new RuntimeException('service', 0, $broken),
+            'throwing nested wrapper'    => new HandlerFailedException(new Envelope(new stdClass()), [FakeDriverException::deadlock(), $broken]),
+            'non-throwable wrapped'      => $notThrowable,
+        ];
+
+        foreach ($failures as $case => $failure) {
+            $calls  = 0;
+            $caught = null;
+
+            try {
+                $unit->run(static function () use ($failure, &$calls): never {
+                    ++$calls;
+
+                    throw $failure;
+                });
+            } catch (Throwable $thrown) {
+                $caught = $thrown;
+            }
+
+            self::assertSame($failure, $caught, $case);
+            self::assertSame(1, $calls, $case);
+            self::assertNull($unit->conflictKind($failure), $case);
+        }
+    }
+
+    /** Audit UI2-4: a cycle of wrappers ends; each throwable is read once. */
+    public function testAWrapperCycleEnds(): void
+    {
+        $unit           = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout']));
+        $outer          = new CyclicWrapper();
+        $inner          = new CyclicWrapper();
+        $outer->wrapped = [$outer, $inner];
+        $inner->wrapped = [$outer, $inner, FakeDriverException::deadlock()];
+
+        self::assertSame(TransientFailureKind::Deadlock, $unit->conflictKind($outer));
+
+        $inner->wrapped[] = new RuntimeException('not a conflict');
+        self::assertNull($unit->conflictKind($outer));
+
+        $inner->wrapped = [$outer, new ConcurrencyConflict(3, TransientFailureKind::Deadlock, 2, FakeDriverException::deadlock())];
+        self::assertNull($unit->conflictKind($outer));
+    }
+
+    /**
+     * Audit UI2-4: a failure carrying more than ThrowableWalk::MAX_NODES throwables is not replayed (an inner unit's
+     * ConcurrencyConflict may sit beyond the cap); under the cap it is.
+     */
+    public function testAFailureBeyondTheWalkCapIsNotReplayed(): void
+    {
+        $unit = new WriteUnit(new RecordingRegistry(), new WriteUnitPolicy(replayKinds: ['deadlock', 'lock_wait_timeout']));
+
+        // Deep getPrevious() chain under a deadlock.
+        $chain = new RuntimeException('0');
+        for ($i = 1; $i < 10; ++$i) {
+            $chain = new RuntimeException((string) $i, 0, $chain);
+        }
+
+        self::assertSame(TransientFailureKind::Deadlock, $unit->conflictKind(new RuntimeException('top', 0, new FakeDriverException('Deadlock found', '40001', 1213, $chain))));
+
+        for ($i = 10; $i <= ThrowableWalk::MAX_NODES + 10; ++$i) {
+            $chain = new RuntimeException((string) $i, 0, $chain);
+        }
+
+        self::assertNull($unit->conflictKind(new RuntimeException('top', 0, new FakeDriverException('Deadlock found', '40001', 1213, $chain))));
+
+        // Deep nesting of wrappers around a deadlock.
+        $deep          = new CyclicWrapper();
+        $deep->wrapped = [FakeDriverException::deadlock()];
+        for ($i = 0; $i < 10; ++$i) {
+            $outer          = new CyclicWrapper();
+            $outer->wrapped = [$deep];
+            $deep           = $outer;
+        }
+
+        self::assertSame(TransientFailureKind::Deadlock, $unit->conflictKind($deep));
+
+        for ($i = 0; $i < ThrowableWalk::MAX_NODES; ++$i) {
+            $outer          = new CyclicWrapper();
+            $outer->wrapped = [$deep];
+            $deep           = $outer;
+        }
+
+        self::assertNull($unit->conflictKind($deep));
+
+        // Wide: a wrapper with more wrapped deadlocks than the cap.
+        $wide = new CyclicWrapper();
+        for ($i = 0; $i <= ThrowableWalk::MAX_NODES; ++$i) {
+            $wide->wrapped[] = FakeDriverException::deadlock();
+        }
+
+        self::assertNull($unit->conflictKind($wide));
     }
 
     /**
