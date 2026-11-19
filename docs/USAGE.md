@@ -248,8 +248,9 @@ $unit = $writeUnit->forManagers('my_bundle');              // WriteUnit (the Doc
 $unit->run(fn (int $attempt) => $runner->run(fn () => $this->save($command)));
 ```
 
-Only the named managers are reset or cleared between attempts, and only their connections rolled back. Name every
-manager the unit writes through: a replay that would start inside a transaction or over pending changes on any
+Only the named managers are reset or cleared between attempts; leftover transaction levels are still rolled back on
+every connection. Name every manager the unit writes through (a manager outside the scope found closed, or pending
+changes outside the scope when a replay is abandoned, make the repair cover every manager): a replay that would start inside a transaction or over pending changes on any
 connection or manager is abandoned with `ConcurrencyConflict`. An empty list or an unknown name throws
 `InvalidArgumentException`.
 

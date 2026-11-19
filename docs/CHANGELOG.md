@@ -29,9 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once, at most 256). Bundles detecting conflicts in their own exception subscriber can call them instead of walking
   `getPrevious()`.
 - **Write units scoped to named entity managers (audit UD2-L-2):** `WriteUnit::forManagers('my_bundle')`, or the new
-  last constructor argument `managers: ['my_bundle']`, makes a replay reset or clear only those managers and roll
-  back only their connections; the host's default manager keeps its entities. `DoctrineStateRepairer::discardUnitOfWork()`
-  takes the same optional list. An empty list or an unknown manager name throws `InvalidArgumentException`. Without
+  last constructor argument `managers: ['my_bundle']`, makes a replay reset or clear only those managers; the host's
+  default manager keeps its entities. Leftover transaction levels are still rolled back on every connection. When a
+  manager outside the scope is found closed after an attempt (the unit wrote through a manager it did not name), every
+  manager is repaired with a warning; when a replay is abandoned with pending changes outside the scope (a resetter
+  or retry listener persisted through the host's manager), every manager is cleared (audits UI-1 / UI-3).
+  `DoctrineStateRepairer::discardUnitOfWork()` takes the same optional list. An empty list or an unknown manager name throws `InvalidArgumentException`. Without
   it nothing changes: a replay still clears every open manager.
 
 ### Changed
@@ -40,13 +43,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConcurrencyConflictResponder::isConflict()` used to walk only `getPrevious()`, so a `ConcurrencyConflict` in the
   second wrapped exception of a synchronous `HandlerFailedException` answered 500. It now uses
   `TransientFailureClassifier::findLockConflict()`, and `TransientFailureConflictMapper`
-  (`map_transient_failures: true`) uses `findTransientFailure()`. The attempts and `Retry-After` hint come from that
-  conflict. Unique violations and lost connections are still never mapped.
+  (`map_transient_failures: true`) uses `findTransientFailure()`. The attempts and `Retry-After` hint come from the
+  first `ConcurrencyConflict` in walk order (the `getPrevious()` chain first, then the wrapped exceptions in order),
+  which is not necessarily the lock conflict `findLockConflict()` returned (that one may be another
+  `LockConflictExceptionInterface`). A wrapper mixing a non-conflict and a conflict (a business exception in the first
+  handler, a lock conflict in the second) answers 409 with the conflict's code (`CONFLICT_001` unless something proves
+  a commit). Unique violations and lost connections are still never mapped. A custom wrapper whose
+  `getWrappedExceptions()` throws no longer escapes the walk: it is skipped and counts as a truncated walk (audit UI-5).
 - **A truncated walk answers `CONFLICT_002` (audit TA42-1):** when a failure carries more than 256 throwables,
   `ConflictCode::forFailure()` used to give up and answer `CONFLICT_001`, even though a committed conflict could sit
   beyond the cap. It now answers `CONFLICT_002` (no `Retry-After`), the safe over-approximation.
 - **`ConflictCode::forFailure()` applies the lost-savepoint rule to wrapped exceptions too:** a lost savepoint with no
-  deadlock behind it in a later wrapped exception answers `CONFLICT_002`, as it does in the `getPrevious()` chain.
+  deadlock behind it in a later wrapped exception answers `CONFLICT_002`, as it does in the `getPrevious()` chain,
+  also when the first handler failed with an uncommitted `ConcurrencyConflict` (a conflict decides only its own chain,
+  audit UI-2).
 
 ### Fixed
 

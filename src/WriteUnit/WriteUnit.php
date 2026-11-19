@@ -26,6 +26,7 @@ use Throwable;
 
 use function array_key_exists;
 use function array_values;
+use function in_array;
 use function iterator_to_array;
 use function sprintf;
 use function usleep;
@@ -94,9 +95,9 @@ final readonly class WriteUnit implements WriteUnitInterface
      * @param EventDispatcherInterface|null $dispatcher Dispatches WriteUnitRetryEvent before each replay; null = none
      * @param list<string>|null $managers The entity managers a replay repairs (1.7, audit UD2-L-2): null (the
      *                                    default) clears every open manager of the registry, the host's default one
-     *                                    included; a list of manager names repairs only those managers and their
-     *                                    connections (a bundle's private manager), so the host's manager keeps its
-     *                                    entities. Every name must be a manager of the registry
+     *                                    included; a list of manager names clears or resets only those managers (a
+     *                                    bundle's private manager), so the host's manager keeps its entities (see
+     *                                    forManagers()). Every name must be a manager of the registry
      *
      * @throws InvalidArgumentException When $managers is empty or names a manager the registry does not have
      */
@@ -126,10 +127,12 @@ final readonly class WriteUnit implements WriteUnitInterface
 
     /**
      * The same write unit, its replays scoped to the named entity managers (1.7, audit UD2-L-2): between two attempts
-     * only these managers are reset or cleared and only their connections rolled back; the host's default manager
-     * (and any other) keeps its entities. Name every manager the unit writes through. The checks before the first
-     * attempt still read every connection and manager (a caller's open transaction, or pending changes anywhere, make
-     * the unit run once), and a replay that would start inside a transaction or over pending changes on any of them is
+     * only these managers are reset or cleared; the host's default manager (and any other) keeps its entities.
+     * Leftover transaction levels are still rolled back on every connection. Name every manager the unit writes
+     * through: when one outside the scope is found closed after an attempt, or a replay is abandoned with pending
+     * changes outside the scope, every manager is repaired (audits UI-1 / UI-3). The checks before the first attempt
+     * still read every connection and manager (a caller's open transaction, or pending changes anywhere, make the unit
+     * run once), and a replay that would start inside a transaction or over pending changes on any of them is
      * abandoned (ConcurrencyConflict), never run nested.
      *
      * @throws InvalidArgumentException When no name is given or one is not a manager of the registry
@@ -306,14 +309,24 @@ final readonly class WriteUnit implements WriteUnitInterface
             $this->dispatcher?->dispatch(new WriteUnitRetryEvent($next, $failure, $kind, $unit));
         } catch (Throwable $resetFailure) {
             // Audit TA-6: a resetter or listener may have opened a transaction (or persisted) before throwing.
-            $this->repairer->discardUnitOfWork($this->managers);
+            $this->discardAbandoned();
             $this->abandonReplay($next - 1, $failure, $kind, $resetFailure);
         }
 
         if ($this->insideTransaction() || $this->hasPendingChanges()) {
-            $this->repairer->discardUnitOfWork($this->managers);
+            $this->discardAbandoned();
             $this->abandonReplay($next - 1, $failure, $kind, new LogicException('A reset-between-attempts service or retry listener left a transaction or pending changes.'));
         }
+    }
+
+    /**
+     * Discards what an abandoned replay left: the scoped repair, or every manager when one outside the scope holds
+     * pending changes (a resetter or listener persisted through the host's manager, audit UI-1). Run once only when
+     * no manager had pending changes, so whatever is pending now was left by the unit or by those services.
+     */
+    private function discardAbandoned(): void
+    {
+        $this->repairer->discardUnitOfWork($this->managers !== null && $this->hasPendingChanges($this->managers) ? null : $this->managers);
     }
 
     private function abandonReplay(int $attempts, Throwable $failure, TransientFailureKind $kind, Throwable $resetFailure): never
@@ -369,10 +382,13 @@ final readonly class WriteUnit implements WriteUnitInterface
      * Whether an open entity manager holds work the caller has not flushed (the cheap scheduled signals first, then
      * the change sets of the managed entities, as DoctrineTransactionRunner does). An unreadable unit of work counts.
      */
-    private function hasPendingChanges(): bool
+    /**
+     * @param list<string> $except Managers not checked (by name)
+     */
+    private function hasPendingChanges(array $except = []): bool
     {
-        foreach ($this->registry->getManagers() as $manager) {
-            if (!$manager instanceof EntityManagerInterface || !$manager->isOpen()) {
+        foreach ($this->registry->getManagers() as $name => $manager) {
+            if (in_array($name, $except, true) || !$manager instanceof EntityManagerInterface || !$manager->isOpen()) {
                 continue;
             }
 

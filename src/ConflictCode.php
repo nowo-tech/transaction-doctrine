@@ -66,17 +66,18 @@ enum ConflictCode: string
      */
     public static function forFailure(Throwable $failure, ?CommitMark $since = null): self
     {
-        if (($since instanceof CommitMark && $since->committedSince()) || self::carriesCommit($failure)) {
+        if (($since instanceof CommitMark && $since->committedSince()) || self::carriesCommit($failure) || self::wrappedOutcomeUnknown($failure)) {
             return self::Committed;
         }
 
+        // A ConcurrencyConflict decides its own chain only (audit UI-2): the wrapped chains were read above.
         for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
             if ($current instanceof ConcurrencyConflict) {
                 return $current->committed ? self::Committed : self::RetrySafe;
             }
         }
 
-        return self::outcomeUnknown($failure) ? self::Committed : self::RetrySafe;
+        return (new TransientFailureClassifier())->isCommitOutcomeUnknown($failure) ? self::Committed : self::RetrySafe;
     }
 
     /**
@@ -112,15 +113,29 @@ enum ConflictCode: string
     }
 
     /**
-     * Whether the failure's getPrevious() chain, or the chain of any exception a Messenger wrapper carries, is a lost
-     * savepoint with no transient failure (TransientFailureClassifier::isCommitOutcomeUnknown()).
+     * Whether the chain of an exception a Messenger wrapper carries (not the failure's own getPrevious() chain) is a
+     * lost savepoint with no transient failure (TransientFailureClassifier::isCommitOutcomeUnknown()). A chain that
+     * holds a ConcurrencyConflict is decided by that conflict (its `committed`, read by carriesCommit()), so it is
+     * skipped; the other chains are read whatever the first wrapped exception was (audit UI-2: a first handler's
+     * uncommitted conflict no longer hides a second handler's lost savepoint).
      */
-    private static function outcomeUnknown(Throwable $failure): bool
+    private static function wrappedOutcomeUnknown(Throwable $failure): bool
     {
         $classifier = new TransientFailureClassifier();
 
         foreach (ThrowableWalk::of($failure) as $current => $chainStart) {
-            if ($chainStart && $classifier->isCommitOutcomeUnknown($current)) {
+            if ($chainStart && $current !== $failure && !self::chainHasConflict($current) && $classifier->isCommitOutcomeUnknown($current)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function chainHasConflict(Throwable $start): bool
+    {
+        for ($current = $start; $current instanceof Throwable; $current = $current->getPrevious()) {
+            if ($current instanceof ConcurrencyConflict) {
                 return true;
             }
         }

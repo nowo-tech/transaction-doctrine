@@ -37,8 +37,9 @@ signature change (new optional arguments and new methods only).
   $unit->run(fn (int $attempt) => $this->save($command));
   ```
 
-  Only the named managers are reset or cleared, and only their connections rolled back. Name every manager the unit
-  writes through: a replay that would start inside a transaction or over pending changes on any connection or
+  Only the named managers are reset or cleared; leftover transaction levels are still rolled back on every
+  connection. Name every manager the unit writes through (when one outside the scope is found closed, or a replay is
+  abandoned with pending changes outside the scope, every manager is repaired): a replay that would start inside a transaction or over pending changes on any connection or
   manager is abandoned (`ConcurrencyConflict`), never run nested. The checks before the first attempt still read every
   connection and manager. `DoctrineStateRepairer::discardUnitOfWork(['my_bundle'])` does the same for a bundle's own
   repair code. Without a scope nothing changes. See [Concurrency](CONCURRENCY.md#nested-transactions-and-replays).
@@ -55,6 +56,9 @@ signature change (new optional arguments and new methods only).
   since commit tracking was added. Nothing to do; code that worked around it (`!== false` instead of `=== true`) keeps
   working. The new class `Nowo\TransactionDoctrine\WriteUnit\Dbal\Dbal3\CommitResultConnection` lives in
   `compat/dbal3/` (PSR-4 autoload entry in `composer.json`) and is loaded only on DBAL 3. DBAL 4 is unchanged.
+- **Preloading:** a hand-written preload script that compiles every file of the class map must skip
+  `vendor/nowo-tech/transaction-doctrine/compat/dbal3/` on DBAL 4 (its class is incompatible with DBAL 4 and is never
+  loaded there). Symfony's generated preload file only lists classes the container uses, so it needs nothing.
 
 ## To 1.6.1
 

@@ -114,7 +114,12 @@ code. It carries the code when the body has none (the host's error page). Bundle
 which differs between bundles and is kept only for BC.
 
 By default the responder answers `ConcurrencyConflict` (and anything implementing `LockConflictExceptionInterface`) and
-whatever a tagged `ConflictExceptionMapperInterface` accepts. A raw transient failure or a bare lost savepoint that
+whatever a tagged `ConflictExceptionMapperInterface` accepts. Since 1.7 it also looks inside Messenger wrappers: a
+`HandlerFailedException` whose first handler failed with a non-conflict (a business exception) and whose second failed
+with a lock conflict answers 409 with the conflict's code, `CONFLICT_001` unless something proves a commit (a
+`HandledStamp`, a committed conflict, a lost savepoint in another handler's chain). The attempts and the
+`Retry-After` hint come from the first `ConcurrencyConflict` in walk order (the `getPrevious()` chain first, then the
+wrapped exceptions in order). A raw transient failure or a bare lost savepoint that
 reaches the kernel outside a write unit is answered only with `conflict_response.map_transient_failures: true`.
 
 ## Nested transactions and replays
@@ -127,8 +132,11 @@ reaches the kernel outside a write unit is answered only with `conflict_response
 - By default that covers every manager and connection of the registry, the host's default manager included: a replay
   detaches every entity the host loaded before the unit (audit UD2-L-2). A bundle whose unit writes only through its
   own manager scopes it (1.7): `WriteUnit::forManagers('my_bundle')`, or `new WriteUnit(..., managers: ['my_bundle'])`.
-  Only those managers are reset or cleared and only their connections rolled back. Name every manager the unit writes
-  through. The checks before the first attempt still read every connection and manager (a caller's transaction or
+  Only those managers are reset or cleared; leftover levels are still rolled back on every connection (a unit only
+  starts outside any transaction, so an open level is always the unit's or a retry listener's, audit UI-1). Name every
+  manager the unit writes through: when one outside the scope is found closed after an attempt, every manager is
+  repaired with a warning (audit UI-3), and when a replay is abandoned with pending changes outside the scope, every
+  manager is cleared. The checks before the first attempt still read every connection and manager (a caller's transaction or
   pending changes anywhere make the unit run once), and a replay that would start inside a transaction or over
   pending changes on any of them is abandoned with `ConcurrencyConflict`, never run nested.
 - When one of them throws, or leaves a transaction or pending changes, the replay is abandoned. Since 1.5.0 (audit
@@ -182,6 +190,8 @@ process):
   violation there is not (1.7, audits TA42-3 / UA2-5);
 - a write unit scoped to a bundle's own manager on its own connection replays a real lock wait timeout without
   clearing the host's manager (its entity still managed), while the unscoped unit clears it (1.7, audit UD2-L-2);
+- a scoped unit whose retry listener opens a transaction on the host's connection and throws, or persists through
+  the host's manager, is abandoned with level 0 on both connections and no pending host change (1.7, audit UI-1);
 - with commit tracking on, a real COMMIT returns the driver's `true` on DBAL 3 (`void` on DBAL 4), is recorded, and a
   second connection sees the row (1.7, audit UE-CF-1);
 - PostgreSQL COMMITs the server refuses, on every leg (DBAL 3 included, audit TA3-5): a SERIALIZABLE write skew

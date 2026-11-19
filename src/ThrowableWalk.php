@@ -22,9 +22,11 @@ use function spl_object_id;
  *   may still visit (audits TA4-3, TA42-2: a child already known is never queued again).
  * - Order: the throwable, then its whole getPrevious() chain, then the wrapped exceptions (each one with its own chain),
  *   in their order. So the first match of the walk is the first match of the getPrevious() chain when there is one.
- * - Anything a custom wrapper returns that is not a Throwable is ignored (a 409 never becomes a TypeError).
+ * - Anything a custom wrapper returns that is not a Throwable is ignored (a 409 never becomes a TypeError), and a
+ *   getWrappedExceptions() that throws is skipped and counts as a truncation (audit UI-5): the walk never throws.
  * - The generator's return value says whether the walk was truncated: a throwable child was left out because of the
- *   cap (audit TA42-1). A caller looking for proof of a commit must then over-approximate.
+ *   cap (audit TA42-1), or a wrapper's getWrappedExceptions() threw. A caller looking for proof of a commit must then
+ *   over-approximate.
  *
  * Stateless: safe in a long-running worker.
  *
@@ -57,7 +59,16 @@ final class ThrowableWalk
 
             $children = [[$current->getPrevious(), false]];
             if ($messenger && $current instanceof WrappedExceptionsInterface) {
-                foreach ($current->getWrappedExceptions() as $wrapped) {
+                try {
+                    $wrappedExceptions = $current->getWrappedExceptions();
+                } catch (Throwable) {
+                    // A broken custom wrapper (audit UI-5): what it hides is unknown, so the walk counts as truncated
+                    // (CONFLICT_002 when looking for proof of a commit), and nothing escapes the walk.
+                    $wrappedExceptions = [];
+                    $truncated         = true;
+                }
+
+                foreach ($wrappedExceptions as $wrapped) {
                     $children[] = [$wrapped, true];
                 }
             }

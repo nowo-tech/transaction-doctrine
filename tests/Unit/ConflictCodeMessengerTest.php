@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\CyclicWrapper;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
+use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -158,6 +159,33 @@ final class ConflictCodeMessengerTest extends TestCase
         self::assertSame(ConflictCode::Committed, $this->code(new HandlerFailedException($envelope, [new RuntimeException('business rule'), new RuntimeException('wrap', 0, FakeDriverException::lostSavepoint())])));
         self::assertSame(ConflictCode::RetrySafe, $this->code(new HandlerFailedException($envelope, [new RuntimeException('business rule'), FakeDriverException::deadlock()])));
         self::assertSame(ConflictCode::RetrySafe, $this->code(new HandlerFailedException($envelope, [new RuntimeException('business rule'), new FakeDriverException('SQLSTATE[42000]: 1305 SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305, FakeDriverException::uniqueViolation())])));
+    }
+
+    /**
+     * Audit UI-2 (1.7): a first handler's uncommitted ConcurrencyConflict decides its own chain only; a second
+     * handler's lost savepoint (MySQL / MariaDB 1305, PostgreSQL 3B001) still answers CONFLICT_002.
+     */
+    public function testAnUncommittedConflictDoesNotHideALaterLostSavepoint(): void
+    {
+        $envelope = new Envelope(new stdClass());
+        $conflict = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, 1, FakeDriverException::deadlock());
+
+        self::assertSame(ConflictCode::Committed, $this->code(new HandlerFailedException($envelope, [$conflict, FakeDriverException::lostSavepoint()])));
+        self::assertSame(ConflictCode::Committed, $this->code(new HandlerFailedException($envelope, [$conflict, new FakeDriverException('savepoint "DOCTRINE_2" does not exist', '3B001', 7)])));
+        // A lost savepoint under a conflict in its own chain: the conflict decides that chain.
+        $second = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, 1, FakeDriverException::lostSavepoint());
+        self::assertSame(ConflictCode::RetrySafe, $this->code(new HandlerFailedException($envelope, [$conflict, $second])));
+    }
+
+    /** Audit UI-5 (1.7): a custom wrapper whose getWrappedExceptions() throws never escapes; it counts as truncated. */
+    public function testABrokenWrapperNeverThrowsOutOfTheWalk(): void
+    {
+        $wrapper         = new CyclicWrapper();
+        $wrapper->throws = true;
+
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
+        self::assertNull(TransientFailureClassifier::findConflict($wrapper));
+        self::assertNull(TransientFailureClassifier::findLockConflict(new RuntimeException('outer', 0, $wrapper)));
     }
 
     /** @phpstan-impure the answer depends on the wrapper, which the test changes between calls */

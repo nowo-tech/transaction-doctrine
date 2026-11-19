@@ -7,15 +7,19 @@ namespace Nowo\TransactionDoctrine\Tests\Integration\Database;
 use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use LogicException;
+use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\CallbackDispatcher;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Counter;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\DatabaseTestCase;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\TwoManagerRegistry;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingDriver;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
+use RuntimeException;
 
 use function str_starts_with;
 
@@ -69,6 +73,56 @@ final class FollowUpsDatabaseTest extends DatabaseTestCase
             self::assertFalse($registry->entityManager('private')->contains($loaded[0]), $label);
             self::assertSame(8, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), $label);
             self::assertSame(0, $privateConnection->getTransactionNestingLevel(), $label);
+            $privateConnection->close();
+            $this->tearDown();
+        }
+    }
+
+    /**
+     * Audit UI-1: a scoped unit whose retry listener opens a transaction on the host's connection and throws, or
+     * persists through the host's manager, is abandoned with nothing left behind: level 0 on every connection, no
+     * pending host change, and the listener's write rolled back.
+     */
+    #[DataProvider('allServers')]
+    public function testAnAbandonedScopedReplayLeavesNothingBehind(string $server): void
+    {
+        foreach (['begins a transaction and throws', 'persists through the host manager'] as $case) {
+            $this->boot($server);
+            $privateConnection = $this->connect();
+            $privateConnection->executeStatement($this->isPostgreSql() ? "SET lock_timeout = '1s'" : 'SET SESSION innodb_lock_wait_timeout = 1');
+            $registry = new TwoManagerRegistry($this->connection, $privateConnection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
+            self::assertSame('OK', $this->otherSession()->execute('BEGIN'));
+            self::assertSame('OK', $this->otherSession()->execute('UPDATE ddrb_counter SET counter_value = 7 WHERE id = 1'));
+            $listener = $case === 'persists through the host manager'
+                ? static function () use ($registry): void {
+                    $registry->entityManager('default')->persist(new Counter(9, 9));
+                }
+            : function (): never {
+                $this->connection->beginTransaction();
+                $this->connection->executeStatement('UPDATE ddrb_counter SET counter_value = 3 WHERE id = 2');
+
+                throw new RuntimeException('retry listener failed');
+            };
+            $unit   = new WriteUnit($registry, new WriteUnitPolicy(3, 0, 0, 0), null, null, null, null, null, [], new CallbackDispatcher($listener), ['private']);
+            $caught = null;
+
+            try {
+                $unit->run(static function () use ($privateConnection): void {
+                    $privateConnection->executeStatement('UPDATE ddrb_counter SET counter_value = counter_value + 1 WHERE id = 1');
+                });
+            } catch (ConcurrencyConflict $conflict) {
+                $caught = $conflict;
+            } finally {
+                $this->otherSession()->execute('ROLLBACK');
+            }
+
+            self::assertInstanceOf(ConcurrencyConflict::class, $caught, $case);
+            self::assertInstanceOf($case === 'persists through the host manager' ? LogicException::class : RuntimeException::class, $caught->resetFailure, $case);
+            self::assertSame(0, $this->connection->getTransactionNestingLevel(), $case);
+            self::assertSame(0, $privateConnection->getTransactionNestingLevel(), $case);
+            self::assertSame([], $registry->entityManager('default')->getUnitOfWork()->getScheduledEntityInsertions(), $case);
+            self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'), $case);
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 9'), $case);
             $privateConnection->close();
             $this->tearDown();
         }
