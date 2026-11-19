@@ -77,6 +77,44 @@ final class ConflictCodeDatabaseTest extends DatabaseTestCase
         self::assertSame(ConflictCode::Committed, ConflictCode::forFailure(new HandlerFailedException($envelope, [new RuntimeException('other handler'), $committed])));
     }
 
+    /**
+     * 1.7 (audits TA42-3 / UA2-5): a real lock wait timeout from a second session in the SECOND wrapped exception of a
+     * synchronous HandlerFailedException is detected (409, not 500), and so is a write unit's ConcurrencyConflict
+     * there, without the mapper; a real lost savepoint there answers CONFLICT_002; a real unique violation there is
+     * never mapped.
+     */
+    #[DataProvider('allServers')]
+    public function testAConflictInALaterWrappedExceptionIsDetected(string $server): void
+    {
+        $this->boot($server);
+        $this->connection->executeStatement($this->isPostgreSql() ? "SET lock_timeout = '1s'" : 'SET SESSION innodb_lock_wait_timeout = 1');
+        self::assertSame('OK', $this->otherSession()->execute('BEGIN'));
+        self::assertSame('OK', $this->otherSession()->execute('UPDATE ddrb_counter SET counter_value = 9 WHERE id = 1'));
+
+        $timeout = $this->failure('UPDATE ddrb_counter SET counter_value = 5 WHERE id = 1');
+        $this->otherSession()->execute('ROLLBACK');
+        $envelope = new Envelope(new stdClass());
+        $wrapped  = new HandlerFailedException($envelope, [new RuntimeException('business rule'), $timeout]);
+
+        self::assertSame($timeout, TransientFailureClassifier::findConflict($wrapped));
+        $this->assertAnswer($wrapped, ConflictCode::RetrySafe, '1');
+
+        $conflict = new ConcurrencyConflict(2, TransientFailureKind::LockWaitTimeout, 3, $timeout);
+        $default  = new ConcurrencyConflictResponder(new ConflictResponsePolicy());
+        $failure  = new HandlerFailedException($envelope, [new RuntimeException('business rule'), $conflict]);
+        self::assertTrue($default->isConflict($failure));
+        self::assertSame('3', $default->respond(Request::create('/api/notes', 'POST'), $failure)->headers->get('Retry-After'));
+
+        $this->connection->beginTransaction();
+        $lost = $this->failure('ROLLBACK TO SAVEPOINT td_missing');
+        $this->connection->rollBack();
+        $this->assertAnswer(new HandlerFailedException($envelope, [new RuntimeException('business rule'), $lost]), ConflictCode::Committed, null);
+
+        $this->connection->executeStatement('INSERT INTO ddrb_board (id) VALUES (2)');
+        $unique = $this->failure('INSERT INTO ddrb_board (id) VALUES (2)');
+        self::assertNull(TransientFailureClassifier::findConflict(new HandlerFailedException($envelope, [new RuntimeException('business rule'), $unique])));
+    }
+
     /** A MySQL / MariaDB deadlock (1213) on the victim: CONFLICT_001. */
     #[DataProvider('mysqlFamily')]
     public function testADeadlockAnswersConflict001(string $server): void

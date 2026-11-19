@@ -13,11 +13,7 @@ use Symfony\Component\Messenger\Exception\WrappedExceptionsInterface;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
-use function array_pop;
-use function array_values;
-use function count;
 use function interface_exists;
-use function spl_object_id;
 
 /**
  * The platform's conflict code (REQ-RUNTIME-003 rule 6), carried by every conflict answer next to the 409 (or 503):
@@ -49,9 +45,6 @@ enum ConflictCode: string
     /** Part of the work may already be committed: read again, do not repeat blindly. */
     case Committed = 'CONFLICT_002';
 
-    /** Most throwables walked when looking for proof of a commit (a cycle or a fan-out cannot hang a worker). */
-    private const MAX_NODES = 256;
-
     /**
      * The code of a conflict failure. CONFLICT_002 when:
      *
@@ -62,8 +55,10 @@ enum ConflictCode: string
      *   whose envelope carries a HandledStamp: another handler already succeeded; any DelayedMessageHandlingException:
      *   the outer dispatch, and its transaction, already committed);
      * - otherwise, the first ConcurrencyConflict of the getPrevious() chain says it committed, or there is none and the
-     *   chain holds a lost savepoint with no transient failure (commit outcome unknown,
-     *   TransientFailureClassifier::isCommitOutcomeUnknown()).
+     *   chain (or, transaction-doctrine >= 1.7, the chain of an exception a Messenger wrapper carries) holds a lost
+     *   savepoint with no transient failure (commit outcome unknown, TransientFailureClassifier::isCommitOutcomeUnknown());
+     * - the walk over what the failure carries was cut short by its cap (more than ThrowableWalk::MAX_NODES throwables,
+     *   transaction-doctrine >= 1.7): a proof may sit beyond it, so the safe answer is CONFLICT_002.
      *
      * CONFLICT_001 otherwise. Stateless; works without symfony/messenger (the Messenger rules are then skipped).
      *
@@ -81,7 +76,7 @@ enum ConflictCode: string
             }
         }
 
-        return (new TransientFailureClassifier())->isCommitOutcomeUnknown($failure) ? self::Committed : self::RetrySafe;
+        return self::outcomeUnknown($failure) ? self::Committed : self::RetrySafe;
     }
 
     /**
@@ -98,40 +93,35 @@ enum ConflictCode: string
 
     /**
      * Whether the failure, or anything it carries (getPrevious() and Messenger's wrapped exceptions), proves that part
-     * of the work committed. Each throwable is visited once, at most MAX_NODES of them, and the queue never holds more
-     * than the walk may still visit. Anything a custom wrapper returns that is not a Throwable is ignored.
+     * of the work committed (the bounded ThrowableWalk). A walk truncated by its cap answers true: a proof may sit
+     * beyond it, and CONFLICT_002 is the safe over-approximation (audit TA42-1). Anything a custom wrapper returns that
+     * is not a Throwable is ignored.
      */
     private static function carriesCommit(Throwable $failure): bool
     {
         $messenger = interface_exists(WrappedExceptionsInterface::class);
-        $seen      = [];
-        $stack     = [$failure];
+        $walk      = ThrowableWalk::of($failure);
 
-        while ($stack !== [] && count($seen) < self::MAX_NODES) {
-            $current = array_pop($stack);
-            $id      = spl_object_id($current);
-
-            if (isset($seen[$id])) {
-                continue;
-            }
-
-            $seen[$id] = true;
-
+        foreach ($walk as $current => $chainStart) {
             if (($current instanceof ConcurrencyConflict && $current->committed) || ($messenger && self::isNonReplayableWrapper($current))) {
                 return true;
             }
+        }
 
-            $children = [$current->getPrevious()];
-            if ($messenger && $current instanceof WrappedExceptionsInterface) {
-                $children = [...$children, ...array_values($current->getWrappedExceptions())];
-            }
+        return $walk->getReturn();
+    }
 
-            // A custom wrapper may hand back anything: only throwables are walked (a 409 never becomes a 500), and
-            // no more are queued than the walk may still visit.
-            foreach ($children as $child) {
-                if ($child instanceof Throwable && count($stack) + count($seen) < self::MAX_NODES) {
-                    $stack[] = $child;
-                }
+    /**
+     * Whether the failure's getPrevious() chain, or the chain of any exception a Messenger wrapper carries, is a lost
+     * savepoint with no transient failure (TransientFailureClassifier::isCommitOutcomeUnknown()).
+     */
+    private static function outcomeUnknown(Throwable $failure): bool
+    {
+        $classifier = new TransientFailureClassifier();
+
+        foreach (ThrowableWalk::of($failure) as $current => $chainStart) {
+            if ($chainStart && $classifier->isCommitOutcomeUnknown($current)) {
+                return true;
             }
         }
 

@@ -72,7 +72,8 @@
     },
     "autoload": {
         "psr-4": {
-            "Nowo\\TransactionDoctrine\\": "src/"
+            "Nowo\\TransactionDoctrine\\": "src/",
+            "Nowo\\TransactionDoctrine\\WriteUnit\\Dbal\\Dbal3\\": "compat/dbal3/"
         }
     },
     "autoload-dev": {

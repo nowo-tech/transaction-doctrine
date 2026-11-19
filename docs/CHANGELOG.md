@@ -20,6 +20,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Conflict detection inside Messenger wrappers (audits TA42-3 / UA2-5):** `TransientFailureClassifier::findConflict()`,
+  `findLockConflict()` and `findTransientFailure()` (public, static) return the first conflict a failure carries,
+  along `getPrevious()` and, with `symfony/messenger`, inside `getWrappedExceptions()` (a deadlock in the second
+  handler of a synchronous `HandlerFailedException`). They use the same bounded walk as `ConflictCode` (each throwable
+  once, at most 256). Bundles detecting conflicts in their own exception subscriber can call them instead of walking
+  `getPrevious()`.
+- **Write units scoped to named entity managers (audit UD2-L-2):** `WriteUnit::forManagers('my_bundle')`, or the new
+  last constructor argument `managers: ['my_bundle']`, makes a replay reset or clear only those managers and roll
+  back only their connections; the host's default manager keeps its entities. `DoctrineStateRepairer::discardUnitOfWork()`
+  takes the same optional list. An empty list or an unknown manager name throws `InvalidArgumentException`. Without
+  it nothing changes: a replay still clears every open manager.
+
+### Changed
+
+- **The 409 responder detects a conflict in a later wrapped exception (audits TA42-3 / UA2-5):**
+  `ConcurrencyConflictResponder::isConflict()` used to walk only `getPrevious()`, so a `ConcurrencyConflict` in the
+  second wrapped exception of a synchronous `HandlerFailedException` answered 500. It now uses
+  `TransientFailureClassifier::findLockConflict()`, and `TransientFailureConflictMapper`
+  (`map_transient_failures: true`) uses `findTransientFailure()`. The attempts and `Retry-After` hint come from that
+  conflict. Unique violations and lost connections are still never mapped.
+- **A truncated walk answers `CONFLICT_002` (audit TA42-1):** when a failure carries more than 256 throwables,
+  `ConflictCode::forFailure()` used to give up and answer `CONFLICT_001`, even though a committed conflict could sit
+  beyond the cap. It now answers `CONFLICT_002` (no `Retry-After`), the safe over-approximation.
+- **`ConflictCode::forFailure()` applies the lost-savepoint rule to wrapped exceptions too:** a lost savepoint with no
+  deadlock behind it in a later wrapped exception answers `CONFLICT_002`, as it does in the `getPrevious()` chain.
+
+### Fixed
+
+- **Duplicates no longer use up the walk's cap (audit TA42-2):** a throwable already visited or queued (a
+  `HandlerFailedException`'s previous is also its first wrapped exception) is not queued again.
+- **DBAL 3: `Connection::commit()` returns `true` again with commit tracking on (audit UE-CF-1):**
+  `CommitTrackingConnection::commit()` is declared `void` to stay valid against DBAL 4, so on DBAL 3 the wrapper's
+  `commit()` returned `null` instead of the driver's `true`. Host code testing `=== true` or `!$connection->commit()`
+  misread a successful commit; the ORM checks `=== false` and was not affected. On DBAL 3 the driver middleware now
+  adds a small `Dbal3\CommitResultConnection` (autoloaded from `compat/dbal3/`, loaded only on DBAL 3) that hands the
+  driver's result back. DBAL 4 is unchanged (`void`).
+
 ## [1.6.1] - 2026-11-19
 
 ### Fixed

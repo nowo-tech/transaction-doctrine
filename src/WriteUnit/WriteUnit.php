@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\ManagerRegistry;
 use Generator;
+use InvalidArgumentException;
 use LogicException;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
@@ -23,7 +24,10 @@ use Symfony\Component\Messenger\Exception\WrappedExceptionsInterface;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
+use function array_key_exists;
+use function array_values;
 use function iterator_to_array;
+use function sprintf;
 use function usleep;
 
 /**
@@ -47,7 +51,9 @@ use function usleep;
  * - any open entity manager has pending changes before the first attempt (a caller's unflushed edits or persists):
  *   clearing it for a replay would silently lose them.
  *
- * A replay clears the open entity managers: every entity the caller loaded before run() is detached afterwards.
+ * A replay clears the open entity managers: every entity the caller loaded before run() is detached afterwards. A
+ * unit scoped to named managers (forManagers(), or the `managers` argument; 1.7) clears only those, so a bundle
+ * writing through its own manager leaves the host's default manager alone.
  * Request memos that keep entities must therefore be emptied before the replay: after the managers are cleared and
  * the pause, and right before the next attempt, every ResetBetweenAttemptsInterface given (in order) is called, then
  * a WriteUnitRetryEvent is dispatched when a PSR-14 dispatcher is given. Neither runs before the first attempt nor
@@ -86,6 +92,13 @@ final readonly class WriteUnit implements WriteUnitInterface
      * @param iterable<ResetBetweenAttemptsInterface> $resetters Called in order before each replay (read on every
      *                                                           replay; a Generator is read once into a list)
      * @param EventDispatcherInterface|null $dispatcher Dispatches WriteUnitRetryEvent before each replay; null = none
+     * @param list<string>|null $managers The entity managers a replay repairs (1.7, audit UD2-L-2): null (the
+     *                                    default) clears every open manager of the registry, the host's default one
+     *                                    included; a list of manager names repairs only those managers and their
+     *                                    connections (a bundle's private manager), so the host's manager keeps its
+     *                                    entities. Every name must be a manager of the registry
+     *
+     * @throws InvalidArgumentException When $managers is empty or names a manager the registry does not have
      */
     public function __construct(
         private ManagerRegistry $registry,
@@ -97,13 +110,44 @@ final readonly class WriteUnit implements WriteUnitInterface
         private ?CommitLedger $ledger = null,
         iterable $resetters = [],
         private ?EventDispatcherInterface $dispatcher = null,
+        private ?array $managers = null,
     ) {
+        if ($managers !== null) {
+            $this->assertManagers($registry, $managers);
+        }
+
         $this->logger     = $logger ?? new NullLogger();
         $this->classifier = new TransientFailureClassifier();
         $this->repairer   = $repairer ?? new DoctrineStateRepairer($registry, $this->logger);
         $this->random     = $random ?? new Randomizer();
         // A Generator cannot be traversed twice; a unit with several replays reads the resetters on each one.
         $this->resetters = $resetters instanceof Generator ? iterator_to_array($resetters, false) : $resetters;
+    }
+
+    /**
+     * The same write unit, its replays scoped to the named entity managers (1.7, audit UD2-L-2): between two attempts
+     * only these managers are reset or cleared and only their connections rolled back; the host's default manager
+     * (and any other) keeps its entities. Name every manager the unit writes through. The checks before the first
+     * attempt still read every connection and manager (a caller's open transaction, or pending changes anywhere, make
+     * the unit run once), and a replay that would start inside a transaction or over pending changes on any of them is
+     * abandoned (ConcurrencyConflict), never run nested.
+     *
+     * @throws InvalidArgumentException When no name is given or one is not a manager of the registry
+     */
+    public function forManagers(string ...$managers): self
+    {
+        return new self(
+            $this->registry,
+            $this->policy,
+            $this->repairer,
+            $this->clock,
+            $this->logger,
+            $this->random,
+            $this->ledger,
+            $this->resetters,
+            $this->dispatcher,
+            array_values($managers),
+        );
     }
 
     /**
@@ -143,7 +187,7 @@ final readonly class WriteUnit implements WriteUnitInterface
                 $failure = $caught;
             }
 
-            $this->repairer->discardUnitOfWork();
+            $this->repairer->discardUnitOfWork($this->managers);
 
             if ($this->ledger instanceof CommitLedger && $this->ledger->count() !== $writes) {
                 SafeLog::log($this->logger, 'warning', 'Write unit not replayed: the failed attempt had already committed.', [
@@ -262,12 +306,12 @@ final readonly class WriteUnit implements WriteUnitInterface
             $this->dispatcher?->dispatch(new WriteUnitRetryEvent($next, $failure, $kind, $unit));
         } catch (Throwable $resetFailure) {
             // Audit TA-6: a resetter or listener may have opened a transaction (or persisted) before throwing.
-            $this->repairer->discardUnitOfWork();
+            $this->repairer->discardUnitOfWork($this->managers);
             $this->abandonReplay($next - 1, $failure, $kind, $resetFailure);
         }
 
         if ($this->insideTransaction() || $this->hasPendingChanges()) {
-            $this->repairer->discardUnitOfWork();
+            $this->repairer->discardUnitOfWork($this->managers);
             $this->abandonReplay($next - 1, $failure, $kind, new LogicException('A reset-between-attempts service or retry listener left a transaction or pending changes.'));
         }
     }
@@ -280,6 +324,23 @@ final readonly class WriteUnit implements WriteUnitInterface
         ] + SafeLog::throwable($resetFailure));
 
         throw new ConcurrencyConflict($attempts, $kind, $this->policy->retryAfterSeconds, $failure, false, $resetFailure);
+    }
+
+    /**
+     * @param list<string> $managers
+     */
+    private function assertManagers(ManagerRegistry $registry, array $managers): void
+    {
+        if ($managers === []) {
+            throw new InvalidArgumentException('A write unit scoped to managers needs at least one manager name.');
+        }
+
+        $known = $registry->getManagerNames();
+        foreach ($managers as $name) {
+            if (!array_key_exists($name, $known)) {
+                throw new InvalidArgumentException(sprintf('The write unit names the entity manager "%s", which the registry does not have.', $name));
+            }
+        }
     }
 
     private function pause(int $milliseconds): void

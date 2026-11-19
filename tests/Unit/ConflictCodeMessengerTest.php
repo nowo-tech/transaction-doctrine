@@ -20,6 +20,8 @@ use Symfony\Component\Messenger\Handler\HandlerDescriptor;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
 
+use function array_fill;
+
 /**
  * ConflictCode::forFailure() with Messenger wrappers (1.6.1, audits TA-3 / TJ): a wrapper that proves earlier work
  * completed, and a committed ConcurrencyConflict inside getWrappedExceptions(), answer CONFLICT_002. Requires
@@ -79,7 +81,10 @@ final class ConflictCodeMessengerTest extends TestCase
         self::assertSame(ConflictCode::Committed, $this->code($wrapper));
     }
 
-    /** Audit TA4-3: the queue stops growing once it holds what the walk may still visit. */
+    /**
+     * Audit TA4-3: the queue stops growing once it holds what the walk may still visit. Audit TA42-1 (1.7): the
+     * truncated walk answers CONFLICT_002, since a proof may sit beyond the cap.
+     */
     public function testTheQueueIsBoundedToo(): void
     {
         $leaf  = new CyclicWrapper();
@@ -91,11 +96,19 @@ final class ConflictCodeMessengerTest extends TestCase
         $outer->wrapped[] = $leaf;
         $leaf->wrapped    = [new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true)];
 
-        // Only the first 255 children are queued; the committed conflict behind the 1001st is never reached.
+        // Only the first 255 children are queued; the committed conflict behind the 1001st is never reached, so the
+        // walk ends truncated: CONFLICT_002 (the safe over-approximation).
+        self::assertSame(ConflictCode::Committed, $this->code($outer));
+
+        // Under the cap nothing is truncated, and nothing proves a commit.
+        $outer->wrapped = [new RuntimeException('a'), new RuntimeException('b')];
         self::assertSame(ConflictCode::RetrySafe, $this->code($outer));
     }
 
-    /** The walk is bounded: a proof beyond 256 throwables is not looked for; one among the first is found. */
+    /**
+     * The walk is bounded: a proof beyond 256 throwables is not looked for (the truncated walk answers CONFLICT_002,
+     * 1.7); one among the first is found.
+     */
     public function testTheWalkIsBounded(): void
     {
         $committed = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
@@ -106,13 +119,45 @@ final class ConflictCodeMessengerTest extends TestCase
 
         $wrapper          = new CyclicWrapper();
         $wrapper->wrapped = [...$plain, $committed];
-        self::assertSame(ConflictCode::RetrySafe, $this->code($wrapper));
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
+
+        $wrapper->wrapped = $plain;
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
 
         $wrapper->wrapped = [$committed, ...$plain];
         self::assertSame(ConflictCode::Committed, $this->code($wrapper));
 
         $wrapper->wrapped = [new RuntimeException('a'), new RuntimeException('b'), $committed];
         self::assertSame(ConflictCode::Committed, $this->code($wrapper));
+    }
+
+    /**
+     * Audit TA42-2 (1.7): a child already known is never queued again, so duplicates do not use up the cap (a
+     * HandlerFailedException's previous is also its first wrapped exception).
+     */
+    public function testDuplicatesDoNotUseUpTheCap(): void
+    {
+        $same             = new RuntimeException('same');
+        $wrapper          = new CyclicWrapper();
+        $wrapper->wrapped = [...array_fill(0, 1000, $same), new RuntimeException('b')];
+
+        self::assertSame(ConflictCode::RetrySafe, $this->code($wrapper));
+
+        $wrapper->wrapped[] = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, null, FakeDriverException::deadlock(), true);
+        self::assertSame(ConflictCode::Committed, $this->code($wrapper));
+    }
+
+    /**
+     * Audits TA42-3 / UA2-5 (1.7): a lost savepoint (commit outcome unknown) in a later wrapped exception answers
+     * CONFLICT_002, as it does in the getPrevious() chain; a unique violation behind it does not.
+     */
+    public function testALostSavepointInALaterWrappedExceptionIsCommitted(): void
+    {
+        $envelope = new Envelope(new stdClass());
+
+        self::assertSame(ConflictCode::Committed, $this->code(new HandlerFailedException($envelope, [new RuntimeException('business rule'), new RuntimeException('wrap', 0, FakeDriverException::lostSavepoint())])));
+        self::assertSame(ConflictCode::RetrySafe, $this->code(new HandlerFailedException($envelope, [new RuntimeException('business rule'), FakeDriverException::deadlock()])));
+        self::assertSame(ConflictCode::RetrySafe, $this->code(new HandlerFailedException($envelope, [new RuntimeException('business rule'), new FakeDriverException('SQLSTATE[42000]: 1305 SAVEPOINT DOCTRINE_2 does not exist', '42000', 1305, FakeDriverException::uniqueViolation())])));
     }
 
     /** @phpstan-impure the answer depends on the wrapper, which the test changes between calls */

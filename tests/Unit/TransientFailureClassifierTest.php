@@ -12,8 +12,10 @@ use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\RetryableException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Exception;
+use Nowo\TransactionContract\TransientStorageFailure;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use PDOException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -64,6 +66,29 @@ final class TransientFailureClassifierTest extends TestCase
         yield 'DBAL 3 PDO driver 1213 errorInfo' => [self::pdoDriver('40001', ['40001', 1213], null), TransientFailureKind::Deadlock];
         yield 'DBAL 3 PDO driver unique 23505' => [self::pdoDriver('23505', ['23505', 7], null), null];
         yield 'driver exception with a string code' => [self::stringCodeDriver('40001', '40001'), TransientFailureKind::SerializationFailure];
+    }
+
+    /**
+     * The static finders (1.7) on a getPrevious() chain; Messenger wrappers are covered by
+     * TransientFailureClassifierMessengerTest.
+     */
+    public function testTheStaticFindersReadTheChain(): void
+    {
+        $deadlock = new DeadlockException(self::driver(1213, '40001'), null);
+        $conflict = new ConcurrencyConflict(1, TransientFailureKind::Deadlock, 1, $deadlock);
+        $lost     = new RuntimeException('wrap', 0, self::lostSavepoint('SAVEPOINT DOCTRINE_2 does not exist'));
+        $storage  = TransientStorageFailure::fromPrevious(new RuntimeException('bundle runner'));
+
+        self::assertSame($deadlock, TransientFailureClassifier::findConflict(new RuntimeException('a', 0, $deadlock)));
+        self::assertSame($conflict, TransientFailureClassifier::findConflict(new RuntimeException('a', 0, $conflict)));
+        self::assertSame($conflict, TransientFailureClassifier::findLockConflict(new RuntimeException('a', 0, $conflict)));
+        self::assertNull(TransientFailureClassifier::findLockConflict(new RuntimeException('a', 0, $deadlock)));
+        self::assertSame($deadlock, TransientFailureClassifier::findTransientFailure(new RuntimeException('a', 0, $deadlock)));
+        self::assertSame($storage, TransientFailureClassifier::findTransientFailure($storage));
+        self::assertSame($lost, TransientFailureClassifier::findTransientFailure($lost));
+        self::assertNull(TransientFailureClassifier::findConflict(new UniqueConstraintViolationException(self::driver(1062, '23000'), null)));
+        self::assertNull(TransientFailureClassifier::findConflict(new DriverException(self::driver(1305, '42000', 'SAVEPOINT DOCTRINE_2 does not exist', new DriverException(self::driver(1062, '23000'), null)), null)));
+        self::assertNull(TransientFailureClassifier::findConflict(new RuntimeException('not a deadlock', 1213)));
     }
 
     /**

@@ -35,11 +35,18 @@ With `forHostEntityManager()` (the host's manager, REQ-RUNTIME-003 rule 2) an op
 reset: only what the failed run brought in is detached, and a closed manager is replaced through the registry (see
 [Usage](USAGE.md#the-hosts-entity-manager-forhostentitymanager-160)).
 Between two attempts a write unit clears the open managers, which `ResetBetweenAttemptsInterface` makes safe for
-request memos.
+request memos. That includes the host's default manager (REQ-RUNTIME-003 rule 2): a bundle whose unit writes only
+through its own manager scopes the repair with `WriteUnit::forManagers('my_bundle')` (1.7, audit UD2-L-2), so the
+host's manager keeps its entities (see [Nested transactions and replays](#nested-transactions-and-replays)).
 
 ## Conflict classification
 
-`TransientFailureClassifier` walks the previous chain and reads driver codes only:
+`TransientFailureClassifier` walks the previous chain and reads driver codes only. Its static finders (1.7, audits
+TA42-3 / UA2-5) also look inside Messenger wrappers, through the bounded walk `ConflictCode` uses:
+`findConflict($failure)` (a lock conflict or a transient failure), `findLockConflict()` (what the responder answers
+by default) and `findTransientFailure()` (what `map_transient_failures` maps). A deadlock in the second handler of a
+synchronous `HandlerFailedException` is therefore a 409, not a 500. Bundles with their own conflict subscriber call
+them instead of walking `getPrevious()`.
 
 | Server | Code | Kind | Conflict code |
 |--------|------|------|---------------|
@@ -74,8 +81,9 @@ Never mapped, wherever they sit in the chain:
 `ConcurrencyConflict` with `committed: true` anywhere along `getPrevious()` or inside a Messenger wrapper's
 `getWrappedExceptions()`, a `HandlerFailedException` whose envelope carries a `HandledStamp`, or any
 `DelayedMessageHandlingException` (the Messenger rules only when `symfony/messenger` is installed; at most 256
-throwables walked, each once). Otherwise it reads the first `ConcurrencyConflict` of the chain (`committed`), else the
-lost-savepoint rule. `ConflictCode::forRequest($request, $failure)` (1.6.0) adds the request-level rule: `CONFLICT_002` when anything
+throwables walked, each once, and since 1.7 a walk cut short by that cap answers `CONFLICT_002`, audit TA42-1).
+Otherwise it reads the first `ConcurrencyConflict` of the chain (`committed`), else the lost-savepoint rule (since 1.7
+also applied to the chain of each wrapped exception). `ConflictCode::forRequest($request, $failure)` (1.6.0) adds the request-level rule: `CONFLICT_002` when anything
 was committed since the request's `CommitMark`. The mark is taken by `RequestCommitWatermark` at `kernel.request`
 (priority 4096) on the main request when `commit_detection` is on; sub-requests carry the main request's mark. The
 responder uses `forRequest()`, so a conflict after a commit earlier in the same request (by the host, another bundle
@@ -116,6 +124,13 @@ reaches the kernel outside a write unit is answered only with `conflict_response
   left poisoned. A failed rollback is never reported as success.
 - Between two attempts `DoctrineStateRepairer::discardUnitOfWork()` rolls back leftover levels, resets closed managers
   and clears open ones; then the `ResetBetweenAttemptsInterface` services and `WriteUnitRetryEvent` listeners run.
+- By default that covers every manager and connection of the registry, the host's default manager included: a replay
+  detaches every entity the host loaded before the unit (audit UD2-L-2). A bundle whose unit writes only through its
+  own manager scopes it (1.7): `WriteUnit::forManagers('my_bundle')`, or `new WriteUnit(..., managers: ['my_bundle'])`.
+  Only those managers are reset or cleared and only their connections rolled back. Name every manager the unit writes
+  through. The checks before the first attempt still read every connection and manager (a caller's transaction or
+  pending changes anywhere make the unit run once), and a replay that would start inside a transaction or over
+  pending changes on any of them is abandoned with `ConcurrencyConflict`, never run nested.
 - When one of them throws, or leaves a transaction or pending changes, the replay is abandoned. Since 1.5.0 (audit
   TA-6) what it left is discarded in both cases, so the connection is back at nesting level 0 before
   `ConcurrencyConflict` is thrown.
@@ -162,6 +177,13 @@ process):
 - a real lock wait timeout from a second session inside a Messenger `HandlerFailedException` answers `CONFLICT_001`,
   and `CONFLICT_002` without `Retry-After` once another handler succeeded (`HandledStamp`) or inside a
   `DelayedMessageHandlingException` (1.6.1);
+- the same timeout, a write unit's `ConcurrencyConflict` and a real lost savepoint in the SECOND wrapped exception of
+  a `HandlerFailedException` are detected (409, not 500; the lost savepoint `CONFLICT_002`), and a real unique
+  violation there is not (1.7, audits TA42-3 / UA2-5);
+- a write unit scoped to a bundle's own manager on its own connection replays a real lock wait timeout without
+  clearing the host's manager (its entity still managed), while the unscoped unit clears it (1.7, audit UD2-L-2);
+- with commit tracking on, a real COMMIT returns the driver's `true` on DBAL 3 (`void` on DBAL 4), is recorded, and a
+  second connection sees the row (1.7, audit UE-CF-1);
 - PostgreSQL COMMITs the server refuses, on every leg (DBAL 3 included, audit TA3-5): a SERIALIZABLE write skew
   (40001) becomes `TransientStorageFailure` and a write unit replays it; a deferred unique violation (23505) is
   rethrown unchanged; the connection is back at level 0 each time;
@@ -196,6 +218,9 @@ process):
   names `INSERT`, `UPDATE`, `DELETE` or `MERGE` anywhere (a data-modifying CTE, or only an identifier spelled that
   way). An over-count turns a `CONFLICT_001` into `CONFLICT_002` (read again instead of retry); it never invites a
   retry of committed work.
+- Detection walks at most 256 throwables (1.7: inside Messenger wrappers too). A conflict beyond the cap is not
+  detected (the failure stays a 500), while the conflict code of a detected one over-approximates to `CONFLICT_002`.
+  Only pathological wrappers carry that many throwables.
 - Commit detection sees commits on the connections wrapped by `CommitTrackingMiddleware`; a commit made through
   another connection (a second DBAL connection without the middleware, an HTTP call) is invisible to it, so a unit
   must commit at most once or be idempotent as a whole.

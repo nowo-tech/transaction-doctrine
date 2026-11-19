@@ -4,18 +4,25 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit\WriteUnit\Dbal;
 
+use Composer\InstalledVersions;
+use Doctrine\DBAL\Configuration;
 use Doctrine\DBAL\Driver;
 use Doctrine\DBAL\Driver\Connection as DriverConnection;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
+use Doctrine\DBAL\DriverManager;
 use mysqli;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\NativeAwareDriverConnection;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingConnection;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingDriver;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use PDO;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 use RuntimeException;
+
+use function str_starts_with;
 
 /**
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -189,6 +196,43 @@ final class CommitTrackingMiddlewareTest extends TestCase
         self::assertSame(0, $ledger->count(), 'A refused COMMIT is not a commit.');
         $connection->exec('INSERT INTO t VALUES (1)');
         self::assertSame(1, $ledger->count(), 'The autocommit write after it is counted.');
+    }
+
+    /**
+     * Audit UE-CF-1 (1.7): through DBAL's own wrapper (SQLite in memory), commit() returns the driver's `true` on
+     * DBAL 3 with commit tracking on (it returned null before), and nothing on DBAL 4 (void); the commit is recorded.
+     */
+    public function testDbalsCommitKeepsTheDriversResult(): void
+    {
+        $ledger        = new CommitLedger();
+        $configuration = new Configuration();
+        $configuration->setMiddlewares([new CommitTrackingMiddleware($ledger)]);
+        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true], $configuration);
+        $connection->executeStatement('CREATE TABLE t (a INT)');
+        $connection->beginTransaction();
+        $connection->executeStatement('INSERT INTO t VALUES (1)');
+
+        $result = (new ReflectionMethod($connection, 'commit'))->invoke($connection);
+
+        $dbal3 = str_starts_with((string) InstalledVersions::getVersion('doctrine/dbal'), '3.');
+        self::assertSame($dbal3, CommitTrackingDriver::driverCommitReturnsResult());
+        self::assertSame($dbal3 ? true : null, $result);
+        self::assertSame(2, $ledger->count());
+        self::assertSame(1, (int) $connection->fetchOne('SELECT COUNT(*) FROM t'));
+        $connection->close();
+    }
+
+    /** trackCommit() hands back what the commit returned (DBAL 3's bool) and records it once it succeeded. */
+    public function testTrackCommitReturnsTheCommitsResult(): void
+    {
+        $ledger     = new CommitLedger();
+        $connection = new CommitTrackingConnection($this->createMock(DriverConnection::class), $ledger);
+        $connection->beginTransaction();
+
+        self::assertTrue($connection->trackCommit(static fn (): bool => true));
+        self::assertSame(1, $ledger->count());
+        $connection->exec('INSERT INTO t VALUES (1)');
+        self::assertSame(2, $ledger->count(), 'The transaction is over: the autocommit write is counted.');
     }
 
     private function connect(CommitLedger $ledger, string $server = 'pgsql'): DriverConnection

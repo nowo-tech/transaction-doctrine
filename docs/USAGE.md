@@ -10,6 +10,7 @@
 - [FrankenPHP worker mode](#frankenphp-worker-mode)
 - [Write units (1.3.0)](#write-units-130)
   - [Programmatic API](#programmatic-api)
+    - [A bundle's own entity manager (1.7)](#a-bundles-own-entity-manager-17)
   - [Controllers: `#[AsWriteUnit]`](#controllers-aswriteunit)
   - [Messenger middleware](#messenger-middleware)
   - [Request memos between attempts (1.4.0)](#request-memos-between-attempts-140)
@@ -235,6 +236,22 @@ $total = $writeUnit->run(function (int $attempt, ?Throwable $previous) use ($ord
 
 `WriteUnitInterface` has no Doctrine or Symfony type in its signature, so a DDD / hexagonal application service can
 depend on it; `WriteUnit` is the Doctrine adapter behind it.
+
+#### A bundle's own entity manager (1.7)
+
+A replay clears every open entity manager by default, the host's default one included. A bundle whose unit writes
+only through its own manager scopes the repair, so the host's entities stay managed (audit UD2-L-2):
+
+```php
+$unit = $writeUnit->forManagers('my_bundle');              // WriteUnit (the Doctrine adapter)
+// Plain PHP: new WriteUnit($registry, $policy, ..., managers: ['my_bundle']);
+$unit->run(fn (int $attempt) => $runner->run(fn () => $this->save($command)));
+```
+
+Only the named managers are reset or cleared between attempts, and only their connections rolled back. Name every
+manager the unit writes through: a replay that would start inside a transaction or over pending changes on any
+connection or manager is abandoned with `ConcurrencyConflict`. An empty list or an unknown name throws
+`InvalidArgumentException`.
 
 ### Controllers: `#[AsWriteUnit]`
 
@@ -465,6 +482,12 @@ $response = new JsonResponse(['ok' => false, 'error' => 'unavailable'], $policy-
 
 `headers($hint)` and `retryAfter($hint)` use a failure's own hint (`TransientStorageFailure::retryAfterSeconds()`)
 when it has one, else `conflict_response.retry_after`.
+
+To tell whether a failure is a conflict, call `TransientFailureClassifier::findConflict($failure)` (1.7) instead of
+walking `getPrevious()`: it also looks inside Messenger wrappers (a deadlock in the second handler of a synchronous
+`HandlerFailedException`, audits TA42-3 / UA2-5), with a bounded walk, and returns the conflict or null.
+`findLockConflict()` finds only write-unit conflicts (`LockConflictExceptionInterface`), `findTransientFailure()` only
+transient storage failures and lost savepoints. Unique violations and lost connections are never a conflict.
 
 ### Conflict codes: CONFLICT_001 and CONFLICT_002 (1.5.0)
 

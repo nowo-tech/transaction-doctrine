@@ -57,6 +57,42 @@ final class DoctrineStateRepairerTest extends TestCase
         self::assertSame(['audit'], $registry->resets);
     }
 
+    /**
+     * Audit UD2-L-2 (1.7): scoped to named managers, only those managers are cleared or reset, and only their
+     * connections (each once) rolled back; the host's default manager and its connection are left alone.
+     */
+    public function testDiscardUnitOfWorkScopedToNamedManagersLeavesTheOthersAlone(): void
+    {
+        $hostConnection = $this->createMock(Connection::class);
+        $hostConnection->expects($this->never())->method('getTransactionNestingLevel');
+        $hostConnection->expects($this->never())->method('rollBack');
+        $privateConnection = $this->createMock(Connection::class);
+        $privateConnection->method('getTransactionNestingLevel')->willReturnOnConsecutiveCalls(1, 1);
+        $privateConnection->expects($this->once())->method('rollBack');
+        $host = $this->createMock(EntityManagerInterface::class);
+        $host->method('isOpen')->willReturn(true);
+        $host->method('getConnection')->willReturn($hostConnection);
+        $host->expects($this->never())->method('clear');
+        $private = $this->createMock(EntityManagerInterface::class);
+        $private->method('isOpen')->willReturn(true);
+        $private->method('getConnection')->willReturn($privateConnection);
+        $private->expects($this->once())->method('clear');
+        $closed = $this->createMock(EntityManagerInterface::class);
+        $closed->method('isOpen')->willReturn(false);
+        $closed->method('getConnection')->willReturn($privateConnection);
+        $closed->expects($this->never())->method('clear');
+        $odm = $this->createMock(ObjectManager::class);
+        $odm->expects($this->once())->method('clear');
+        $registry = new RecordingRegistry(
+            ['default' => $hostConnection, 'private' => $privateConnection],
+            ['default' => $host, 'private' => $private, 'private_audit' => $closed, 'odm' => $odm],
+        );
+
+        (new DoctrineStateRepairer($registry))->discardUnitOfWork(['private', 'private_audit', 'odm']);
+
+        self::assertSame(['private_audit'], $registry->resets);
+    }
+
     public function testAfterDatabaseFailurePingsConnectedConnectionsOnly(): void
     {
         $platform = $this->createMock(AbstractPlatform::class);

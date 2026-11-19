@@ -10,6 +10,8 @@ use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseContext;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
+use Nowo\TransactionDoctrine\ThrowableWalk;
+use Nowo\TransactionDoctrine\TransientFailureClassifier;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface;
 use Psr\Log\LoggerInterface;
@@ -38,7 +40,8 @@ use const PHP_URL_SCHEME;
 /**
  * Answers a lock conflict the client may retry with the configured status (409 by default, 503 to keep the 1.2
  * behaviour) and `Retry-After`, on any route. A conflict is a ConcurrencyConflict of a write unit, any exception
- * implementing LockConflictExceptionInterface in the previous chain, or whatever a tagged
+ * implementing LockConflictExceptionInterface in the previous chain or (since 1.7) inside a Messenger wrapper
+ * (TransientFailureClassifier::findLockConflict(), bounded), or whatever a tagged
  * ConflictExceptionMapperInterface accepts (the exception-mapping hook: no route-name matching here).
  *
  * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCode::forRequest()): CONFLICT_001 when nothing
@@ -126,10 +129,8 @@ final readonly class ConcurrencyConflictResponder
 
     public function isConflict(Throwable $failure): bool
     {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
-            if ($current instanceof LockConflictExceptionInterface) {
-                return true;
-            }
+        if (TransientFailureClassifier::findLockConflict($failure) instanceof LockConflictExceptionInterface) {
+            return true;
         }
 
         foreach ($this->mappers as $mapper) {
@@ -266,24 +267,12 @@ final readonly class ConcurrencyConflictResponder
 
     private function attempts(Throwable $failure): ?int
     {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
-            if ($current instanceof ConcurrencyConflict) {
-                return $current->attempts;
-            }
-        }
-
-        return null;
+        return ThrowableWalk::first($failure, ConcurrencyConflict::class)?->attempts;
     }
 
     private function hint(Throwable $failure): ?int
     {
-        for ($current = $failure; $current instanceof Throwable; $current = $current->getPrevious()) {
-            if ($current instanceof ConcurrencyConflict) {
-                return $current->retryAfterSeconds();
-            }
-        }
-
-        return null;
+        return ThrowableWalk::first($failure, ConcurrencyConflict::class)?->retryAfterSeconds();
     }
 
     private function route(Request $request): string

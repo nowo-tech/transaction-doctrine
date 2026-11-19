@@ -29,6 +29,8 @@ use function str_contains;
  *
  * Works with DBAL 3 and 4: the overridden signatures are valid against both (DBAL 3's untyped transaction methods
  * accept a `void` override; their boolean result was never read by DBAL's wrapper except as commit()'s own return).
+ * On DBAL 3 the driver middleware wraps it in Dbal3\CommitResultConnection, which hands the driver's commit() result
+ * back (since 1.7, audit UE-CF-1: `Connection::commit()` returned `null` instead of `true` with tracking on).
  *
  * @internal
  *
@@ -94,15 +96,30 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
 
     public function commit(): void
     {
+        $this->trackCommit(parent::commit(...));
+    }
+
+    /**
+     * Runs the given driver COMMIT and records it once it succeeded. Dbal3\CommitResultConnection calls it with the
+     * driver's own commit(), to hand DBAL 3's wrapper the driver's result (audit UE-CF-1).
+     *
+     * @param callable(): mixed $commit
+     *
+     * @return mixed What $commit returned (DBAL 3: the driver's bool; DBAL 4: null)
+     */
+    public function trackCommit(callable $commit): mixed
+    {
         // Audit TA2-1: a COMMIT the server refuses (a deferred constraint, PostgreSQL 40001 at commit) still ends the
         // transaction; a flag left true would stop counting the autocommit writes that follow.
         try {
-            parent::commit();
+            $result = $commit();
         } finally {
             $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
         }
 
         $this->ledger->record();
+
+        return $result;
     }
 
     public function rollBack(): void

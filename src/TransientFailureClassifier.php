@@ -10,6 +10,8 @@ use Doctrine\DBAL\Exception\ConstraintViolationException;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\RetryableException;
+use Nowo\TransactionContract\TransientStorageFailure;
+use Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface;
 use PDOException;
 use Throwable;
 
@@ -38,11 +40,51 @@ use function str_starts_with;
  * logs an exception message, which can contain SQL and parameters. Stateless: safe as a shared service in a
  * long-running worker.
  *
+ * The instance methods read the getPrevious() chain. The static find*() helpers (transaction-doctrine >= 1.7, audits
+ * TA42-3 / UA2-5) also look inside Messenger wrappers (getWrappedExceptions(): a deadlock in the second handler of a
+ * synchronous HandlerFailedException), through the same bounded walk ConflictCode uses (ThrowableWalk: each throwable
+ * once, at most 256): bundles detecting a conflict in their own exception subscriber call them instead of walking
+ * getPrevious() themselves.
+ *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
  */
 final class TransientFailureClassifier
 {
+    /**
+     * The first conflict anything the failure carries holds (getPrevious() and Messenger's wrapped exceptions, bounded):
+     * a lock conflict (LockConflictExceptionInterface, a write unit's ConcurrencyConflict included), or what
+     * findTransientFailure() finds. Null when there is none. Unique violations and lost connections are never a
+     * conflict. Stateless.
+     */
+    public static function findConflict(Throwable $failure): ?Throwable
+    {
+        return self::find($failure, true, true);
+    }
+
+    /**
+     * The first lock conflict anything the failure carries holds (LockConflictExceptionInterface, a write unit's
+     * ConcurrencyConflict included; getPrevious() and Messenger's wrapped exceptions, bounded). What the conflict
+     * responder answers by default.
+     */
+    public static function findLockConflict(Throwable $failure): ?LockConflictExceptionInterface
+    {
+        $conflict = self::find($failure, true, false);
+
+        return $conflict instanceof LockConflictExceptionInterface ? $conflict : null;
+    }
+
+    /**
+     * The first transient storage failure anything the failure carries holds (getPrevious() and Messenger's wrapped
+     * exceptions, bounded): the contract's TransientStorageFailure, a deadlock / lock wait timeout / serialization
+     * failure, or (the throwable that starts the chain) a getPrevious() chain that is a lost savepoint of unknown
+     * outcome (isCommitOutcomeUnknown()). What `conflict_response.map_transient_failures` maps.
+     */
+    public static function findTransientFailure(Throwable $failure): ?Throwable
+    {
+        return self::find($failure, false, true);
+    }
+
     /**
      * @return TransientFailureKind|null The kind of the first transient failure in the chain, or null when there is none
      */
@@ -90,6 +132,21 @@ final class TransientFailureClassifier
     {
         for ($current = $throwable; $current instanceof Throwable; $current = $current->getPrevious()) {
             if ($this->classifyOne($current) instanceof TransientFailureKind) {
+                return $current;
+            }
+        }
+
+        return null;
+    }
+
+    private static function find(Throwable $failure, bool $lockConflicts, bool $transientFailures): ?Throwable
+    {
+        $classifier = new self();
+
+        foreach (ThrowableWalk::of($failure) as $current => $chainStart) {
+            if (($lockConflicts && $current instanceof LockConflictExceptionInterface)
+                || ($transientFailures && ($current instanceof TransientStorageFailure || $classifier->classifyOne($current) instanceof TransientFailureKind
+                    || ($chainStart && $classifier->isCommitOutcomeUnknown($current))))) {
                 return $current;
             }
         }
