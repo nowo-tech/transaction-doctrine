@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`forHostEntityManager()` forgets an entity the failed run removed (audit VQ4-1; affects 1.6.0 to 1.7.2).** When
+  a run on the host's entity manager loaded an entity, `remove()`d it and then failed before the runner's flush (any
+  failure: a deadlock, a lock wait, a domain exception), `releaseHostManager()` left the entity scheduled for removal
+  (`UnitOfWork::doDetach()` does nothing for a REMOVED entity), so the host's next `flush()` deleted its row. The
+  removal is now forgotten entirely (the identity-map entry, the scheduled removal, state, identifier and original
+  data) and the entity unlinked from the caller's entities, like everything else the run brought in. A removal of an
+  entity the host managed before the run still stays, as any other change the run made to the caller's entities.
+
 ### Changed
 
 - **A write-unit replay no longer clears the host's entity manager (audits VD2-4 / VQ, REQ-RUNTIME-003 rule 2).**

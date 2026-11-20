@@ -209,36 +209,57 @@ final class KeptEntitiesRestorer
 
     /**
      * Drops the attempt's unflushed work from the unit of work: kept entities scheduled for removal are managed again
-     * (no cascade), any other scheduled removal forgotten entirely (the entity detached: audit VQ2-1, it was the
-     * attempt's own), orphan removals cancelled, computed updates and collection work forgotten. Nothing of it existed
-     * before the unit (it only starts without pending work). Same private properties in ORM 2.20 and 3.x.
+     * (no cascade), any other scheduled removal forgotten entirely (forgetRemovals()), orphan removals cancelled,
+     * computed updates and collection work forgotten. Nothing of it existed before the unit (it only starts without
+     * pending work). Same private properties in ORM 2.20 and 3.x.
      *
      * @param array<int, object> $kept
      */
     private static function forgetScheduledWork(UnitOfWork $unitOfWork, array $kept): void
     {
-        Closure::bind(static function (UnitOfWork $unitOfWork, array $kept): void {
-            foreach ($unitOfWork->entityDeletions as $oid => $entity) {
-                unset($unitOfWork->entityDeletions[$oid]);
-                if (isset($kept[$oid])) {
-                    $unitOfWork->entityStates[$oid] = UnitOfWork::STATE_MANAGED;
-                    $unitOfWork->addToIdentityMap($entity);
-
-                    continue;
-                }
-
-                // remove() keeps the identity-map entry: drop it first (it reads the identifier), or a find() would
-                // serve an entity no flush ever writes again (audit VQ3-1).
-                $unitOfWork->removeFromIdentityMap($entity);
-                unset($unitOfWork->entityStates[$oid], $unitOfWork->entityIdentifiers[$oid], $unitOfWork->originalEntityData[$oid]);
-            }
-
+        self::forgetRemovals($unitOfWork, $kept, true);
+        Closure::bind(static function (UnitOfWork $unitOfWork): void {
             $unitOfWork->orphanRemovals      = [];
             $unitOfWork->entityUpdates       = [];
             $unitOfWork->entityChangeSets    = [];
             $unitOfWork->collectionUpdates   = [];
             $unitOfWork->collectionDeletions = [];
-        }, null, UnitOfWork::class)($unitOfWork, $kept);
+        }, null, UnitOfWork::class)($unitOfWork);
+    }
+
+    /**
+     * Forgets every scheduled removal of an entity not in $kept entirely: remove() keeps the identity-map entry, so it
+     * is dropped first (removeFromIdentityMap() reads the identifier), then the removal, state, identifier and original
+     * data, so the entity is detached (audits VQ2-1, VQ3-1, VQ4-1: doDetach() does nothing for a REMOVED entity, and a
+     * later flush would delete its row). A removal of a kept entity is cancelled (managed again, no cascade) when
+     * $restoreKept is true, else left as it is. Same private properties in ORM 2.20 and 3.x.
+     *
+     * @param array<int, object> $kept The entities to keep, by spl_object_id
+     *
+     * @return array<int, object> The entities forgotten, by spl_object_id
+     */
+    public static function forgetRemovals(UnitOfWork $unitOfWork, array $kept, bool $restoreKept): array
+    {
+        return Closure::bind(static function (UnitOfWork $unitOfWork, array $kept, bool $restoreKept): array {
+            $forgotten = [];
+            foreach ($unitOfWork->entityDeletions as $oid => $entity) {
+                if (isset($kept[$oid])) {
+                    if ($restoreKept) {
+                        unset($unitOfWork->entityDeletions[$oid]);
+                        $unitOfWork->entityStates[$oid] = UnitOfWork::STATE_MANAGED;
+                        $unitOfWork->addToIdentityMap($entity);
+                    }
+
+                    continue;
+                }
+
+                $unitOfWork->removeFromIdentityMap($entity);
+                unset($unitOfWork->entityDeletions[$oid], $unitOfWork->entityStates[$oid], $unitOfWork->entityIdentifiers[$oid], $unitOfWork->originalEntityData[$oid]);
+                $forgotten[$oid] = $entity;
+            }
+
+            return $forgotten;
+        }, null, UnitOfWork::class)($unitOfWork, $kept, $restoreKept);
     }
 
     /**

@@ -43,6 +43,8 @@ From **1.7.2**: `composer update nowo-tech/transaction-doctrine`. No configurati
   so request memos still need `ResetBetweenAttemptsInterface`.
 - Bundle tests that asserted the host manager was cleared after an unscoped replay (`contains()` false) need
   updating.
+- `DoctrineTransactionRunner::forHostEntityManager()`: an entity the failed run loaded and removed is now forgotten
+  with the run (audit VQ4-1, 1.6.0 to 1.7.2), so the host's next flush no longer deletes its row. Nothing to change.
 - `DoctrineStateRepairer::discardUnitOfWork()` now returns a list and takes two optional arguments; a caller that
   ignored the (void) result is unaffected.
 

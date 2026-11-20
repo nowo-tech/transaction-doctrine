@@ -78,4 +78,14 @@ final class HostEntityManagerSqliteTest extends DatabaseTestCase
     {
         $this->scenarioAFieldTheRunChangedStaysWithANotice();
     }
+
+    public function testARemovalOfTheRunsOwnEntityIsForgotten(): void
+    {
+        $this->scenarioARemovalOfTheRunsOwnEntityIsForgotten();
+    }
+
+    public function testARemovalOfAHostEntityStays(): void
+    {
+        $this->scenarioARemovalOfAHostEntityStays();
+    }
 }

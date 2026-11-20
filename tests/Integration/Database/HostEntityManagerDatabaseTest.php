@@ -186,4 +186,18 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
 
         return null;
     }
+
+    #[DataProvider('allServers')]
+    public function testARemovalOfTheRunsOwnEntityIsForgotten(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARemovalOfTheRunsOwnEntityIsForgotten();
+    }
+
+    #[DataProvider('allServers')]
+    public function testARemovalOfAHostEntityStays(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARemovalOfAHostEntityStays();
+    }
 }

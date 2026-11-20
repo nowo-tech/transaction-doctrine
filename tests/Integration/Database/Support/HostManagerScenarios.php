@@ -295,4 +295,59 @@ trait HostManagerScenarios
 
         return null;
     }
+
+    /**
+     * Audit VQ4-1 / P25 (1.6.0 to 1.7.2): the run loads counter 1, remove()s it and fails before its flush. The removal
+     * is forgotten with the run: the host's next flush keeps the row, and a find() loads it again.
+     */
+    private function scenarioARemovalOfTheRunsOwnEntityIsForgotten(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+        $removed = null;
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry)->run(static function () use ($manager, &$removed): never {
+                $removed = $manager->find(Counter::class, 1);
+                self::assertInstanceOf(Counter::class, $removed);
+                $manager->remove($removed);
+
+                throw new RuntimeException('failure before the flush');
+            });
+        } catch (RuntimeException) {
+        }
+
+        self::assertSame([], $manager->getUnitOfWork()->getScheduledEntityDeletions());
+        self::assertInstanceOf(Counter::class, $removed);
+        self::assertFalse($manager->contains($removed));
+        $manager->flush(); // the host's own next flush
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 1'));
+        $again = $manager->find(Counter::class, 1);
+        self::assertInstanceOf(Counter::class, $again);
+        self::assertNotSame($removed, $again);
+        self::assertTrue($manager->contains($host));
+    }
+
+    /**
+     * The run removed an entity the host managed before it: like any other change the run made to the caller's
+     * entities, it stays (the host decides; the runner never clears an open host manager).
+     */
+    private function scenarioARemovalOfAHostEntityStays(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry)->run(static function () use ($manager, $host): never {
+                $manager->remove($host);
+
+                throw new RuntimeException('failure before the flush');
+            });
+        } catch (RuntimeException) {
+        }
+
+        self::assertTrue($manager->getUnitOfWork()->isScheduledForDelete($host));
+    }
 }
