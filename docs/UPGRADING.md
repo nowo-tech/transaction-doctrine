@@ -4,13 +4,11 @@
 
 - [Unreleased](#unreleased)
 - [To 1.9.0](#to-190)
-  - [To 1.9.0](#to-190-1)
 - [To 1.8.2](#to-182)
 - [To 1.8.1](#to-181)
 - [To 1.8.0](#to-180)
 - [To 1.7.2](#to-172)
 - [To 1.7.1](#to-171)
-- [To 1.7.1](#to-171-1)
 - [To 1.7.0](#to-170)
 - [To 1.6.1](#to-161)
 - [To 1.6.0](#to-160)
@@ -24,7 +22,6 @@
   - [Request memos and write-unit replays](#request-memos-and-write-unit-replays)
 - [To 1.3.1](#to-131)
 - [To 1.3.0](#to-130)
-  - [To 1.3.0](#to-130-1)
   - [Default lock-conflict status: 409](#default-lock-conflict-status-409)
   - [Migration notes for ChatKit, Wiki and TimeTrack](#migration-notes-for-chatkit-wiki-and-timetrack)
 - [To 1.2.0](#to-120)
@@ -32,6 +29,17 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+From **1.9.0**: `composer update nowo-tech/transaction-doctrine`. No configuration change. `HostFlushProbe` no longer
+reports loaded, untouched entities with backed-enum fields (audit XA-1): deprecations the probe raised only for such
+entities disappear from the deprecation log. It never throws any more (audit XA-3): a failure is logged as a warning
+through the new optional constructor argument (`?LoggerInterface $logger = null`; the Symfony bundle wires `logger`),
+otherwise swallowed.
+
+`UnitOfWorkBoundaryListener` (with `unit_of_work_boundaries`, on by default) now resets the probe and the private
+managers only at the outermost unit-of-work boundaries: a command, a request or a Messenger worker run in-process inside
+another unit no longer resets the state of the unit that runs it. Nothing to do; code that builds the listener by hand
+keeps the 1.9.0 behaviour unless it passes the new optional `UnitOfWorkFrames` tracker (internal).
 
 ## To 1.9.0
 
@@ -41,9 +49,7 @@ From **1.8.2**:
 composer update nowo-tech/transaction-doctrine
 ```
 
-### To 1.9.0
-
-`composer update nowo-tech/transaction-doctrine`. Additive only: no signature or default behaviour of earlier APIs
+Additive only: no signature or default behaviour of earlier APIs
 changes. New: `CommitLedger::mark()` / `outcome()` (per-connection outermost-commit epoch), `HostFlushProbe` (the
 REQ-ARCH-001 rule 6 deprecation layer for bundles that flush the host's manager), and the `PrivateManager\` kit (see
 USAGE). With the Symfony bundle, `unit_of_work_boundaries` (on by default) registers a listener that resets the probe
@@ -142,9 +148,7 @@ From **1.7.0**:
 composer update nowo-tech/transaction-doctrine
 ```
 
-## To 1.7.1
-
-From **1.7.0**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
+No configuration or signature change.
 
 - **`DoctrineStateRepairer::discardUnitOfWork()` rolls back every connection (audit UI2-2).** With or without a list
   of managers, it rolls back every open transaction level on every connection of the registry, not only those of the
@@ -378,14 +382,6 @@ composer update nowo-tech/transaction-doctrine
 ```
 
 ## To 1.3.0
-
-From **1.2.0**:
-
-```bash
-composer update nowo-tech/transaction-doctrine
-```
-
-### To 1.3.0
 
 From **1.2.0**:
 
