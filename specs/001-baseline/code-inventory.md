@@ -2,7 +2,7 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/transaction-doctrine`  
-**Last audited**: 2026-11-17 (1.3.0 write units)
+**Last audited**: 2026-11-20 (1.8.0)
 
 ## Runner
 
@@ -23,6 +23,8 @@
 | --- | --- | --- |
 | `TransientFailureClassifier.php` | Transient classifier | FR-CLS-001 |
 | `TransientFailureKind.php` | Transient kinds | FR-CLS-002 |
+| `ThrowableWalk.php` | Transient classifier | FR-CLS-001 |
+| `ConflictCode.php` | Conflict codes (spec [004-conflict-codes](../004-conflict-codes/spec.md)) | 004 FR-001, 004 FR-006 |
 
 ## Observability
 
@@ -42,6 +44,11 @@
 | `WriteUnit/LockConflictExceptionInterface.php` | Write units | FR-WU-004 |
 | `WriteUnit/AsWriteUnit.php` | Write units | FR-WU-004 |
 | `WriteUnit/CommitLedger.php` | Write units | FR-WU-005 |
+| `WriteUnit/CommitMark.php` | Write units | FR-WU-005, 004 FR-001 |
+| `WriteUnit/ResetBetweenAttemptsInterface.php` | Write units (spec [003-replay-reset-hook](../003-replay-reset-hook/spec.md)) | 003 FR-001, 003 FR-002 |
+| `WriteUnit/WriteUnitRetryEvent.php` | Write units (spec [003-replay-reset-hook](../003-replay-reset-hook/spec.md)) | 003 FR-002, 003 FR-004 |
+| `WriteUnit/AttemptObserver.php` | Write units | FR-WU-003 |
+| `WriteUnit/KeptEntitiesRestorer.php` | Write units | FR-WU-003 |
 | `WriteUnit/Dbal/CommitTrackingMiddleware.php` | Write units | FR-WU-005 |
 | `WriteUnit/Dbal/CommitTrackingDriver.php` | Write units | FR-WU-005 |
 | `WriteUnit/Dbal/CommitTrackingConnection.php` | Write units | FR-WU-005 |
@@ -56,6 +63,7 @@
 | `Symfony/Messenger/WriteUnitMiddleware.php` | Symfony bundle | FR-SF-003 |
 | `Symfony/Messenger/UnreplayableDispatch.php` | Symfony bundle | FR-SF-003 |
 | `Symfony/EventListener/ConcurrencyConflictResponder.php` | Symfony bundle | FR-SF-004 |
+| `Symfony/EventListener/RequestCommitWatermark.php` | Symfony bundle | FR-SF-004, 004 FR-001 |
 | `Symfony/Conflict/ConflictResponsePolicy.php` | Symfony bundle | FR-SF-005 |
 | `Symfony/Conflict/ConflictResponseContext.php` | Symfony bundle | FR-SF-005 |
 | `Symfony/Conflict/ConflictExceptionMapperInterface.php` | Symfony bundle | FR-SF-005 |
@@ -70,8 +78,8 @@
 | --- | ---: | ---: |
 | Runner | 2 | 2 |
 | Repair | 1 | 1 |
-| Classification | 2 | 2 |
+| Classification | 4 | 4 |
 | Observability | 1 | 1 |
-| Write units | 12 | 12 |
-| Symfony bundle | 11 | 11 |
-| **Total production sources** | **29** | **29** |
+| Write units | 17 | 17 |
+| Symfony bundle | 12 | 12 |
+| **Total production sources** | **37** | **37** |
