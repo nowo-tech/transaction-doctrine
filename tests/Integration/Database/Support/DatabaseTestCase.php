@@ -86,6 +86,9 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_leaf');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_folder');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_auto');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_enum');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_derived');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_owner');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
@@ -106,6 +109,12 @@ abstract class DatabaseTestCase extends TestCase
             default                         => 'id INT AUTO_INCREMENT PRIMARY KEY',
         } . ', label VARCHAR(20) NOT NULL)');
         $this->connection->executeStatement("INSERT INTO ddrb_auto (label) VALUES ('x')");
+        $this->connection->executeStatement('CREATE TABLE ddrb_enum (kind VARCHAR(10) NOT NULL PRIMARY KEY, label VARCHAR(50) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_enum (kind, label) VALUES ('alpha', 'e')");
+        $this->connection->executeStatement('CREATE TABLE ddrb_owner (id INT NOT NULL PRIMARY KEY, label VARCHAR(50) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_owner (id, label) VALUES (1, 'o1')");
+        $this->connection->executeStatement('CREATE TABLE ddrb_derived (owner_id INT NOT NULL PRIMARY KEY, label VARCHAR(50) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_derived (owner_id, label) VALUES (1, 'd1')");
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }

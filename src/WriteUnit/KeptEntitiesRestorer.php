@@ -8,7 +8,6 @@ use Closure;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
-use RuntimeException;
 use Throwable;
 
 use function array_combine;
@@ -127,8 +126,8 @@ final class KeptEntitiesRestorer
         }
 
         // 4. Back to what the database holds. When none of the kept entities is managed any more, the attempt (or host
-        // code it called) cleared the manager: the replay goes ahead as before 1.8 (1.8.1). The host's old objects stay
-        // detached, so writes to them are not flushed (audit VQ5-2, documented limitation). One kept entity gone while others remain was detached on purpose: unrestorable.
+        // code it called) cleared the manager or detached them all: WriteUnit re-attaches them (reattach(), 1.8.2).
+        // One kept entity gone while others remain was detached on purpose: unrestorable.
         if (!self::anyManaged($unitOfWork, $kept)) {
             return $restored;
         }
@@ -145,18 +144,71 @@ final class KeptEntitiesRestorer
             }
 
             // After a flush every kept entity is reloaded, but only one the attempt touched counts when its reload fails:
-            // an untouched entity whose row another session deleted stays as the host held it (audit VQ2-2).
-            $reloaded = self::safely(static fn () => self::reload($manager, $entity));
-            $restored = ($reloaded || !isset($touched[$oid])) && $restored;
+            // an untouched entity whose row another session deleted stays as the host held it (audit VQ2-2). A version
+            // committed by someone else since the run started always counts (audit VQ6-2).
+            $restored = self::reloadKept($manager, $entity, $attempt, $oid, isset($touched[$oid])) && $restored;
         }
 
         return $restored;
     }
 
     /**
+     * Re-attaches the kept entities to a manager that holds none of them any more (1.8.2, audits VQ5-1 / VQ5-2): the
+     * attempt's flush failed and the manager was reset (by the write unit's repairer, or by host code, in place or by a
+     * new object), or the attempt cleared it or detached every kept entity. Each initialised kept entity that no other
+     * object of the manager holds the identity of is registered under its identifier from before the run, then
+     * reloaded through its persister (fields, version, to-ones, fresh collections; no cascade), so the host's captured
+     * objects are managed again and later writes to them are flushed. An uninitialised proxy is left as it is.
+     *
+     * @return bool Whether every re-attached entity could be reloaded (a row gone: it is forgotten again, unrestorable)
+     */
+    public static function reattach(EntityManagerInterface $manager, AttemptObserver $attempt): bool
+    {
+        $unitOfWork = $manager->getUnitOfWork();
+        $sameUnit   = $unitOfWork === $attempt->unitOfWork;
+        $touched    = $attempt->loaded + $attempt->touched;
+        foreach ($attempt->deleted as [$entity]) {
+            $touched[spl_object_id($entity)] = true;
+        }
+
+        $restored = true;
+        $reload   = [];
+        foreach ($attempt->kept as $oid => $entity) {
+            // None of them is managed (the caller checks): each is registered once.
+            $identifier = $attempt->identifiers[$oid] ?? [];
+            // No identifier, or another object holds the identity now: it can never be managed again (audit VQ6-7).
+            if ($identifier === [] || $unitOfWork->tryGetById($identifier, $manager->getClassMetadata($entity::class)->rootEntityName) !== false) {
+                $restored = false;
+
+                continue;
+            }
+
+            // An uninitialised proxy the host holds (audit VQ6-1): in the same unit of work it is registered as it is, so
+            // the owners reloaded below reuse it; in a new one its initializer still points at the old manager, so it is
+            // reloaded through the new manager's persister (Doctrine's hydration marks a registered uninitialised proxy
+            // initialised and fills it: the same object, bound to the new manager).
+            $proxy = $unitOfWork->isUninitializedObject($entity);
+            $unitOfWork->registerManaged($entity, $identifier, []);
+            if (!$proxy || !$sameUnit) {
+                $reload[$oid] = $entity;
+            }
+        }
+
+        foreach ($reload as $oid => $entity) {
+            // A row gone counts only for an entity the attempt touched (audit VQ6-5, as restore() does): an untouched
+            // stale one is forgotten again and stays as the host held it.
+            $restored = self::reloadKept($manager, $entity, $attempt, $oid, isset($touched[$oid]), true) && $restored;
+        }
+
+        return $restored;
+    }
+
+    /**
+     * Whether any kept entity is in the unit of work's identity map.
+     *
      * @param array<int, object> $kept
      */
-    private static function anyManaged(UnitOfWork $unitOfWork, array $kept): bool
+    public static function anyManaged(UnitOfWork $unitOfWork, array $kept): bool
     {
         foreach ($kept as $entity) {
             if ($unitOfWork->isInIdentityMap($entity)) {
@@ -283,6 +335,18 @@ final class KeptEntitiesRestorer
     }
 
     /**
+     * Forgets one managed entity entirely (identity-map entry first, it reads the identifier).
+     */
+    private static function forget(UnitOfWork $unitOfWork, object $entity): void
+    {
+        Closure::bind(static function (UnitOfWork $unitOfWork, object $entity): void {
+            $oid = spl_object_id($entity);
+            $unitOfWork->removeFromIdentityMap($entity);
+            unset($unitOfWork->entityStates[$oid], $unitOfWork->entityIdentifiers[$oid], $unitOfWork->originalEntityData[$oid]);
+        }, null, UnitOfWork::class)($unitOfWork, $entity);
+    }
+
+    /**
      * Removes the brought entities from one kept entity's associations: a to-one pointing at one gets its original value
      * back, a collection loses them (unwrap(): no orphan removal scheduled, no load of an uninitialised collection).
      *
@@ -319,16 +383,65 @@ final class KeptEntitiesRestorer
      * hints): fields, version, to-one associations and fresh to-many collections come back, with no cascade. Only
      * postLoad runs.
      *
-     * @throws RuntimeException When the database no longer has the row
+     * @return bool Whether the row was found (false: it is gone)
      */
-    private static function reload(EntityManagerInterface $manager, object $entity): void
+    private static function reload(EntityManagerInterface $manager, object $entity): bool
     {
         $unitOfWork = $manager->getUnitOfWork();
         $metadata   = $manager->getClassMetadata($entity::class);
         $criteria   = array_combine($metadata->getIdentifierFieldNames(), $unitOfWork->getEntityIdentifier($entity));
-        if ($unitOfWork->getEntityPersister($metadata->name)->load($criteria, $entity) === null) {
-            throw new RuntimeException('The row of a kept entity is gone.');
+
+        return $unitOfWork->getEntityPersister($metadata->name)->load($criteria, $entity) !== null;
+    }
+
+    /**
+     * Reloads a kept entity, puts back its identifier from before the run (audit VQ6-4: ORM 2 swaps a backed-enum id
+     * for its value) and checks its version (audit VQ6-2).
+     *
+     * Only a row that is really gone (the reload found nothing) is forgiven for an entity the attempt did not touch:
+     * any other failure of the reload (a postLoad listener, a decryption failure, a lost connection) leaves the
+     * entity's state unknown, so the unit cannot be replayed (audit VQ7-1).
+     *
+     * @return bool Whether it is restored: false on another version, on a gone row of a touched entity, or on a reload
+     *              that failed
+     */
+    private static function reloadKept(EntityManagerInterface $manager, object $entity, AttemptObserver $attempt, int $oid, bool $touched, bool $forgetOnFailure = false): bool
+    {
+        $unitOfWork = $manager->getUnitOfWork();
+
+        try {
+            $found = self::reload($manager, $entity);
+        } catch (Throwable) {
+            if ($forgetOnFailure) {
+                self::forget($unitOfWork, $entity);
+            }
+
+            return false;
         }
+
+        if (!$found) {
+            if ($forgetOnFailure) {
+                self::forget($unitOfWork, $entity);
+            }
+
+            return !$touched;
+        }
+
+        $identifier = $attempt->identifiers[$oid] ?? [];
+        if ($identifier !== []) {
+            Closure::bind(static function (UnitOfWork $unitOfWork, int $oid, array $identifier): void {
+                $unitOfWork->entityIdentifiers[$oid] = $identifier;
+            }, null, UnitOfWork::class)($unitOfWork, $oid, $identifier);
+        }
+
+        if (!array_key_exists($oid, $attempt->versions)) {
+            return true;
+        }
+
+        $metadata = $manager->getClassMetadata($entity::class);
+
+        // Someone committed since the run started: the host's flush would have refused it (OptimisticLockException).
+        return $metadata->versionField === null || $metadata->getFieldValue($entity, $metadata->versionField) == $attempt->versions[$oid];
     }
 
     /**

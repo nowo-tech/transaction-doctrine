@@ -353,10 +353,27 @@ meanwhile, is left as the host held it and does not stop the replay. When the un
 attempt. The manager stays open and is never cleared. A closed manager (the ORM closes it after a failed flush) is
 still reset through the registry, as before. A manager reset in place during the attempt (DoctrineBundle's lazy service: the same object, a new
 entity manager behind it) counts as replaced, and a manager the attempt cleared entirely is not counted as unrestorable:
-in both cases the replay goes ahead (1.8.1) and the host's earlier entities stay detached. Writes made to those
-detached objects are silently ignored (no flush writes them), as after any attempt whose own flush failed (the ORM
-closes the manager and the repairer resets it): load what you change again from the manager (audits VQ5-1 / VQ5-2;
-1.8.2 is planned to manage them again).
+in both cases the replay goes ahead (1.8.1). Since 1.8.2 the host's earlier entities are re-attached to the manager
+the registry now serves, there and after any attempt whose own flush failed (the ORM closes the manager and the
+repairer resets it), or that detached every host entity: each initialised one whose identity no other object holds is
+registered under its identifier from before the run and reloaded through its entity persister, so the same objects
+stay managed and the replay's writes to them are flushed (audits VQ5-1 / VQ5-2). An uninitialised proxy the host holds
+is registered again too: as it is when the manager kept its unit of work, reloaded through the new manager after a
+reset (the same object; audit VQ6-1). The unit gives up with `ConcurrencyConflict` (409, `CONFLICT_001`) when a host
+entity has no identifier or another object holds its identity, when one the attempt touched has lost its row, or when
+a versioned host entity has another version in the database than when `run()` started (someone committed in between:
+the host's own flush would refuse it, audit VQ6-2). An untouched host entity whose row another session deleted is
+forgotten again and stays stale, as on the restore path.
+
+What a re-attach (and any reload of a host entity) means for your objects (audit VQ6-6):
+
+- `postLoad` listeners run for each reloaded entity;
+- mapped fields, version and to-one associations come back from the database; do not rely on transient (unmapped)
+  state across a replay: a proxy bound to the new manager starts from its class defaults, and anything derived from
+  mapped state is stale;
+- in-memory edits to read-only entities (`readOnly: true`), which no flush writes anyway, are reverted;
+- to-many collections are replaced by fresh, uninitialised `PersistentCollection` objects: a collection object you
+  held before is no longer the entity's; read it again from the entity.
 
 ### Request memos between attempts (1.4.0)
 
@@ -551,6 +568,11 @@ Every conflict answer carries one code (nowo-tech REQ-RUNTIME-003 rule 6). It is
   inside an HTTP request `ConflictCode::forRequest($request, $failure)` (1.6.0, next section).
 
 The status stays `conflict_response.status` (409 by default, 503 per host).
+
+`CONFLICT_002` needs commit detection (`commit_detection`, on by default, or your own `CommitLedger` passed to the
+write unit): without a ledger, an attempt that auto-committed part of its work (a flush outside a transaction) and then
+met a conflict, for example on the version it just moved, is answered `CONFLICT_001` + `Retry-After` although part was
+committed. Keep the ledger on to get `CONFLICT_002` there.
 
 ### Request commit watermark (1.6.0)
 

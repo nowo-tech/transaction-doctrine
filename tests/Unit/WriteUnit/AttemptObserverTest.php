@@ -20,11 +20,13 @@ final class AttemptObserverTest extends TestCase
     public function testAFlushOfAnotherManagerIsIgnored(): void
     {
         $observed = $this->createMock(EntityManagerInterface::class);
-        // Read once, when the observer records the unit of work it watches (1.8.1); never for another manager's flush.
-        $observed->expects($this->once())->method('getUnitOfWork')->willReturn($this->createStub(UnitOfWork::class));
+        $observed->method('getUnitOfWork')->willReturn($this->createStub(UnitOfWork::class));
         $observer = new AttemptObserver($observed, []);
+        // Compared by unit of work (audit VQ6-3): another manager has another one.
+        $other = $this->createMock(EntityManagerInterface::class);
+        $other->method('getUnitOfWork')->willReturn($this->createStub(UnitOfWork::class));
 
-        $observer->onFlush(new OnFlushEventArgs($this->createMock(EntityManagerInterface::class)));
+        $observer->onFlush(new OnFlushEventArgs($other));
 
         self::assertFalse($observer->flushed);
         self::assertSame([], $observer->deleted);

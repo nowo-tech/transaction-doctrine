@@ -25,6 +25,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The host's entities stay managed after a reset or a clear during a write unit (audits VQ5-1 / VQ5-2; the known
+  limitation of 1.8.1, also in 1.7.x and 1.8.0 for a failed flush).** When the attempt's own flush failed (the ORM
+  closes the manager and the write unit's repairer resets it), when host code reset the manager (in place, as
+  DoctrineBundle does, or by a new object), or when the attempt cleared the manager or detached every host entity,
+  the host's objects captured before `run()` stayed detached: the replay reported success while writes made to them
+  were silently ignored. After the repair, every initialised host entity whose identity no other object holds in the
+  manager the registry now serves is registered again under its identifier from before the run and reloaded through
+  its entity persister (fields, version, to-ones, fresh collections; no cascade). The same objects are managed again
+  and the replay's writes to them are flushed. The write unit still never clears or resets an open host entity manager
+  itself. Details (audit VQ6):
+  - an uninitialised proxy the host holds (for example `$folder = $leaf->folder`) is registered again too: as it is
+    when the manager kept its unit of work (a clear, a detach), so the reloaded owners reuse it; reloaded through the
+    new manager's persister after a reset (Doctrine's hydration initialises it), so the same object is bound to the new
+    manager (VQ6-1; before, ORM 2.20 replaced it and writes to the held one were lost);
+  - the version of each initialised versioned host entity is captured when the run starts; a reload, on the restore
+    path or the re-attach path, that finds another version (someone committed in between, which the host's own flush
+    would refuse with `OptimisticLockException`) ends the unit with `ConcurrencyConflict` (409, `CONFLICT_001`) instead
+    of overwriting it (VQ6-2);
+  - a flush is recognised by its unit of work, so a decorated or lazy manager (`EntityManagerDecorator`,
+    DoctrineBundle's lazy service) no longer turns off the reload after a flush of the attempt (VQ6-3, also in 1.8.0
+    and 1.8.1);
+  - the identifier captured before the run is put back after a reload (VQ6-4: ORM 2.20 swapped a backed-enum id and
+    the replay's UPDATE failed with an `Error`);
+  - an entity without an identifier, or whose identity another object of the manager holds, is unrestorable (409);
+    an entity the attempt touched whose row is gone too (VQ6-7);
+  - an untouched host entity whose row another session deleted is forgotten again and does not stop the replay, as on
+    the restore path (VQ6-5).
+  - only a row that is really gone is forgiven that way: any other failure of the reload (a `postLoad` listener that
+    throws, a decryption failure, a connection lost during the SELECT) makes the entity unrestorable (409
+    `CONFLICT_001`) instead of forgetting it while its row exists and losing the replay's writes to it (VQ7-1).
+
 ## [1.8.1] - 2026-11-20
 
 ### Fixed

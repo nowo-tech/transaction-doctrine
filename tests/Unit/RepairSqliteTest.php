@@ -214,4 +214,109 @@ final class RepairSqliteTest extends DatabaseTestCase
     {
         $this->scenarioAReplayAfterTheAttemptClearedTheManagerGoesAhead();
     }
+
+    public function testAFlushTimeDeadlockKeepsTheHostEntityInPlace(): void
+    {
+        $this->scenarioAFlushTimeDeadlockKeepsTheHostEntityInPlace();
+    }
+
+    public function testAFlushTimeDeadlockKeepsTheHostEntityInANewManager(): void
+    {
+        $this->scenarioAFlushTimeDeadlockKeepsTheHostEntityInANewManager();
+    }
+
+    public function testAClearedManagerKeepsTheHostEntityWritable(): void
+    {
+        $this->scenarioAClearedManagerKeepsTheHostEntityWritable();
+    }
+
+    public function testADetachedOnlyHostEntityIsWritable(): void
+    {
+        $this->scenarioADetachedOnlyHostEntityIsWritable();
+    }
+
+    public function testAReattachWithoutARowStopsTheReplay(): void
+    {
+        $this->scenarioAReattachWithoutARowStopsTheReplay();
+    }
+
+    public function testAnUninitialisedProxyIsRegisteredAgain(): void
+    {
+        $this->scenarioAnUninitialisedProxyIsRegisteredAgain();
+    }
+
+    public function testABackedEnumIdentifierSurvivesTheReplay(): void
+    {
+        $this->scenarioABackedEnumIdentifierSurvivesTheReplay();
+    }
+
+    public function testADerivedIdentitysOwnerIsReused(): void
+    {
+        $this->scenarioADerivedIdentitysOwnerIsReused();
+    }
+
+    public function testAConcurrentVersionStopsTheReplayOnTouch(): void
+    {
+        $this->scenarioAConcurrentVersionStopsTheReplay('touch');
+    }
+
+    public function testAConcurrentVersionStopsTheReplayOnClear(): void
+    {
+        $this->scenarioAConcurrentVersionStopsTheReplay('clear');
+    }
+
+    public function testAConcurrentVersionStopsTheReplayOnReset(): void
+    {
+        $this->scenarioAConcurrentVersionStopsTheReplay('reset');
+    }
+
+    public function testADecoratedManagersFlushIsReloaded(): void
+    {
+        $this->scenarioADecoratedManagersFlushIsReloaded();
+    }
+
+    public function testADecoratedManagerResetInPlaceThenAFlushedWrite(): void
+    {
+        $this->scenarioADecoratedManagerResetInPlaceThenAFlushedWrite();
+    }
+
+    public function testAHeldProxyIsWrittenAfterAClear(): void
+    {
+        $this->scenarioAHeldProxyIsWrittenAfterAClear();
+    }
+
+    public function testAHeldProxyIsWrittenAfterAReset(): void
+    {
+        $this->scenarioAHeldProxyIsWrittenAfterAReset();
+    }
+
+    public function testAStaleUntouchedEntityDoesNotStopAReattachOnClear(): void
+    {
+        $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('clear');
+    }
+
+    public function testAStaleUntouchedEntityDoesNotStopAReattachOnReset(): void
+    {
+        $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('reset');
+    }
+
+    public function testAFailedReloadIsNotAGoneRowOnClear(): void
+    {
+        $this->scenarioAFailedReloadIsNotAGoneRow('clear');
+    }
+
+    public function testAFailedReloadIsNotAGoneRowOnReset(): void
+    {
+        $this->scenarioAFailedReloadIsNotAGoneRow('reset');
+    }
+
+    public function testAReattachRefusesWhatItCannotManageAgain(): void
+    {
+        $this->scenarioAReattachRefusesWhatItCannotManageAgain();
+    }
+
+    public function testAFlushTimeDeleteIsReattached(): void
+    {
+        $this->scenarioAFlushTimeDeleteIsReattached();
+    }
 }
