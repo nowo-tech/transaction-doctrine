@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.7.2] - 2026-11-20](#172---2026-11-20)
 - [[1.7.1] - 2026-11-19](#171---2026-11-19)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
 - [[1.6.1] - 2026-11-19](#161---2026-11-19)
@@ -21,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [[1.0.0] - 2026-11-15](#100---2026-11-15)
 
 ## [Unreleased]
+
+## [1.7.2] - 2026-11-20
 
 ### Fixed
 
@@ -417,7 +420,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Requires `nowo-tech/transaction-contract ^1.0` and `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.
 
-[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.6.0...v1.6.1

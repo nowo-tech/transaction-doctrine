@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.7.2](#to-172)
 - [To 1.7.1](#to-171)
 - [To 1.7.1](#to-171-1)
 - [To 1.7.0](#to-170)
@@ -26,6 +27,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.7.2
+
+From **1.7.1**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
 
