@@ -713,8 +713,8 @@ How each server ends a transaction is followed:
 | Case | Outcome |
 |---|---|
 | PostgreSQL: a statement failed inside the transaction (a caught unique violation), then COMMIT | `false`: the server answered the COMMIT with a ROLLBACK, which PDO reports as a success. A rollback to a savepoint taken before the failure (DBAL's nested `rollBack()`) ends that state |
-| MySQL / MariaDB: a deadlock inside the transaction | `false` at once: the server rolled the whole transaction back; what follows auto-commits |
-| MySQL / MariaDB: a statement that commits implicitly (DDL, `TRUNCATE`, `LOCK TABLES`, `SET autocommit = 1`…) | `true` at once: the server committed it; what follows auto-commits |
+| MySQL / MariaDB: a deadlock inside the transaction | `false` at once: the server rolled the whole transaction back; what follows auto-commits (a mark taken now, while DBAL still counts the transaction open, is an auto-commit mark) |
+| MySQL / MariaDB: a statement that commits implicitly (DDL, `TRUNCATE`, `LOCK TABLES`, `SET autocommit = 1`…) | `true` at once: the server committed it; what follows auto-commits (likewise) |
 | The connection is lost **during** COMMIT (`ConnectionLost`, SQLSTATE 08xxx, MySQL 2006 / 2013 / 4031) | `null` with `ended()` true: unknown, the server may have committed |
 | DBAL's `close()` with the transaction open | `false` once the driver connection is released (a prepared statement still referenced keeps it until it is freed) |
 
@@ -790,8 +790,9 @@ includes the bundle's rows (its flushes then use savepoints). A rollback of a le
 in, or of one of the bundle's own savepoints (the middleware's prefix), leaves it alone; one of a savepoint the
 application named itself counts as undoing everything pending. A stale manager with pending work is kept until that work
 is flushed or the boundary. A connection closed or lost with its transaction open (`ConnectionRepairer`,
-`DoctrineTransactionRunner`, `WorkerConnectionHygiene`), and a rollback to a savepoint that fails (MySQL / MariaDB after
-a deadlock), make it stale too: no ghost entity of a rolled-back write, no silent 0-row `UPDATE`. The application's
+`DoctrineTransactionRunner`, `WorkerConnectionHygiene`), a rollback to a savepoint that fails (MySQL / MariaDB after
+a deadlock), and a PostgreSQL COMMIT after a statement failed in the transaction (the server answers it with a
+ROLLBACK), make it stale too: no ghost entity of a rolled-back write, no silent 0-row `UPDATE`. The application's
 managers are never flushed, cleared, closed or reset by the kit.
 
 Things to know when moving a bundle onto the kit:

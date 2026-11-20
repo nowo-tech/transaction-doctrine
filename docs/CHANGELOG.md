@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transaction the host then rolled back, while unrelated writes moved `CommitLedger::count()` (Uptime's audit-trail
   outbox, UserKit's savepoint case). Server behaviour followed (audit WD): a COMMIT after a failed statement on
   PostgreSQL is a rollback (false) unless a savepoint rollback ended the failure; a MySQL / MariaDB deadlock rolls the
-  transaction back and an implicit-commit statement (DDL) commits it, at once. Each mark holds its transaction's outcome,
+  transaction back and an implicit-commit statement (DDL) commits it, at once (a mark taken after that, while DBAL still
+  counts the transaction open, stands for an auto-committed write). Each mark holds its transaction's outcome,
   so it is never forgotten however many transactions follow; the ledger keeps only the open transaction per native
   connection, weakly.
 - **Host-flush probe (REQ-ARCH-001 rule 6 deprecation layer):** `HostFlushProbe::beforeHostFlush($entityManager,
@@ -54,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TransactionLevelListenerInterface` and `DependencyInjection\PrivateEntityManagerPass`: the shared shape of the
   private managers TaskBoard, Wiki, ChatKit and Vault copy, for a zero-config private manager on the application's
   connection (ORM 2.20 and 3). The private manager goes stale after a rollback of a level it wrote or loaded in, a
-  connection closed or lost with its transaction open, or a failed rollback to a savepoint.
+  connection closed or lost with its transaction open, a failed rollback to a savepoint, or a PostgreSQL COMMIT after a
+  failed statement (the server's ROLLBACK).
 - **`CommitLedger::count()` on MySQL / MariaDB:** after a deadlock or an implicit-commit statement (DDL) inside a
   transaction, the writes that follow are counted as the auto-committed writes they are (before, they were taken for
   part of the transaction until its COMMIT or ROLLBACK). Counting more only makes a write unit give up a replay sooner.

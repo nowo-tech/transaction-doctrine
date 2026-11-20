@@ -59,7 +59,8 @@ final class CommitLedger
 
     /**
      * Marks the outermost transaction currently open on the connection (1.9). Outside a transaction the mark stands for
-     * an auto-committed write.
+     * an auto-committed write; so does a mark taken after the server ended the transaction DBAL still counts open (MySQL
+     * / MariaDB after an implicit-commit statement or a deadlock: the writes that follow auto-commit).
      *
      * @throws LogicException When the connection is inside a transaction that commit tracking did not see (the
      *                        connection does not go through Dbal\CommitTrackingMiddleware fed by this ledger)
@@ -70,12 +71,16 @@ final class CommitLedger
             return new TransactionMark();
         }
 
-        $transaction = ($this->connections[$connection->getNativeConnection()] ?? null)?->current();
-        if (!$transaction instanceof TransactionOutcome) {
+        $transactions = $this->connections[$connection->getNativeConnection()] ?? null;
+        if (!$transactions instanceof OutermostTransactions) {
             throw new LogicException('CommitLedger::mark() needs the connection to go through CommitTrackingMiddleware fed by this ledger (the bundle\'s commit_detection).');
         }
 
-        return new TransactionMark($transaction);
+        // Audit WD-R2: the server ended the transaction while DBAL still counts it open (MySQL / MariaDB after an
+        // implicit-commit statement or a deadlock): what is written now auto-commits, as the mark says.
+        $transaction = $transactions->current();
+
+        return $transaction instanceof TransactionOutcome ? new TransactionMark($transaction) : new TransactionMark();
     }
 
     /**

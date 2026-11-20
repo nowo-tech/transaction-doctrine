@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\PrivateManager;
 use ArrayObject;
 use Closure;
 use Doctrine\DBAL\Driver\Connection;
+use Doctrine\DBAL\Driver\Statement;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
 use Doctrine\ORM\Mapping\ClassMetadata;
@@ -21,6 +22,8 @@ use Nowo\TransactionDoctrine\PrivateManager\PrivateManagerRegistry;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateManagerRepositoryFactory;
 use Nowo\TransactionDoctrine\PrivateManager\TransactionLevelListenerInterface;
 use Nowo\TransactionDoctrine\Tests\Unit\PrivateManager\Fixtures\ServiceRepository;
+use Nowo\TransactionDoctrine\Tests\Unit\Support\NativeAwareDriverConnection;
+use PDO;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use RuntimeException;
@@ -29,6 +32,8 @@ use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
+
+use function str_starts_with;
 
 /**
  * The 1.9 private-manager kit pieces that need no database: the compiler pass, the registry's delegation, the
@@ -118,14 +123,53 @@ final class PrivateManagerKitTest extends TestCase
     }
 
     /**
-     * Audit WD-2: a driver connection released with its transaction open (DBAL's close(), a lost connection) tells the
-     * listener everything pending is gone; one released after its commit or rollback tells nothing more.
+     * Audit WD-R1: on PostgreSQL a failed statement (query, exec or prepared) inside the transaction turns its COMMIT
+     * into a rollback for the listener, until a rollback to a savepoint; another server, or no transaction, keeps it.
      */
-    public function testAConnectionReleasedWithItsTransactionOpenRollsBack(): void
+    public function testAFailedStatementOnPostgresMakesTheCommitARollback(): void
     {
-        /** @var ArrayObject<int, string> $events */
-        $events   = new ArrayObject();
-        $listener = new class($events) implements TransactionLevelListenerInterface {
+        $expected = static fn (string $first): array => [$first, 'rolledBack:all', 'committed', 'rolledBack:1', 'committed'];
+        foreach (['pgsql' => $expected('rolledBack:1'), 'mysql' => $expected('committed')] as $server => $expected) {
+            /** @var ArrayObject<int, string> $events */
+            $events   = new ArrayObject();
+            $listener = $this->recordingListener($events);
+            $pdo      = $this->createMock(PDO::class);
+            $pdo->method('getAttribute')->with(PDO::ATTR_DRIVER_NAME)->willReturn($server);
+            $statement = $this->createMock(Statement::class);
+            $statement->method('execute')->willThrowException(new RuntimeException('statement failed'));
+            $driver = $this->createMock(NativeAwareDriverConnection::class);
+            $driver->method('getNativeConnection')->willReturn($pdo);
+            $driver->method('query')->willThrowException(new RuntimeException('statement failed'));
+            $driver->method('prepare')->willReturn($statement);
+            $driver->method('exec')->willReturnCallback(static fn (string $sql): int => str_starts_with($sql, 'INSERT') ? throw new RuntimeException('statement failed') : 0);
+            $connection = new PrivateEntityManagerConnection($driver, $listener);
+
+            $this->failsWith(static fn (): mixed => $connection->exec('INSERT dup')); // outside a transaction: nothing to abort
+            $connection->beginTransaction();
+            $this->failsWith(static fn (): mixed => $connection->query('SELECT dup'));
+            $connection->commit();
+
+            $connection->beginTransaction();
+            $this->failsWith(static fn (): mixed => $connection->prepare('INSERT dup')->execute());
+            $connection->exec('ROLLBACK TO SAVEPOINT bundle_sp'); // the failure is undone
+            $connection->commit();
+
+            $connection->beginTransaction();
+            $this->failsWith(static fn (): mixed => $connection->exec('INSERT dup'));
+            $connection->rollBack();
+            $connection->beginTransaction();
+            $connection->commit(); // a new transaction starts clean
+
+            self::assertSame($expected, $events->getArrayCopy(), $server);
+        }
+    }
+
+    /**
+     * @param ArrayObject<int, string> $events
+     */
+    private function recordingListener(ArrayObject $events): TransactionLevelListenerInterface
+    {
+        return new class($events) implements TransactionLevelListenerInterface {
             /** @param ArrayObject<int, string> $events */
             public function __construct(private readonly ArrayObject $events)
             {
@@ -146,6 +190,28 @@ final class PrivateManagerKitTest extends TestCase
                 $this->events[] = 'released:' . $level;
             }
         };
+    }
+
+    /** @param callable(): mixed $call */
+    private function failsWith(callable $call): void
+    {
+        try {
+            $call();
+            self::fail('No failure.');
+        } catch (RuntimeException $failure) {
+            self::assertSame('statement failed', $failure->getMessage());
+        }
+    }
+
+    /**
+     * Audit WD-2: a driver connection released with its transaction open (DBAL's close(), a lost connection) tells the
+     * listener everything pending is gone; one released after its commit or rollback tells nothing more.
+     */
+    public function testAConnectionReleasedWithItsTransactionOpenRollsBack(): void
+    {
+        /** @var ArrayObject<int, string> $events */
+        $events   = new ArrayObject();
+        $listener = $this->recordingListener($events);
 
         $connection = new PrivateEntityManagerConnection($this->createMock(Connection::class), $listener);
         $connection->beginTransaction();

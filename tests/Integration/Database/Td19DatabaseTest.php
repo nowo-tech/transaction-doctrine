@@ -143,6 +143,7 @@ final class Td19DatabaseTest extends DatabaseTestCase
         $this->boot($server);
         $this->scenarioARollbackMakesThePrivateManagerStale();
         $this->scenarioAClosedConnectionMakesThePrivateManagerStale();
+        $this->scenarioAFailedHostStatementBeforeCommit();
     }
 
     #[DataProvider('allServers')]

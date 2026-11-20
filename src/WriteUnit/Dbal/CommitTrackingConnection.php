@@ -289,19 +289,7 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
 
     private function isPostgres(): bool
     {
-        if ($this->postgres === null) {
-            try {
-                $native   = $this->getNativeConnection();
-                $postgres = ($native instanceof PDO && $native->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql')
-                    || (is_object($native) && $native::class === \PgSql\Connection::class);
-            } catch (Throwable) {
-                $postgres = false; // unknown server: a failed statement does not abort the transaction
-            }
-
-            $this->postgres = $postgres; // @igor-ignore — fact about this driver connection, not a request
-        }
-
-        return $this->postgres;
+        return $this->postgres ??= NativeServer::isPostgres($this); // @igor-ignore — fact about this driver connection, not a request
     }
 
     private function isMySql(): bool

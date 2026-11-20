@@ -153,6 +153,8 @@ trait EpochScenarios
         $this->connection->executeStatement('CREATE TABLE ddrb_ddl (id INT)');
         self::assertTrue($ledger->outcome($mark), 'the DDL committed the transaction');
         self::assertTrue($ledger->ended($mark));
+        self::assertTrue($this->connection->isTransactionActive(), 'DBAL still counts it open');
+        self::assertTrue($ledger->mark($this->connection)->isAutoCommit(), 'audit WD-R2: what follows auto-commits');
         $this->failsWith(function (): void {
             $this->connection->rollBack();
         }); // the server has no transaction left
@@ -166,6 +168,7 @@ trait EpochScenarios
         $this->startDeadlockingPeer();
         $this->failsWith(fn (): mixed => $this->connection->executeStatement('UPDATE ddrb_counter SET counter_value = counter_value + 1 WHERE id = 2'));
         self::assertFalse($ledger->outcome($deadlocked), 'the deadlock rolled the transaction back');
+        self::assertTrue($ledger->mark($this->connection)->isAutoCommit(), 'audit WD-R2: what follows auto-commits');
         self::assertSame('OK', $this->otherSession()->await());
         self::assertSame('OK', $this->otherSession()->execute('COMMIT'));
 

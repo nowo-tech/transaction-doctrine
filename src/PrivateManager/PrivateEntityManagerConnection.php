@@ -6,6 +6,9 @@ namespace Nowo\TransactionDoctrine\PrivateManager;
 
 use Doctrine\DBAL\Driver\Connection;
 use Doctrine\DBAL\Driver\Middleware\AbstractConnectionMiddleware;
+use Doctrine\DBAL\Driver\Result;
+use Doctrine\DBAL\Driver\Statement;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\NativeServer;
 use Throwable;
 
 use function preg_match;
@@ -43,6 +46,15 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
     /** Whether a driver-level transaction is open on this connection. */
     private bool $open = false;
 
+    /**
+     * PostgreSQL only: a statement of the open transaction failed, so the server answers its COMMIT with a ROLLBACK that
+     * the driver reports as a success, until a rollback to a savepoint taken before the failure (audit WD-R1).
+     */
+    private bool $aborted = false;
+
+    /** Whether the server is PostgreSQL (read from the native connection the first time it matters). */
+    private ?bool $postgres = null;
+
     public function __construct(
         Connection $connection,
         private readonly TransactionLevelListenerInterface $listener,
@@ -54,7 +66,35 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
     public function beginTransaction(): void
     {
         parent::beginTransaction();
-        $this->open = true; // @igor-ignore — state of this driver connection, not of a request
+        $this->open    = true; // @igor-ignore — state of this driver connection, not of a request
+        $this->aborted = false; // @igor-ignore — state of this driver connection, not of a request
+    }
+
+    public function prepare(string $sql): Statement
+    {
+        return new PrivateEntityManagerStatement(parent::prepare($sql), $this);
+    }
+
+    public function query(string $sql): Result
+    {
+        try {
+            return parent::query($sql);
+        } catch (Throwable $exception) {
+            $this->failed();
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * A statement of this connection failed (PrivateEntityManagerStatement calls it too). On PostgreSQL a failure inside
+     * a transaction aborts it: the COMMIT that follows is a ROLLBACK (audit WD-R1).
+     */
+    public function failed(): void
+    {
+        if ($this->open && ($this->postgres ??= NativeServer::isPostgres($this))) { // @igor-ignore — fact about this driver connection
+            $this->aborted = true; // @igor-ignore — state of this driver connection, not of a request
+        }
     }
 
     public function commit(): void
@@ -72,6 +112,8 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
      */
     public function trackCommit(callable $commit): mixed
     {
+        $aborted       = $this->aborted;
+        $this->aborted = false; // @igor-ignore — state of this driver connection, not of a request
         try {
             $result = $commit();
         } catch (Throwable $exception) {
@@ -83,6 +125,13 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
         }
 
         $this->open = false; // @igor-ignore — state of this driver connection, not of a request
+        if ($aborted) {
+            // PostgreSQL answered this COMMIT with a ROLLBACK (a statement had failed): nothing of it is left.
+            $this->listener->connectionRolledBack(1);
+
+            return $result;
+        }
+
         $this->listener->connectionCommitted();
 
         return $result;
@@ -93,7 +142,8 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
         try {
             parent::rollBack();
         } finally {
-            $this->open = false; // @igor-ignore — state of this driver connection, not of a request
+            $this->open    = false; // @igor-ignore — state of this driver connection, not of a request
+            $this->aborted = false; // @igor-ignore — state of this driver connection, not of a request
             $this->listener->connectionRolledBack(1);
         }
     }
@@ -105,6 +155,7 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
         try {
             $result = (int) parent::exec($sql);
         } catch (Throwable $exception) {
+            $this->failed();
             if ($savepointRollback) {
                 // Audit WD-2: the rollback to the savepoint failed (MySQL / MariaDB after a deadlock rolled the whole
                 // transaction back): nothing of it is left.
@@ -112,6 +163,10 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
             }
 
             throw $exception;
+        }
+
+        if ($savepointRollback) {
+            $this->aborted = false; // @igor-ignore — the savepoint was taken before the failure: the transaction lives on
         }
 
         if ($savepointRollback && !$this->isOwn($match[1])) {

@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 use Doctrine\DBAL\Configuration as DbalConfiguration;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Tools\DsnParser;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
@@ -298,6 +299,54 @@ trait PrivateManagerScenarios
             }
 
             self::assertFalse($private->isStale());
+        } finally {
+            $private->reset();
+            $connection->close();
+        }
+    }
+
+    /**
+     * Audit WD-R1: the host catches a failed statement inside its transaction, then commits. PostgreSQL answers that
+     * COMMIT with a ROLLBACK the driver reports as a success: the private manager's flushed write is gone, so it must be
+     * stale (no ghost). Other servers keep the transaction: the write is durable and the manager is not stale. A rollback
+     * to a savepoint taken before the failure keeps the transaction on every server.
+     */
+    private function scenarioAFailedHostStatementBeforeCommit(): void
+    {
+        [$connection, $private] = $this->trackedPrivateManager();
+        $failing                = static function () use ($connection): void {
+            try {
+                $connection->insert('ddrb_counter', ['id' => 1, 'counter_value' => 0]); // duplicate key
+                self::fail('No failure.');
+            } catch (UniqueConstraintViolationException) {
+            }
+        };
+
+        try {
+            $connection->beginTransaction();
+            $note = $private->find(BundleNote::class, 1);
+            self::assertInstanceOf(BundleNote::class, $note);
+            $note->counterId = 51;
+            $private->flush();
+            $failing();
+            $connection->commit();
+
+            $durable = (int) $this->freshValue('SELECT counter_id FROM ddrb_note WHERE id = 1') === 51;
+            self::assertSame(!$this->isPostgreSql(), $durable);
+            self::assertSame(!$durable, $private->isStale(), 'stale exactly when the server rolled the write back');
+            $again = $private->find(BundleNote::class, 1);
+            self::assertInstanceOf(BundleNote::class, $again);
+            self::assertSame($durable ? 51 : 1, $again->counterId, 'no ghost');
+
+            $connection->beginTransaction();
+            $again->counterId = 52;
+            $private->flush();
+            $connection->beginTransaction(); // a savepoint
+            $failing();
+            $connection->rollBack(); // to the savepoint: the failure is undone
+            $connection->commit();
+            self::assertFalse($private->isStale());
+            self::assertSame(52, (int) $this->freshValue('SELECT counter_id FROM ddrb_note WHERE id = 1'));
         } finally {
             $private->reset();
             $connection->close();

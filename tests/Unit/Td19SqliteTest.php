@@ -110,6 +110,7 @@ final class Td19SqliteTest extends DatabaseTestCase
     {
         $this->scenarioARollbackMakesThePrivateManagerStale();
         $this->scenarioAClosedConnectionMakesThePrivateManagerStale();
+        $this->scenarioAFailedHostStatementBeforeCommit();
     }
 
     public function testABoundaryNeverFails(): void
