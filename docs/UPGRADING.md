@@ -34,11 +34,14 @@ From **1.9.0**: `composer update nowo-tech/transaction-doctrine`. No configurati
 reports loaded, untouched entities with backed-enum fields (audit XA-1): deprecations the probe raised only for such
 entities disappear from the deprecation log. It never throws any more (audit XA-3): a failure is logged as a warning
 through the new optional constructor argument (`?LoggerInterface $logger = null`; the Symfony bundle wires `logger`),
-otherwise swallowed.
+otherwise swallowed; the warning carries the failure's type, never its message or trace.
 
 `UnitOfWorkBoundaryListener` (with `unit_of_work_boundaries`, on by default) now resets the probe and the private
-managers only at the outermost unit-of-work boundaries: a command, a request or a Messenger worker run in-process inside
-another unit no longer resets the state of the unit that runs it. Nothing to do; code that builds the listener by hand
+managers only at the boundaries of a unit that runs inside no other one: the outermost console command, a Messenger
+message with no other message in flight, and a main request with no other main request and no message in flight (also
+while a console command runs, so a server command keeps resetting at every request). A command run inside another unit,
+a main request inside another main request or a message handler, and a worker run by a handler no longer reset the
+state of the unit that runs them. Nothing to do; code that builds the listener by hand
 keeps the 1.9.0 behaviour unless it passes the new optional `UnitOfWorkFrames` tracker (internal).
 
 ## To 1.9.0

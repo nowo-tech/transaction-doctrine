@@ -40,7 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a broken proxy, an entity whose state cannot be read) or from the deprecation itself (a host error handler that
   ignores `@` and throws on `E_USER_DEPRECATED`) is caught: logged as a warning when a PSR logger is wired (new optional
   constructor argument; the Symfony bundle passes the `logger` service, channel `transaction_doctrine`, when there is
-  one), otherwise swallowed. A failed inspection reports and returns no classes.
+  one), otherwise swallowed. The warning holds the bundle, the entity class and the failure's type (`exception_type`),
+  never its message or trace (audit XB-2). A failed inspection reports and returns no classes.
 - **Unit-of-work boundaries: outermost units only, and never stuck (duplicate-code survey, row 1):** the 1.9.0
   `UnitOfWorkBoundaryListener` was a plain command-depth counter. A worker run in-process by a message handler ended the
   outer message, a main request handled in-process inside another one (and its `kernel.terminate`) reset the outer
@@ -51,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Messenger workers, changed at the extreme priorities before any other listener can throw; aborted Messenger runs, a
   message skipped with `shouldHandle(false)`, nested workers and nested main requests are handled, and a frame left by a
   throwing `console.error` / `kernel.exception` / `WorkerMessageReceivedEvent` listener is dropped at the next unit.
+  Unit boundaries: the outermost console command; a Messenger message with no other message in flight; a main request
+  with no other main request and no message in flight, even while a console command runs, so a server started from a
+  command (Swoole, ReactPHP, RoadRunner) still resets at every request as 1.9.0 did (audit XB-1).
   Internal and BC: the listener's methods and constructor keep working (new optional third argument; without it, the
   1.9.0 counter). Real-kernel tests in worker mode with the kernel reset off cover the Messenger, console and
   nested-request cases.

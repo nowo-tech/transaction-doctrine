@@ -758,10 +758,19 @@ bundle registers one shared instance (autowirable `HostFlushProbe`) and resets i
 (`unit_of_work_boundaries`, on by default: main request, Messenger message, outermost console command; worker mode
 with kernel reset off included) and at `kernel.reset`. Without the bundle, create one per unit of work.
 
-Since 1.9.1 only the OUTERMOST unit's boundaries reset it (and the private managers): a command, a main request or a
-Messenger worker run in-process inside another unit never resets the state of the unit that runs it, and a listener that
-throws at a boundary (`console.error`, `kernel.exception`, `WorkerMessageReceivedEvent`), an aborted worker run or a
-message skipped with `shouldHandle(false)` never leaves the process "inside" a unit (the next unit resets again).
+Since 1.9.1 only the boundaries of a unit of work that runs inside no other one reset it (and the private managers):
+
+- a console command: when no other command, no message and no main request runs (a command run in-process by a
+  command, a handler or a controller keeps the outer unit's state);
+- a Messenger message: when no other message is in flight (`messenger:consume` resets at every message; a worker run
+  in-process by a handler keeps the outer message's state);
+- a main request: when no other main request and no message is in flight, whatever command runs. A server started from
+  a console command (Swoole, ReactPHP, RoadRunner) resets at every request; a main request handled inside another one
+  or inside a message handler keeps the outer unit's state. Sub-requests are never boundaries.
+
+A listener that throws at a boundary (`console.error`, `kernel.exception`, `WorkerMessageReceivedEvent`), an aborted
+worker run or a message skipped with `shouldHandle(false)` never leaves the process "inside" a unit (the next unit
+resets again).
 
 Backed-enum fields (also arrays of enums on array / simple_array columns) are compared by their backing values, as
 Doctrine's change-set computation does: a loaded, untouched entity with an enum column is not reported (1.9.1).
@@ -769,7 +778,9 @@ Doctrine's change-set computation does: a loaded, untouched entity with an enum 
 The probe never breaks the bundle's write (1.9.1): a failure while inspecting the unit of work (a broken proxy, an entity
 whose state cannot be read), or a host error handler that ignores `@` and throws on the deprecation, is caught and
 logged as a warning when a PSR logger is wired (`new HostFlushProbe($logger)`; the Symfony bundle passes the `logger`
-service, channel `transaction_doctrine`), otherwise swallowed. A failed inspection reports and returns no classes.
+service, channel `transaction_doctrine`), otherwise swallowed. The warning's context holds `bundle`, `class` (the entity
+class, for a failed deprecation) and `exception_type` (the failure's class), never the failure's message or trace. A
+failed inspection reports and returns no classes.
 
 ## Private entity manager kit (1.9)
 
