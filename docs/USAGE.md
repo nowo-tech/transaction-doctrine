@@ -695,19 +695,32 @@ $mark = $ledger->mark($connection);   // inside the transaction that holds your 
 // … later, at the boundary …
 match ($ledger->outcome($mark)) {
     true  => $this->release(),         // committed (or the write was auto-committed: marked outside a transaction)
-    false => $this->drop(),            // rolled back, refused at commit, or lost with its connection
-    null  => $this->keepWaiting(),     // still open (or older than the last 256 transactions of that connection)
+    false => $this->drop(),            // rolled back, refused at commit, or lost with its connection before COMMIT
+    null  => $ledger->ended($mark)
+        ? $this->reconcile()           // the connection was lost during COMMIT: the server may have committed
+        : $this->keepWaiting(),        // still open
 };
 ```
 
-Each driver-level BEGIN opens the next transaction of that connection; its COMMIT, ROLLBACK, a refused COMMIT, or the
+Each driver-level BEGIN opens a new transaction of that connection; its COMMIT, ROLLBACK, a refused COMMIT, or the
 connection going away with it open (closed, lost: the server rolls it back) records how it ended. Savepoints are plain
 SQL inside it and never count, so a bundle that released its savepoint inside a host transaction the host then rolled
 back reads `false`, however many unrelated writes commit afterwards (the "phantom" case of an audit-trail outbox).
-Marking inside a transaction the ledger did not see throws `LogicException`. Limits: a statement that commits
-implicitly inside a transaction (MySQL / MariaDB DDL) is not a COMMIT of the marked transaction; the outcome of a
-driver without a native connection object stays unknown. State is per native connection, held weakly and bounded: no
-reset is needed in worker mode.
+Marking inside a transaction the ledger did not see throws `LogicException`.
+
+How each server ends a transaction is followed:
+
+| Case | Outcome |
+|---|---|
+| PostgreSQL: a statement failed inside the transaction (a caught unique violation), then COMMIT | `false`: the server answered the COMMIT with a ROLLBACK, which PDO reports as a success. A rollback to a savepoint taken before the failure (DBAL's nested `rollBack()`) ends that state |
+| MySQL / MariaDB: a deadlock inside the transaction | `false` at once: the server rolled the whole transaction back; what follows auto-commits |
+| MySQL / MariaDB: a statement that commits implicitly (DDL, `TRUNCATE`, `LOCK TABLES`, `SET autocommit = 1`…) | `true` at once: the server committed it; what follows auto-commits |
+| The connection is lost **during** COMMIT (`ConnectionLost`, SQLSTATE 08xxx, MySQL 2006 / 2013 / 4031) | `null` with `ended()` true: unknown, the server may have committed |
+| DBAL's `close()` with the transaction open | `false` once the driver connection is released (a prepared statement still referenced keeps it until it is freed) |
+
+Each mark holds its transaction's outcome itself: it is never forgotten, however many transactions follow, and goes
+away with the last mark. The ledger keeps only the open transaction per native connection, weakly: no reset is needed
+in worker mode. The outcome of a driver without a native connection object stays unknown.
 
 ## Host-flush probe (1.9)
 
@@ -722,11 +735,22 @@ $this->probe->beforeHostFlush($entityManager, 'NowoWikiBundle', ['Nowo\\WikiBund
 $entityManager->flush();
 ```
 
-Every entity class outside the bundle's namespaces with pending work in the host's unit of work (a scheduled insert or
-delete, or a managed entity whose fields, to-one associations or collections differ from what was loaded) triggers one
+Every entity class outside the bundle's namespaces with pending work in the host's unit of work triggers one
 `E_USER_DEPRECATED` per bundle and class per unit of work: *"Your pending changes to App\\X were flushed by
 NowoWikiBundle; 2.0 no longer does."* The host's deprecation log becomes the exact migration inventory. The method
-returns those classes.
+returns those classes. Pending work is:
+
+- a scheduled insert or delete, and an entity orphan removal will delete;
+- a managed entity whose fields, to-one associations or collections differ from what was loaded (an object field
+  replaced by an equal one counts only where the installed ORM writes it), and the new entities a changed association
+  would cascade-persist;
+- the owner of a collection `clear()` scheduled for deletion (a many-to-many's join rows);
+- each entity's own class decides: a host subclass of a bundle-owned single-table root is reported, a bundle subclass
+  of a host root is not.
+
+Never reported: read-only entities (`readOnly: true`, or loaded read-only), and `DEFERRED_EXPLICIT` entities the host
+did not `persist()` again; Doctrine writes neither. Not seen: changes inside an object field modified in place (Doctrine
+does not write them either), and work a listener adds during the flush itself.
 
 It is read-only and cheap: no change-set computation, nothing flushed, cleared, closed or reset (REQ-RUNTIME-003);
 classes of the identity map inside the bundle's namespaces are skipped without looking at an entity. The Symfony
@@ -744,8 +768,8 @@ bundle flush never commits an application change and a failed bundle write close
 |---|---|
 | `PrivateManager\PrivateEntityManager` | Stable decorator over a private `EntityManager` created on the source manager's connection, configuration (own repository factory) and event manager; SQL filters mirrored on every call; replaced when closed, on another connection, or stale after a rollback; dropped by `reset()` (pending changes logged per class) |
 | `PrivateManager\PrivateManagerRegistry` | The `ManagerRegistry` the bundle's services get: the bundle's manager name and entity namespaces resolve to the private manager, everything else to the application's registry |
-| `PrivateManager\PrivateEntityManagerMiddleware` (+ driver, connection) | DBAL middleware telling the private manager how the connection's transactions end, so a rollback of a level it wrote or loaded in makes it stale (DBAL 4 only: `supported()`) |
-| `PrivateManager\DependencyInjection\PrivateEntityManagerPass` | Checks the source manager exists and tags the middleware `doctrine.middleware` for its connection (removed on DBAL 3) |
+| `PrivateManager\PrivateEntityManagerMiddleware` (+ driver, connection) | DBAL middleware (DBAL 3 and 4) telling the private manager how the connection's transactions end, so a rollback of a level it wrote or loaded in makes it stale |
+| `PrivateManager\DependencyInjection\PrivateEntityManagerPass` | Checks the source manager exists and tags the middleware `doctrine.middleware` for its connection |
 | `PrivateManager\PrivateManagerRepositoryFactory` | One factory per private manager (no per-instance repository leak in worker mode); DoctrineBundle service repositories still come from the source factory |
 
 Wiring in a bundle (Symfony):
@@ -765,5 +789,23 @@ The tables do not move and the connection is shared: a transaction the applicati
 includes the bundle's rows (its flushes then use savepoints). A rollback of a level the private manager did not write
 in, or of one of the bundle's own savepoints (the middleware's prefix), leaves it alone; one of a savepoint the
 application named itself counts as undoing everything pending. A stale manager with pending work is kept until that work
-is flushed or the boundary. On DBAL 3 the manager is only replaced when closed, on another connection, or at the
-boundary. The application's managers are never flushed, cleared, closed or reset by the kit.
+is flushed or the boundary. A connection closed or lost with its transaction open (`ConnectionRepairer`,
+`DoctrineTransactionRunner`, `WorkerConnectionHygiene`), and a rollback to a savepoint that fails (MySQL / MariaDB after
+a deadlock), make it stale too: no ghost entity of a rolled-back write, no silent 0-row `UPDATE`. The application's
+managers are never flushed, cleared, closed or reset by the kit.
+
+Things to know when moving a bundle onto the kit:
+
+- `PrivateManagerRegistry::getManager()` (no name, or the bundle's manager name) returns the **private** manager, also
+  when the bundle then works with an application entity: persisting an application entity through it inserts it
+  again (a duplicate key), and changes to application entities loaded through it are flushed by the bundle. Use
+  `getManagerForClass()`, which routes application classes to the application's manager, or keep application entities
+  out of the bundle's flushes.
+- A bundle entity that references an application entity needs a reference from the private manager
+  (`$private->getReference(App\User::class, $id)`), not the instance the application's manager holds: that one is
+  unknown to the private manager, which would try to insert it.
+- Service repositories (`ServiceEntityRepository`) take a `ManagerRegistry`: give them the `PrivateManagerRegistry`,
+  or they write through the application's manager.
+- DBAL 3 with `use_savepoints` off: a nested `rollBack()` runs no SQL, so DBAL marks the application's transaction
+  rollback-only; a failed private flush inside an application transaction then makes the application's commit fail.
+  Turn savepoints on (always on in DBAL 4).

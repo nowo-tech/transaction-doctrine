@@ -12,7 +12,8 @@ namespace Nowo\TransactionDoctrine\WriteUnit;
  * rolled back even when unrelated writes commit afterwards (the "phantom" case of an outbox released at the end of
  * the request).
  *
- * Immutable; a mark taken outside a transaction stands for an auto-committed write (always committed).
+ * Immutable; a mark taken outside a transaction stands for an auto-committed write (always committed). The mark holds
+ * the transaction's outcome itself, so it never expires however many transactions follow (audit WD-5).
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
@@ -20,18 +21,18 @@ namespace Nowo\TransactionDoctrine\WriteUnit;
 final readonly class TransactionMark
 {
     /**
-     * @param OutermostTransactions|null $transactions The connection's transactions; null outside a transaction
-     * @param int|null $serial The serial of the transaction that was open; null outside a transaction
+     * @param TransactionOutcome|null $transaction The transaction that was open; null outside a transaction
+     *
+     * @internal Taken with CommitLedger::mark()
      */
     public function __construct(
-        public ?OutermostTransactions $transactions = null,
-        public ?int $serial = null,
+        public ?TransactionOutcome $transaction = null,
     ) {
     }
 
     /** Whether the mark was taken outside any transaction (an auto-committed write). */
     public function isAutoCommit(): bool
     {
-        return !$this->transactions instanceof OutermostTransactions || $this->serial === null;
+        return !$this->transaction instanceof TransactionOutcome;
     }
 }

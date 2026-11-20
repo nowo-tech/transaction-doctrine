@@ -56,6 +56,30 @@ final class Td19DatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testAFailedStatementBeforeCommit(string $server): void
+    {
+        $this->ledger = new CommitLedger();
+        $this->boot($server);
+        $this->scenarioAFailedStatementBeforeCommit();
+    }
+
+    #[DataProvider('mysqlFamily')]
+    public function testMySqlEndsTheTransactionItself(string $server): void
+    {
+        $this->ledger = new CommitLedger();
+        $this->boot($server);
+        $this->scenarioMySqlEndsTheTransactionItself();
+    }
+
+    #[DataProvider('allServers')]
+    public function testALostCommitIsUnknown(string $server): void
+    {
+        $this->ledger = new CommitLedger();
+        $this->boot($server);
+        $this->scenarioALostCommitIsUnknown();
+    }
+
+    #[DataProvider('allServers')]
     public function testTheProbeReportsTheHostsPendingChangesOnce(string $server): void
     {
         $this->ledger = new CommitLedger();
@@ -69,6 +93,7 @@ final class Td19DatabaseTest extends DatabaseTestCase
         $this->ledger = new CommitLedger();
         $this->boot($server);
         $this->scenarioTheProbeSeesRemovalsAndToOneChanges();
+        $this->scenarioTheProbeMatchesWhatTheFlushWrites();
     }
 
     #[DataProvider('allServers')]
@@ -117,6 +142,7 @@ final class Td19DatabaseTest extends DatabaseTestCase
         $this->ledger = new CommitLedger();
         $this->boot($server);
         $this->scenarioARollbackMakesThePrivateManagerStale();
+        $this->scenarioAClosedConnectionMakesThePrivateManagerStale();
     }
 
     #[DataProvider('allServers')]

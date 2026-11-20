@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\PrivateManager\DependencyInjection;
 
-use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManagerMiddleware;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -20,8 +19,7 @@ use function sprintf;
 /**
  * Compiler pass of a bundle's private entity manager (1.9): checks that the source manager the bundle names exists,
  * and tags the bundle's PrivateEntityManagerMiddleware service `doctrine.middleware` for that manager's connection
- * only (zero-config: the default manager on the default connection). On DBAL 3 the middleware cannot hear rollbacks
- * (PrivateEntityManagerMiddleware::supported()): its definition is removed.
+ * only (zero-config: the default manager on the default connection), on DBAL 3 and 4.
  *
  * A bundle adds it once per private manager, for example:
  * `$container->addCompilerPass(new PrivateEntityManagerPass('my_bundle.private_em_middleware', 'my_bundle.entity_manager', 'my_bundle.doctrine.entity_manager'));`
@@ -36,14 +34,11 @@ final readonly class PrivateEntityManagerPass implements CompilerPassInterface
      * @param string|null $managerParameter The container parameter holding the source manager's name (missing or
      *                                      empty: `default`)
      * @param string $settingName The bundle setting named in errors (for example `my_bundle.doctrine.entity_manager`)
-     * @param bool|null $middlewareSupported Whether the middleware can hear rollbacks; null = detect
-     *                                       (PrivateEntityManagerMiddleware::supported(), DBAL 4)
      */
     public function __construct(
         private string $middlewareId,
         private ?string $managerParameter = null,
         private string $settingName = 'entity_manager',
-        private ?bool $middlewareSupported = null,
     ) {
     }
 
@@ -58,12 +53,6 @@ final readonly class PrivateEntityManagerPass implements CompilerPassInterface
         }
 
         if (!$container->hasDefinition($this->middlewareId)) {
-            return;
-        }
-
-        if (!($this->middlewareSupported ?? PrivateEntityManagerMiddleware::supported())) {
-            $container->removeDefinition($this->middlewareId);
-
             return;
         }
 

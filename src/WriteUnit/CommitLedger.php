@@ -70,26 +70,31 @@ final class CommitLedger
             return new TransactionMark();
         }
 
-        $transactions = $this->connections[$connection->getNativeConnection()] ?? null;
-        $serial       = $transactions?->current();
-        if (!$transactions instanceof OutermostTransactions || $serial === null) {
+        $transaction = ($this->connections[$connection->getNativeConnection()] ?? null)?->current();
+        if (!$transaction instanceof TransactionOutcome) {
             throw new LogicException('CommitLedger::mark() needs the connection to go through CommitTrackingMiddleware fed by this ledger (the bundle\'s commit_detection).');
         }
 
-        return new TransactionMark($transactions, $serial);
+        return new TransactionMark($transaction);
     }
 
     /**
      * How the marked transaction ended (1.9): true when it committed (or the mark was taken outside a transaction),
-     * false when it was rolled back, refused at commit or lost with its connection, null while it is still open (or
-     * when it is older than the last OutermostTransactions::KEEP transactions of that connection: unknown).
+     * false when it was rolled back, refused at commit, failed earlier on PostgreSQL, or lost with its connection
+     * before COMMIT; null while it is still open, or when the connection was lost during COMMIT (unknown: ended()
+     * tells the two apart).
      */
     public function outcome(TransactionMark $mark): ?bool
     {
-        if (!$mark->transactions instanceof OutermostTransactions || $mark->serial === null) {
-            return true;
-        }
+        return $mark->transaction instanceof TransactionOutcome ? $mark->transaction->committed() : true;
+    }
 
-        return $mark->transactions->outcome($mark->serial);
+    /**
+     * Whether the marked transaction has ended (1.9): committed, rolled back, or lost during COMMIT with an unknown
+     * outcome. A mark taken outside a transaction has always ended.
+     */
+    public function ended(TransactionMark $mark): bool
+    {
+        return !$mark->transaction instanceof TransactionOutcome || $mark->transaction->hasEnded();
     }
 }

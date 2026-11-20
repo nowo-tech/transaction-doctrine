@@ -18,7 +18,14 @@ use function strtolower;
  * released. A rollback to a savepoint the application named itself has no known level (null: treated as undoing
  * everything pending); one of the bundle's own savepoints (ownSavepointPrefix) is ignored.
  *
- * DBAL 4 signatures (see PrivateEntityManagerMiddleware::supported()).
+ * Audit WD-2: a connection released with its transaction still open (DBAL's close() from ConnectionRepairer,
+ * DoctrineTransactionRunner or WorkerConnectionHygiene, a lost connection) is rolled back by the server, and so is a
+ * transaction whose rollback to a savepoint failed (MySQL / MariaDB after a deadlock): both tell the listener that
+ * everything pending is gone (null).
+ *
+ * Works with DBAL 3 and 4 (audit WD-3), as Dbal\CommitTrackingConnection does: `exec(): int` and `void` transaction
+ * methods are valid against both; on DBAL 3 the driver wraps it in Dbal3\PrivateManagerCommitResultConnection, which
+ * hands the driver's commit() result back to DBAL's wrapper.
  *
  * @internal
  *
@@ -33,6 +40,9 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
 
     private const NESTED = '/^DOCTRINE(?:2_SAVEPOINT)?_?(\d+)$/i';
 
+    /** Whether a driver-level transaction is open on this connection. */
+    private bool $open = false;
+
     public function __construct(
         Connection $connection,
         private readonly TransactionLevelListenerInterface $listener,
@@ -41,18 +51,41 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
         parent::__construct($connection);
     }
 
+    public function beginTransaction(): void
+    {
+        parent::beginTransaction();
+        $this->open = true; // @igor-ignore — state of this driver connection, not of a request
+    }
+
     public function commit(): void
     {
+        $this->trackCommit(parent::commit(...));
+    }
+
+    /**
+     * Runs the given driver COMMIT and tells the listener how it ended. Dbal3\PrivateManagerCommitResultConnection
+     * calls it with the driver's own commit(), to hand DBAL 3's wrapper the driver's result.
+     *
+     * @param callable(): mixed $commit
+     *
+     * @return mixed What $commit returned (DBAL 3: the driver's bool; DBAL 4: null)
+     */
+    public function trackCommit(callable $commit): mixed
+    {
         try {
-            parent::commit();
+            $result = $commit();
         } catch (Throwable $exception) {
             // A refused COMMIT ends the transaction: what it held is gone.
+            $this->open = false; // @igor-ignore — state of this driver connection, not of a request
             $this->listener->connectionRolledBack(1);
 
             throw $exception;
         }
 
+        $this->open = false; // @igor-ignore — state of this driver connection, not of a request
         $this->listener->connectionCommitted();
+
+        return $result;
     }
 
     public function rollBack(): void
@@ -60,20 +93,42 @@ final class PrivateEntityManagerConnection extends AbstractConnectionMiddleware
         try {
             parent::rollBack();
         } finally {
+            $this->open = false; // @igor-ignore — state of this driver connection, not of a request
             $this->listener->connectionRolledBack(1);
         }
     }
 
-    public function exec(string $sql): int|string
+    public function exec(string $sql): int
     {
-        $result = parent::exec($sql);
-        if (preg_match(self::SAVEPOINT_ROLLBACK, $sql, $match) === 1 && !$this->isOwn($match[1])) {
+        $savepointRollback = preg_match(self::SAVEPOINT_ROLLBACK, $sql, $match) === 1;
+
+        try {
+            $result = (int) parent::exec($sql);
+        } catch (Throwable $exception) {
+            if ($savepointRollback) {
+                // Audit WD-2: the rollback to the savepoint failed (MySQL / MariaDB after a deadlock rolled the whole
+                // transaction back): nothing of it is left.
+                $this->listener->connectionRolledBack(null);
+            }
+
+            throw $exception;
+        }
+
+        if ($savepointRollback && !$this->isOwn($match[1])) {
             $this->listener->connectionRolledBack(preg_match(self::NESTED, $match[1], $level) === 1 ? (int) $level[1] : null);
         } elseif (preg_match(self::SAVEPOINT_RELEASE, $sql, $match) === 1 && preg_match(self::NESTED, $match[1], $level) === 1) {
             $this->listener->savepointReleased((int) $level[1]);
         }
 
         return $result;
+    }
+
+    /** Audit WD-2: a connection released with its transaction open (closed, lost): the server rolls it back. */
+    public function __destruct()
+    {
+        if ($this->open) {
+            $this->listener->connectionRolledBack(null);
+        }
     }
 
     private function isOwn(string $savepoint): bool

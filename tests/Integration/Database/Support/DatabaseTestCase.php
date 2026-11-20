@@ -89,6 +89,9 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_enum');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_derived');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_owner');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_item');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_shelf_counter');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_stamp');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
@@ -115,6 +118,12 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement("INSERT INTO ddrb_owner (id, label) VALUES (1, 'o1')");
         $this->connection->executeStatement('CREATE TABLE ddrb_derived (owner_id INT NOT NULL PRIMARY KEY, label VARCHAR(50) NOT NULL)');
         $this->connection->executeStatement("INSERT INTO ddrb_derived (owner_id, label) VALUES (1, 'd1')");
+        $this->connection->executeStatement('CREATE TABLE ddrb_item (id INT NOT NULL PRIMARY KEY, kind VARCHAR(10) NOT NULL, label VARCHAR(20) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_item (id, kind, label) VALUES (1, 'bundle', 'b'), (2, 'host', 'h')");
+        $this->connection->executeStatement('CREATE TABLE ddrb_shelf_counter (shelf_id INT NOT NULL, counter_id INT NOT NULL, PRIMARY KEY (shelf_id, counter_id))');
+        $this->connection->executeStatement('INSERT INTO ddrb_shelf_counter (shelf_id, counter_id) VALUES (1, 1)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_stamp (id INT NOT NULL PRIMARY KEY, stamped_at VARCHAR(19) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_stamp (id, stamped_at) VALUES (1, '2026-01-01 10:00:00')");
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }

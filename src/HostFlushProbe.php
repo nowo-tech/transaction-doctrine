@@ -4,14 +4,22 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine;
 
+use Closure;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Mapping\AssociationMapping;
+use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\PersistentCollection;
+use Doctrine\ORM\UnitOfWork;
 use Symfony\Contracts\Service\ResetInterface;
 
 use function array_key_exists;
 use function array_keys;
+use function is_array;
+use function is_iterable;
+use function is_object;
 use function ksort;
 use function ltrim;
+use function method_exists;
 use function rtrim;
 use function sprintf;
 use function str_starts_with;
@@ -72,23 +80,41 @@ final class HostFlushProbe implements ResetInterface
 
         $unitOfWork = $entityManager->getUnitOfWork();
         $foreign    = [];
-        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions()] as $entities) {
+        $note       = function (object $entity) use (&$foreign, $prefixes): void {
+            $class = $this->realClass($entity::class);
+            if (!$this->owned($class, $prefixes)) {
+                $foreign[$class] = true;
+            }
+        };
+
+        // Scheduled inserts and deletes, orphan removals (audit WD-6), and collections a clear() scheduled for deletion
+        // (audit WD-4: the owner's join rows go).
+        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions(), $this->orphanRemovals($unitOfWork)] as $entities) {
             foreach ($entities as $entity) {
-                $class = $this->realClass($entity::class);
-                if (!$this->owned($class, $prefixes)) {
-                    $foreign[$class] = true;
+                $note($entity);
+            }
+        }
+
+        foreach ([$unitOfWork->getScheduledCollectionDeletions(), $unitOfWork->getScheduledCollectionUpdates()] as $collections) {
+            foreach ($collections as $collection) {
+                $owner = $collection->getOwner();
+                if ($owner !== null) {
+                    $note($owner);
                 }
             }
         }
 
         foreach ($unitOfWork->getIdentityMap() as $rootClass => $entities) {
-            if ($this->owned($rootClass, $prefixes)) {
+            // A root inside the bundle's namespaces is skipped whole, unless a class outside them extends it (audit WD-6:
+            // a host subclass of a bundle-owned single-table root): then each entity's own class decides.
+            if ($this->owned($rootClass, $prefixes) && !$this->hasForeignSubclass($entityManager, $rootClass, $prefixes)) {
                 continue;
             }
 
             foreach ($entities as $entity) {
                 $class = $this->realClass($entity::class);
-                if (!isset($foreign[$class]) && !$unitOfWork->isUninitializedObject($entity) && $this->changed($entityManager, $entity)) {
+                if (!isset($foreign[$class]) && !$this->owned($class, $prefixes) && !$unitOfWork->isUninitializedObject($entity)
+                    && $this->changed($entityManager, $entity, $note)) {
                     $foreign[$class] = true;
                 }
             }
@@ -130,25 +156,118 @@ final class HostFlushProbe implements ResetInterface
     }
 
     /**
-     * Whether a managed entity differs from its loaded state: a field, a to-one association, or a to-many collection
-     * that is dirty or no longer the managed one. Reads only (no change-set computation).
+     * Whether a managed entity differs from its loaded state in a way the flush writes: a field, a to-one association,
+     * or a to-many collection that is dirty or no longer the managed one. A new entity a changed association would
+     * cascade-persist is noted too (audit WD-6). Read-only entities, and DEFERRED_EXPLICIT entities the host did not
+     * persist() again, are never written: not changed (audit WD-6). Reads only (no change-set computation).
+     *
+     * @param Closure(object): void $note
      */
-    private function changed(EntityManagerInterface $entityManager, object $entity): bool
+    private function changed(EntityManagerInterface $entityManager, object $entity, Closure $note): bool
     {
-        $metadata = $entityManager->getClassMetadata($entity::class);
-        $original = $entityManager->getUnitOfWork()->getOriginalEntityData($entity);
+        $unitOfWork = $entityManager->getUnitOfWork();
+        $metadata   = $entityManager->getClassMetadata($entity::class);
+        if ($metadata->isReadOnly || $unitOfWork->isReadOnly($entity)
+            || ($metadata->isChangeTrackingDeferredExplicit() && !$unitOfWork->isScheduledForDirtyCheck($entity))) {
+            return false;
+        }
 
+        $original = $unitOfWork->getOriginalEntityData($entity);
+        $changed  = false;
         foreach ($metadata->getFieldNames() as $field) {
-            if (array_key_exists($field, $original) && $metadata->getFieldValue($entity, $field) !== $original[$field]) {
-                return true;
+            if (array_key_exists($field, $original) && ($value = $metadata->getFieldValue($entity, $field)) !== $original[$field]
+                && !$this->sameDatabaseValue($unitOfWork, $metadata, $field, $original[$field], $value)) {
+                $changed = true;
+
+                break;
             }
         }
 
         foreach ($metadata->getAssociationNames() as $field) {
             $value = $metadata->getFieldValue($entity, $field);
-            if ($metadata->isCollectionValuedAssociation($field)
-                ? !$value instanceof PersistentCollection || $value->isDirty()
-                : array_key_exists($field, $original) && $value !== $original[$field]) {
+            if ($metadata->isCollectionValuedAssociation($field)) {
+                if ($value instanceof PersistentCollection && !$value->isDirty()) {
+                    continue;
+                }
+
+                $changed = true;
+                if ($value instanceof PersistentCollection || is_iterable($value)) {
+                    $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), $value instanceof PersistentCollection ? $value->unwrap() : $value, $note);
+                }
+            } elseif (array_key_exists($field, $original) && $value !== $original[$field]) {
+                $changed = true;
+                if (is_object($value)) {
+                    $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), [$value], $note);
+                }
+            }
+        }
+
+        return $changed;
+    }
+
+    /**
+     * Whether ORM itself skips this field as unchanged: in recent ORM 3 releases an object replaced by an equal one (a new
+     * DateTimeImmutable of the same instant, an equal value object) is compared by its database value, as the flush
+     * does (UnitOfWork::isSameConvertedDatabaseValue(), private: called as is). Older ORMs write it: changed.
+     *
+     * @param ClassMetadata<object> $metadata
+     */
+    private function sameDatabaseValue(UnitOfWork $unitOfWork, ClassMetadata $metadata, string $field, mixed $original, mixed $value): bool
+    {
+        // @phpstan-ignore function.alreadyNarrowedType (absent from older ORMs)
+        if (!is_object($original) || !is_object($value) || !method_exists($unitOfWork, 'isSameConvertedDatabaseValue')) {
+            return false;
+        }
+
+        /** @var bool $same */
+        $same = Closure::bind(static fn (UnitOfWork $unitOfWork): mixed => $unitOfWork->isSameConvertedDatabaseValue($metadata, $field, $original, $value), null, UnitOfWork::class)($unitOfWork);
+
+        return $same;
+    }
+
+    /**
+     * Notes the classes of the new entities an association with cascade persist would insert at the flush.
+     *
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
+     * @param iterable<mixed> $elements
+     * @param Closure(object): void $note
+     */
+    private function noteCascadedPersists(UnitOfWork $unitOfWork, array|object $mapping, iterable $elements, Closure $note): void
+    {
+        $cascade = is_array($mapping) ? ($mapping['isCascadePersist'] ?? false) : ($mapping instanceof AssociationMapping && $mapping->isCascadePersist()); // ORM 2 array, ORM 3 object
+        if ($cascade !== true) {
+            return;
+        }
+
+        foreach ($elements as $element) {
+            if (is_object($element) && $unitOfWork->getEntityState($element, UnitOfWork::STATE_NEW) === UnitOfWork::STATE_NEW) {
+                $note($element);
+            }
+        }
+    }
+
+    /**
+     * The entities orphan removal deletes at the flush (UnitOfWork keeps them private; read without changing them).
+     *
+     * @return array<object>
+     */
+    private function orphanRemovals(UnitOfWork $unitOfWork): array
+    {
+        /** @var array<object> $orphans */
+        $orphans = Closure::bind(static fn (UnitOfWork $unitOfWork): array => $unitOfWork->orphanRemovals, null, UnitOfWork::class)($unitOfWork);
+
+        return $orphans;
+    }
+
+    /**
+     * Whether a class outside the bundle's namespaces extends this root (a host subclass of a bundle-owned root).
+     *
+     * @param list<string> $prefixes
+     */
+    private function hasForeignSubclass(EntityManagerInterface $entityManager, string $rootClass, array $prefixes): bool
+    {
+        foreach ($entityManager->getClassMetadata($rootClass)->subClasses as $subclass) {
+            if (!$this->owned($subclass, $prefixes)) {
                 return true;
             }
         }

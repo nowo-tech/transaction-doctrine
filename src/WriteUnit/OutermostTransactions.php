@@ -4,17 +4,14 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\WriteUnit;
 
-use function array_key_first;
-use function count;
-
 /**
  * The outermost (driver-level) transactions of one database connection, as Dbal\CommitTrackingMiddleware sees them
- * (1.9): each BEGIN opens the next serial, and its COMMIT or ROLLBACK (or the connection going away with it open)
- * records how it ended. Savepoints are plain SQL inside the open transaction and never move the serial.
+ * (1.9): each BEGIN opens a new TransactionOutcome, and its COMMIT or ROLLBACK (or the connection going away with it
+ * open) records how it ended. Savepoints are plain SQL inside the open transaction and never open a new one.
  *
- * Bounded: the outcomes of the last KEEP transactions are kept, older ones are forgotten (an older mark then reads as
- * unknown). One instance per native connection, held by CommitLedger in a WeakMap and by the marks taken on it: it
- * holds no request, user or tenant data, so worker mode needs no reset.
+ * Only the open transaction is held here; an ended one lives on in the marks taken in it (audit WD-5: no cap, no
+ * history). One instance per native connection, held by CommitLedger in a WeakMap: it holds no request, user or
+ * tenant data, so worker mode needs no reset.
  *
  * @internal
  *
@@ -23,21 +20,13 @@ use function count;
  */
 final class OutermostTransactions
 {
-    /** How many ended transactions keep their outcome. */
-    public const KEEP = 256;
-
-    private int $serial = 0;
-
-    private bool $open = false;
-
-    /** @var array<int, bool> Ended transactions: serial => committed */
-    private array $outcomes = [];
+    private ?TransactionOutcome $open = null;
 
     /** A driver-level BEGIN succeeded. */
     public function begin(): void
     {
-        ++$this->serial; // @igor-ignore — state of one database connection, not of a request
-        $this->open = true; // @igor-ignore — state of one database connection, not of a request
+        $this->open?->end(false); // a BEGIN on top of an unseen end (cannot happen through DBAL): that one is over
+        $this->open = new TransactionOutcome(); // @igor-ignore — state of one database connection, not of a request
     }
 
     /** The open transaction committed. */
@@ -46,36 +35,27 @@ final class OutermostTransactions
         $this->end(true);
     }
 
-    /** The open transaction was rolled back, refused at commit, or lost with its connection. */
+    /** The open transaction was rolled back, refused at commit, or lost with its connection before COMMIT. */
     public function rolledBack(): void
     {
         $this->end(false);
     }
 
-    /** The serial of the open transaction, or null when none is open. */
-    public function current(): ?int
+    /** The connection was lost during COMMIT: whether the server committed is unknown (audit WD-7). */
+    public function lost(): void
     {
-        return $this->open ? $this->serial : null;
+        $this->end(null);
     }
 
-    /**
-     * How the transaction with this serial ended: true committed, false rolled back, null still open or forgotten.
-     */
-    public function outcome(int $serial): ?bool
+    /** The open transaction, or null when none is open. */
+    public function current(): ?TransactionOutcome
     {
-        return $this->outcomes[$serial] ?? null;
+        return $this->open;
     }
 
-    private function end(bool $committed): void
+    private function end(?bool $committed): void
     {
-        if (!$this->open) {
-            return;
-        }
-
-        $this->open                    = false; // @igor-ignore — state of one database connection, not of a request
-        $this->outcomes[$this->serial] = $committed; // @igor-ignore — bounded outcomes of one database connection
-        if (count($this->outcomes) > self::KEEP) {
-            unset($this->outcomes[array_key_first($this->outcomes)]); // @igor-ignore — bounded outcomes of one database connection
-        }
+        $this->open?->end($committed);
+        $this->open = null; // @igor-ignore — state of one database connection, not of a request
     }
 }

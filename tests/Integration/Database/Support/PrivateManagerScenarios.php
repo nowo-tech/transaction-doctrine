@@ -19,8 +19,12 @@ use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Host\BundleNote;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Host\OtherTenantFilter;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Host\TenantFilter;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
+use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingDriver;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use Psr\Log\AbstractLogger;
 use Psr\Log\LoggerInterface;
+use ReflectionMethod;
 use RuntimeException;
 use stdClass;
 use Stringable;
@@ -176,25 +180,13 @@ trait PrivateManagerScenarios
     }
 
     /**
-     * DBAL 4: the middleware tells the private manager how the connection's transactions end. A rollback of a level it
-     * wrote or loaded in makes its identity map stale (replaced at the next use, unless work is still pending); a
-     * commit, a rollback of a deeper level, or of the bundle's own savepoint, does not. DBAL 3: not supported.
+     * The middleware tells the private manager how the connection's transactions end (DBAL 3 and 4, audit WD-3). A
+     * rollback of a level it wrote or loaded in makes its identity map stale (replaced at the next use, unless work is
+     * still pending); a commit, a rollback of a deeper level, or of the bundle's own savepoint, does not.
      */
     private function scenarioARollbackMakesThePrivateManagerStale(): void
     {
-        if (!PrivateEntityManagerMiddleware::supported()) {
-            self::assertFalse(PrivateEntityManagerMiddleware::supported(), 'DBAL 3: replaced only when closed or at the boundary');
-
-            return;
-        }
-
-        $forwarder     = new ForwardingListener();
-        $configuration = new DbalConfiguration();
-        $configuration->setMiddlewares([new PrivateEntityManagerMiddleware($forwarder, 'bundle_')]);
-        $connection        = DriverManager::getConnection((new DsnParser(['mysql' => 'pdo_mysql', 'pgsql' => 'pdo_pgsql', 'sqlite' => 'pdo_sqlite']))->parse($this->url), $configuration);
-        $registry          = new TestManagerRegistry($connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
-        $private           = $this->privateManager(null, $registry);
-        $forwarder->target = $private;
+        [$connection, $private] = $this->trackedPrivateManager();
 
         try {
             // A write inside a transaction that is rolled back: stale, replaced at the next use.
@@ -245,6 +237,67 @@ trait PrivateManagerScenarios
             $connection->rollBack();
             self::assertTrue($private->isStale());
             self::assertSame($kept, $private->live(), 'pending work keeps the stale manager');
+        } finally {
+            $private->reset();
+            $connection->close();
+        }
+    }
+
+    /**
+     * A private manager on its own connection, wrapped by PrivateEntityManagerMiddleware (and commit tracking, so both
+     * middlewares are stacked as in an application). Savepoints on, also on DBAL 3.
+     *
+     * @return array{Connection, PrivateEntityManager}
+     */
+    private function trackedPrivateManager(): array
+    {
+        $forwarder     = new ForwardingListener();
+        $configuration = new DbalConfiguration();
+        $configuration->setMiddlewares([new PrivateEntityManagerMiddleware($forwarder, 'bundle_'), new CommitTrackingMiddleware(new CommitLedger())]);
+        $connection = DriverManager::getConnection((new DsnParser(['mysql' => 'pdo_mysql', 'pgsql' => 'pdo_pgsql', 'sqlite' => 'pdo_sqlite']))->parse($this->url), $configuration);
+        if (CommitTrackingDriver::driverCommitReturnsResult()) {
+            $connection->setNestTransactionsWithSavepoints(true); // DBAL 3 (always on in DBAL 4, where the call is deprecated)
+        }
+
+        $registry          = new TestManagerRegistry($connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
+        $private           = $this->privateManager(null, $registry);
+        $forwarder->target = $private;
+
+        return [$connection, $private];
+    }
+
+    /**
+     * Audit WD-2: the connection closed with a transaction open after a private flush (ConnectionRepairer,
+     * DoctrineTransactionRunner, WorkerConnectionHygiene): the server rolled the write back, so the private manager is
+     * stale and replaced: no ghost entity, no silent 0-row UPDATE. Audit WD-3: DBAL 3 too, and commit() still returns
+     * the driver's result there through both middlewares.
+     */
+    private function scenarioAClosedConnectionMakesThePrivateManagerStale(): void
+    {
+        [$connection, $private] = $this->trackedPrivateManager();
+
+        try {
+            $connection->beginTransaction();
+            $note = $private->find(BundleNote::class, 1);
+            self::assertInstanceOf(BundleNote::class, $note);
+            $note->counterId = 41;
+            $private->flush();
+            $first = $private->live();
+            $connection->close();
+            self::assertTrue($private->isStale(), 'the transaction went away with its connection');
+            self::assertNotSame($first, $private->live());
+
+            $again = $private->find(BundleNote::class, 1);
+            self::assertInstanceOf(BundleNote::class, $again);
+            self::assertNotSame(41, $again->counterId, 'no ghost of the rolled-back write');
+
+            $connection->beginTransaction();
+            $result = (new ReflectionMethod($connection, 'commit'))->invoke($connection);
+            if (CommitTrackingDriver::driverCommitReturnsResult()) {
+                self::assertTrue($result, 'DBAL 3: Connection::commit() still returns the driver\'s result');
+            }
+
+            self::assertFalse($private->isStale());
         } finally {
             $private->reset();
             $connection->close();

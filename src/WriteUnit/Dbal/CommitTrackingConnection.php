@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\WriteUnit\Dbal;
 
 use Doctrine\DBAL\Driver\Connection;
+use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Driver\Middleware\AbstractConnectionMiddleware;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
@@ -14,6 +15,7 @@ use Nowo\TransactionDoctrine\WriteUnit\OutermostTransactions;
 use PDO;
 use Throwable;
 
+use function in_array;
 use function is_object;
 use function preg_match;
 use function preg_replace;
@@ -31,7 +33,10 @@ use function str_contains;
  *
  * Since 1.9 it also tells the ledger how each outermost transaction of this connection ends (CommitLedger::mark() /
  * outcome()): BEGIN opens one, COMMIT commits it, ROLLBACK or a refused COMMIT rolls it back, and a connection that goes
- * away with a transaction open (closed, lost) rolls it back too, as the server does.
+ * away with a transaction open (closed, lost) rolls it back too, as the server does. Audit WD: a COMMIT after a failed
+ * statement on PostgreSQL is a rollback (the server's answer, reported as a success), a MySQL / MariaDB deadlock rolls
+ * the transaction back and an implicit-commit statement commits it at once, and a connection lost during COMMIT leaves
+ * the outcome unknown.
  *
  * Works with DBAL 3 and 4: the overridden signatures are valid against both (DBAL 3's untyped transaction methods
  * accept a `void` override; their boolean result was never read by DBAL's wrapper except as commit()'s own return).
@@ -63,7 +68,33 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     /** MySQL / MariaDB statements that commit implicitly, even inside a transaction. */
     private const IMPLICIT_COMMIT = '/^(?:CREATE|ALTER|DROP|TRUNCATE|RENAME|LOCK|UNLOCK|GRANT|REVOKE|BEGIN|START\s+TRANSACTION|ANALYZE|OPTIMIZE|REPAIR|INSTALL|UNINSTALL|FLUSH|LOAD\s+INDEX|CACHE\s+INDEX|SET\s+(?:PASSWORD|(?:SESSION\s+|@@(?:SESSION\.)?)?AUTOCOMMIT))\b/i';
 
+    /** A rollback to a savepoint: on PostgreSQL it ends the "aborted" state of the transaction (audit WD-1). */
+    private const SAVEPOINT_ROLLBACK = '/^ROLLBACK\s+TO\s+(?:SAVEPOINT\s+)?[A-Za-z0-9_"]+\s*;?\s*$/i';
+
+    /** Messages of a connection that went away (driver exceptions have no common class or code for it). */
+    private const CONNECTION_LOST = '/gone away|lost connection|server closed the connection|no connection to the server|SSL SYSCALL error|terminating connection|connection reset|broken pipe/i';
+
+    /** SQLSTATE of a lost connection: class 08, and PostgreSQL's administrator / crash shutdown. */
+    private const CONNECTION_LOST_STATE = '/^(?:08|57P0[123])/';
+
+    /** MySQL / MariaDB error codes of a lost connection (gone away, lost during query, disconnected by the server). */
+    private const CONNECTION_LOST_CODES = [2006, 2013, 4031];
+
+    /** MySQL / MariaDB ER_LOCK_DEADLOCK: the server has rolled the whole transaction back. */
+    private const MYSQL_DEADLOCK = 1213;
+
+    private const MYSQL_DEADLOCK_MESSAGE = '/\b1213\b.*Deadlock found/i';
+
     private bool $inTransaction = false;
+
+    /**
+     * PostgreSQL only: a statement of the open transaction failed, so the server will answer its COMMIT with a ROLLBACK
+     * (which PDO and pgsql report as a success) until a rollback to a savepoint taken before the failure (audit WD-1).
+     */
+    private bool $aborted = false;
+
+    /** Whether the server is PostgreSQL (read from the native connection the first time it matters). */
+    private ?bool $postgres = null;
 
     /** Whether the server is MySQL / MariaDB (read from the native connection the first time it matters). */
     private ?bool $mysql = null;
@@ -83,7 +114,14 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
 
     public function query(string $sql): Result
     {
-        $result = parent::query($sql);
+        try {
+            $result = parent::query($sql);
+        } catch (Throwable $failed) {
+            $this->failed($failed);
+
+            throw $failed;
+        }
+
         $this->executed($sql);
 
         return $result;
@@ -91,7 +129,14 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
 
     public function exec(string $sql): int
     {
-        $affected = (int) parent::exec($sql);
+        try {
+            $affected = (int) parent::exec($sql);
+        } catch (Throwable $failed) {
+            $this->failed($failed);
+
+            throw $failed;
+        }
+
         $this->executed($sql);
 
         return $affected;
@@ -101,6 +146,7 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     {
         parent::beginTransaction();
         $this->inTransaction = true; // @igor-ignore — state of this driver connection, not of a request
+        $this->aborted       = false; // @igor-ignore — state of this driver connection, not of a request
         $this->transactions()?->begin();
     }
 
@@ -121,14 +167,24 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     {
         // Audit TA2-1: a COMMIT the server refuses (a deferred constraint, PostgreSQL 40001 at commit) still ends the
         // transaction; a flag left true would stop counting the autocommit writes that follow.
+        // Audit WD-7: a connection lost during COMMIT leaves the outcome unknown (the server may have committed).
+        $aborted = $this->aborted;
         try {
             $result = $commit();
         } catch (Throwable $refused) {
-            $this->transactions?->rolledBack();
+            self::isConnectionLoss($refused) ? $this->transactions?->lost() : $this->transactions?->rolledBack();
 
             throw $refused;
         } finally {
             $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+            $this->aborted       = false; // @igor-ignore — state of this driver connection, not of a request
+        }
+
+        if ($aborted) {
+            // Audit WD-1: PostgreSQL answered this COMMIT with a ROLLBACK (a statement had failed): nothing committed.
+            $this->transactions?->rolledBack();
+
+            return $result;
         }
 
         $this->transactions?->committed();
@@ -140,8 +196,40 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     public function rollBack(): void
     {
         $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+        $this->aborted       = false; // @igor-ignore — state of this driver connection, not of a request
         $this->transactions?->rolledBack();
         parent::rollBack();
+    }
+
+    /**
+     * A statement of this connection failed (CommitTrackingStatement calls it too). On PostgreSQL a failure inside a
+     * transaction aborts it: the COMMIT that follows is a ROLLBACK (audit WD-1). On MySQL / MariaDB a deadlock rolls
+     * the whole transaction back at once: it is over, and what follows auto-commits until a new BEGIN.
+     */
+    public function failed(Throwable $failure): void
+    {
+        if (!$this->inTransaction) {
+            return;
+        }
+
+        if ($this->isPostgres()) {
+            $this->aborted = true; // @igor-ignore — state of this driver connection, not of a request
+        } elseif (($failure->getCode() === self::MYSQL_DEADLOCK || preg_match(self::MYSQL_DEADLOCK_MESSAGE, $failure->getMessage()) === 1) && $this->isMySql()) {
+            $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+            $this->transactions?->rolledBack();
+        }
+    }
+
+    /** Whether a driver failure means the connection went away (lost, killed, server shut down). */
+    public static function isConnectionLoss(Throwable $failure): bool
+    {
+        if ($failure instanceof DriverException) {
+            if (preg_match(self::CONNECTION_LOST_STATE, (string) $failure->getSQLState()) === 1 || in_array($failure->getCode(), self::CONNECTION_LOST_CODES, true)) {
+                return true;
+            }
+        }
+
+        return preg_match(self::CONNECTION_LOST, $failure->getMessage()) === 1;
     }
 
     /** A connection released with its transaction open (closed, lost): the server rolls that transaction back. */
@@ -173,10 +261,22 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     {
         $statement = (string) preg_replace(self::LEADING_COMMENTS, '', $sql, 1);
 
+        if ($this->inTransaction && preg_match(self::IMPLICIT_COMMIT, $statement) === 1 && $this->isMySql()) {
+            // Audit WD-7: MySQL / MariaDB committed the open transaction; what follows auto-commits until a new BEGIN.
+            $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+            $this->transactions?->committed();
+            $this->ledger->record();
+
+            return;
+        }
+
+        if ($this->inTransaction && $this->aborted && preg_match(self::SAVEPOINT_ROLLBACK, $statement) === 1) {
+            $this->aborted = false; // @igor-ignore — the savepoint was taken before the failure: the transaction lives on
+        }
+
         if ($this->isMultiStatement($sql)
             || (!$this->inTransaction && (preg_match(self::READ_ONLY, $statement) !== 1 || preg_match(self::EXPLAIN_ANALYZE, $statement) === 1
-                || preg_match(self::WRITING_WITH, $statement) === 1))
-            || ($this->inTransaction && preg_match(self::IMPLICIT_COMMIT, $statement) === 1 && $this->isMySql())) {
+                || preg_match(self::WRITING_WITH, $statement) === 1))) {
             $this->ledger->record();
         }
     }
@@ -185,6 +285,23 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     private function isMultiStatement(string $sql): bool
     {
         return str_contains(rtrim($sql, " \t\n\r;"), ';');
+    }
+
+    private function isPostgres(): bool
+    {
+        if ($this->postgres === null) {
+            try {
+                $native   = $this->getNativeConnection();
+                $postgres = ($native instanceof PDO && $native->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql')
+                    || (is_object($native) && $native::class === \PgSql\Connection::class);
+            } catch (Throwable) {
+                $postgres = false; // unknown server: a failed statement does not abort the transaction
+            }
+
+            $this->postgres = $postgres; // @igor-ignore — fact about this driver connection, not a request
+        }
+
+        return $this->postgres;
     }
 
     private function isMySql(): bool

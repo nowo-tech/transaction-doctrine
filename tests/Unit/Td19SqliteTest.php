@@ -60,6 +60,11 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioAClosedConnectionRollsItsTransactionBack();
     }
 
+    public function testAFailedStatementBeforeCommit(): void
+    {
+        $this->scenarioAFailedStatementBeforeCommit();
+    }
+
     public function testAnUntrackedTransactionCannotBeMarked(): void
     {
         $this->scenarioAnUntrackedTransactionCannotBeMarked();
@@ -73,6 +78,7 @@ final class Td19SqliteTest extends DatabaseTestCase
     public function testTheProbeSeesRemovalsAndToOneChanges(): void
     {
         $this->scenarioTheProbeSeesRemovalsAndToOneChanges();
+        $this->scenarioTheProbeMatchesWhatTheFlushWrites();
     }
 
     public function testThePrivateManagerNeverFlushesTheHostsWork(): void
@@ -103,6 +109,7 @@ final class Td19SqliteTest extends DatabaseTestCase
     public function testARollbackMakesThePrivateManagerStale(): void
     {
         $this->scenarioARollbackMakesThePrivateManagerStale();
+        $this->scenarioAClosedConnectionMakesThePrivateManagerStale();
     }
 
     public function testABoundaryNeverFails(): void

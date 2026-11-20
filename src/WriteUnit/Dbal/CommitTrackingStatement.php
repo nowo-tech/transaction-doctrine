@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\WriteUnit\Dbal;
 use Doctrine\DBAL\Driver\Middleware\AbstractStatementMiddleware;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
+use Throwable;
 
 use function func_get_args;
 
@@ -30,7 +31,14 @@ final class CommitTrackingStatement extends AbstractStatementMiddleware
      */
     public function execute($params = null): Result
     {
-        $result = parent::execute(...func_get_args());
+        try {
+            $result = parent::execute(...func_get_args());
+        } catch (Throwable $failed) {
+            $this->connection->failed($failed);
+
+            throw $failed;
+        }
+
         $this->connection->executed($this->sql);
 
         return $result;

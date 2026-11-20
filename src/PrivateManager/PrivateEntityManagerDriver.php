@@ -7,6 +7,9 @@ namespace Nowo\TransactionDoctrine\PrivateManager;
 use Doctrine\DBAL\Driver;
 use Doctrine\DBAL\Driver\Connection;
 use Doctrine\DBAL\Driver\Middleware\AbstractDriverMiddleware;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingDriver;
+use Nowo\TransactionDoctrine\WriteUnit\Dbal\Dbal3\PrivateManagerCommitResultConnection;
+use SensitiveParameter;
 
 /**
  * Driver of PrivateEntityManagerMiddleware: every connection it opens tells the listener how its transactions end.
@@ -26,8 +29,10 @@ final class PrivateEntityManagerDriver extends AbstractDriverMiddleware
         parent::__construct($driver);
     }
 
-    public function connect(array $params): Connection
+    public function connect(#[SensitiveParameter] array $params): Connection
     {
-        return new PrivateEntityManagerConnection(parent::connect($params), $this->listener, $this->ownSavepointPrefix);
+        $tracking = new PrivateEntityManagerConnection($connection = parent::connect($params), $this->listener, $this->ownSavepointPrefix);
+
+        return CommitTrackingDriver::driverCommitReturnsResult() ? new PrivateManagerCommitResultConnection($connection, $tracking) : $tracking;
     }
 }

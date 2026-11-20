@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit\PrivateManager;
 
+use ArrayObject;
 use Closure;
 use Doctrine\DBAL\Driver\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -16,7 +17,6 @@ use Doctrine\Persistence\ObjectManager;
 use Nowo\TransactionDoctrine\PrivateManager\DependencyInjection\PrivateEntityManagerPass;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManagerConnection;
-use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManagerMiddleware;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateManagerRegistry;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateManagerRepositoryFactory;
 use Nowo\TransactionDoctrine\PrivateManager\TransactionLevelListenerInterface;
@@ -49,12 +49,7 @@ final class PrivateManagerKitTest extends TestCase
 
         (new PrivateEntityManagerPass('my.middleware', 'my.manager', 'my.entity_manager'))->process($container);
 
-        if (!PrivateEntityManagerMiddleware::supported()) {
-            self::assertFalse($container->hasDefinition('my.middleware'), 'DBAL 3: removed');
-
-            return;
-        }
-
+        // DBAL 3 and 4 alike (audit WD-3: the middleware is no longer removed on DBAL 3).
         self::assertSame([['connection' => 'logs']], $container->getDefinition('my.middleware')->getTag('doctrine.middleware'));
     }
 
@@ -68,23 +63,13 @@ final class PrivateManagerKitTest extends TestCase
 
             $container->setDefinition('my.middleware', new Definition(stdClass::class));
             (new PrivateEntityManagerPass('my.middleware'))->process($container);
-            if (PrivateEntityManagerMiddleware::supported()) {
-                self::assertSame([['connection' => $default ?? 'default']], $container->getDefinition('my.middleware')->getTag('doctrine.middleware'));
-            }
+            self::assertSame([['connection' => $default ?? 'default']], $container->getDefinition('my.middleware')->getTag('doctrine.middleware'));
         }
 
         // No middleware definition (the bundle did not register one): nothing to do.
         $container = new ContainerBuilder();
         (new PrivateEntityManagerPass('missing'))->process($container);
         self::assertFalse($container->hasDefinition('missing'));
-    }
-
-    public function testThePassRemovesTheMiddlewareWhenRollbacksCannotBeHeard(): void
-    {
-        $container = new ContainerBuilder();
-        $container->setDefinition('my.middleware', new Definition(stdClass::class));
-        (new PrivateEntityManagerPass('my.middleware', null, 'entity_manager', false))->process($container);
-        self::assertFalse($container->hasDefinition('my.middleware'));
     }
 
     public function testThePassRefusesAnUnknownManager(): void
@@ -98,19 +83,8 @@ final class PrivateManagerKitTest extends TestCase
         (new PrivateEntityManagerPass('my.middleware', 'my.manager', 'my.entity_manager'))->process($container);
     }
 
-    public function testTheMiddlewareSupportMatchesTheDriverConnection(): void
-    {
-        self::assertSame((string) (new ReflectionMethod(Connection::class, 'rollBack'))->getReturnType() === 'void', PrivateEntityManagerMiddleware::supported());
-    }
-
     public function testARefusedCommitCountsAsARollback(): void
     {
-        if (!PrivateEntityManagerMiddleware::supported()) {
-            self::assertFalse(PrivateEntityManagerMiddleware::supported());
-
-            return;
-        }
-
         $driver = $this->createMock(Connection::class);
         $driver->method('commit')->willThrowException(new RuntimeException('refused'));
         $listener = $this->createMock(TransactionLevelListenerInterface::class);
@@ -119,6 +93,75 @@ final class PrivateManagerKitTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         (new PrivateEntityManagerConnection($driver, $listener))->commit();
+    }
+
+    /**
+     * Audit WD-2: a rollback to a savepoint that fails (MySQL / MariaDB after a deadlock rolled the whole transaction
+     * back) tells the listener everything pending is gone; another failing statement tells nothing.
+     */
+    public function testAFailedSavepointRollbackUndoesEverything(): void
+    {
+        $driver = $this->createMock(Connection::class);
+        $driver->method('exec')->willThrowException(new RuntimeException('SAVEPOINT DOCTRINE_2 does not exist'));
+        $listener = $this->createMock(TransactionLevelListenerInterface::class);
+        $listener->expects($this->once())->method('connectionRolledBack')->with(null);
+        $connection = new PrivateEntityManagerConnection($driver, $listener);
+
+        foreach (['UPDATE t SET a = 1', 'ROLLBACK TO SAVEPOINT DOCTRINE_2'] as $sql) {
+            try {
+                $connection->exec($sql);
+                self::fail('No exception.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('does not exist', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Audit WD-2: a driver connection released with its transaction open (DBAL's close(), a lost connection) tells the
+     * listener everything pending is gone; one released after its commit or rollback tells nothing more.
+     */
+    public function testAConnectionReleasedWithItsTransactionOpenRollsBack(): void
+    {
+        /** @var ArrayObject<int, string> $events */
+        $events   = new ArrayObject();
+        $listener = new class($events) implements TransactionLevelListenerInterface {
+            /** @param ArrayObject<int, string> $events */
+            public function __construct(private readonly ArrayObject $events)
+            {
+            }
+
+            public function connectionCommitted(): void
+            {
+                $this->events[] = 'committed';
+            }
+
+            public function connectionRolledBack(?int $level = 1): void
+            {
+                $this->events[] = 'rolledBack:' . ($level ?? 'all');
+            }
+
+            public function savepointReleased(int $level): void
+            {
+                $this->events[] = 'released:' . $level;
+            }
+        };
+
+        $connection = new PrivateEntityManagerConnection($this->createMock(Connection::class), $listener);
+        $connection->beginTransaction();
+        unset($connection);
+        self::assertSame(['rolledBack:all'], $events->getArrayCopy());
+
+        $driver = $this->createMock(Connection::class);
+        $driver->method('exec')->willReturn(1);
+        $connection = new PrivateEntityManagerConnection($driver, $listener);
+        $connection->beginTransaction();
+        $connection->commit();
+        $connection->beginTransaction();
+        $connection->rollBack();
+        self::assertSame(1, $connection->exec('RELEASE SAVEPOINT DOCTRINE_2'));
+        unset($connection);
+        self::assertSame(['rolledBack:all', 'committed', 'rolledBack:1', 'released:2'], $events->getArrayCopy());
     }
 
     public function testTheRegistryDelegatesEverythingElse(): void
