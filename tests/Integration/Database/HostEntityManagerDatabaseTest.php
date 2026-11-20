@@ -75,6 +75,13 @@ final class HostEntityManagerDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testAHostWithPendingOrphanRemovalsIsRefused(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAHostWithPendingOrphanRemovalsIsRefused();
+    }
+
+    #[DataProvider('allServers')]
     public function testAFieldTheRunChangedStaysWithANotice(string $server): void
     {
         $this->boot($server);

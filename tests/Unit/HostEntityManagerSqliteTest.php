@@ -74,6 +74,11 @@ final class HostEntityManagerSqliteTest extends DatabaseTestCase
         $this->scenarioAnUncomputableHostIsRefusedWithItsCause();
     }
 
+    public function testAHostWithPendingOrphanRemovalsIsRefused(): void
+    {
+        $this->scenarioAHostWithPendingOrphanRemovalsIsRefused();
+    }
+
     public function testAFieldTheRunChangedStaysWithANotice(): void
     {
         $this->scenarioAFieldTheRunChangedStaysWithANotice();

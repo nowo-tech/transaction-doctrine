@@ -148,7 +148,7 @@ final class HostFlushProbe implements ResetInterface
 
         // Scheduled inserts and deletes, orphan removals (audit WD-6), and collections a clear() scheduled for deletion
         // (audit WD-4: the owner's join rows go).
-        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions(), $this->orphanRemovals($unitOfWork)] as $entities) {
+        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions(), OrphanRemovals::pending($unitOfWork)] as $entities) {
             foreach ($entities as $entity) {
                 $note($entity);
             }
@@ -343,19 +343,6 @@ final class HostFlushProbe implements ResetInterface
                 $note($element);
             }
         }
-    }
-
-    /**
-     * The entities orphan removal deletes at the flush (UnitOfWork keeps them private; read without changing them).
-     *
-     * @return array<object>
-     */
-    private function orphanRemovals(UnitOfWork $unitOfWork): array
-    {
-        /** @var array<object> $orphans */
-        $orphans = Closure::bind(static fn (UnitOfWork $unitOfWork): array => $unitOfWork->orphanRemovals, null, UnitOfWork::class)($unitOfWork);
-
-        return $orphans;
     }
 
     /**
