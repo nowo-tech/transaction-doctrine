@@ -25,6 +25,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (1.9.0)
+
+- **Outermost-commit epoch per connection:** `CommitLedger::mark(Connection)` returns a `TransactionMark` for the
+  outermost transaction open on the connection, and `CommitLedger::outcome()` tells whether exactly that transaction
+  committed (true), was rolled back, refused at commit or lost with its connection (false), or is still open (null).
+  Fed by `Dbal\CommitTrackingMiddleware` (driver-level BEGIN / COMMIT / ROLLBACK, a connection released with its
+  transaction open); savepoints never count. It closes the "phantom" case where a bundle released its savepoint inside
+  a host transaction the host then rolled back, while unrelated writes moved `CommitLedger::count()` (Uptime's
+  audit-trail outbox, UserKit's savepoint case). Per native connection, weakly held, last 256 outcomes kept.
+- **Host-flush probe (REQ-ARCH-001 rule 6 deprecation layer):** `HostFlushProbe::beforeHostFlush($entityManager,
+  $bundleName, $ownNamespaces)`, called by a bundle right before it flushes the host's manager in host mode, triggers
+  one `E_USER_DEPRECATED` per bundle and foreign entity class per unit of work: "Your pending changes to App\X were
+  flushed by <Bundle>; 2.0 no longer does." Read-only (no change-set computation; never flushes, clears, closes or
+  resets the host's manager) and cheap on large identity maps (classes inside the bundle's namespaces are skipped
+  whole). Registered as `nowo_transaction_doctrine.host_flush_probe` (autowirable), reset at every boundary.
+- **Private entity manager kit (`PrivateManager\`):** `PrivateEntityManager`, `PrivateManagerRegistry`,
+  `PrivateEntityManagerMiddleware` (with its driver and connection; DBAL 4), `PrivateManagerRepositoryFactory`,
+  `TransactionLevelListenerInterface` and `DependencyInjection\PrivateEntityManagerPass`: the shared shape of the
+  private managers TaskBoard, Wiki, ChatKit and Vault copy, for a zero-config private manager on the application's
+  connection (ORM 2.20 and 3).
+- **`unit_of_work_boundaries`** (on by default): `Symfony\EventListener\UnitOfWorkBoundaryListener` resets the probe
+  and every service tagged `nowo_transaction_doctrine.private_entity_manager` (autoconfigured for
+  `PrivateEntityManager`) at the start and end of the main request, of a Messenger message and of the outermost console
+  command, kernel reset off included.
+
 ### Fixed
 
 - **The host's entities stay managed after a reset or a clear during a write unit (audits VQ5-1 / VQ5-2; the known

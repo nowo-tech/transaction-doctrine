@@ -1,0 +1,166 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Nowo\TransactionDoctrine;
+
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\PersistentCollection;
+use Symfony\Contracts\Service\ResetInterface;
+
+use function array_key_exists;
+use function array_keys;
+use function ksort;
+use function ltrim;
+use function rtrim;
+use function sprintf;
+use function str_starts_with;
+use function strrpos;
+use function substr;
+use function trigger_error;
+
+use const E_USER_DEPRECATED;
+
+/**
+ * Host-flush probe (1.9, REQ-ARCH-001 rule 6 deprecation layer, plan prerequisite P2): a bundle that still flushes the
+ * HOST's entity manager in host mode calls beforeHostFlush() right before that flush. Every entity class outside the
+ * bundle's own namespaces with pending work in the host's unit of work (a scheduled insert or delete, or a managed
+ * entity whose fields, to-one associations or collections differ from what was loaded) is work the bundle's flush
+ * writes on the host's behalf: in 2.0 the bundles write through a private manager and no longer do. One
+ * `E_USER_DEPRECATED` per bundle and foreign class per unit of work (request, message, command) says so:
+ * "your pending changes to App\X were flushed by <Bundle>; 2.0 no longer does". Collected by the host's deprecation log,
+ * it becomes the exact migration inventory.
+ *
+ * Read-only and cheap: it never computes change sets, never clears, closes or resets the host's manager
+ * (REQ-RUNTIME-003), reads the scheduled inserts / deletes Doctrine already holds, and compares loaded state only for the
+ * entity classes of the identity map that are outside the bundle's namespaces (classes inside them are skipped
+ * whole, without looking at a single entity).
+ *
+ * State: which (bundle, class) pairs already triggered in the current unit of work. The Symfony bundle registers one
+ * shared instance (SERVICE_ID, autowirable) and resets it at every boundary (UnitOfWorkBoundaryListener: main request,
+ * Messenger message, outermost console command; FrankenPHP worker with kernel reset off included) and at
+ * `kernel.reset`. Without the Symfony bundle, create one per unit of work, or call reset() at your boundaries.
+ *
+ * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
+ * @copyright 2026 Nowo.tech
+ */
+final class HostFlushProbe implements ResetInterface
+{
+    /** The service id the Symfony bundle registers (reset at every unit-of-work boundary). */
+    public const SERVICE_ID = 'nowo_transaction_doctrine.host_flush_probe';
+
+    /** @var array<string, true> "bundle|class" pairs already reported in this unit of work */
+    private array $reported = [];
+
+    /**
+     * Reports the host's pending changes the bundle's next flush of that manager would write, and returns their
+     * classes (sorted). Call it right before the bundle flushes the host's manager in host mode; it changes nothing.
+     *
+     * @param EntityManagerInterface $entityManager The host's manager the bundle is about to flush
+     * @param string $bundleName The bundle doing the flush, as shown in the message (for example "NowoWikiBundle")
+     * @param list<string> $ownNamespaces The bundle's entity namespaces (for example ["Nowo\WikiBundle\Entity"]): their
+     *                                    classes are never reported
+     *
+     * @return list<class-string> The foreign entity classes with pending work (reported or already reported)
+     */
+    public function beforeHostFlush(EntityManagerInterface $entityManager, string $bundleName, array $ownNamespaces): array
+    {
+        $prefixes = [];
+        foreach ($ownNamespaces as $namespace) {
+            $prefixes[] = rtrim(ltrim($namespace, '\\'), '\\') . '\\';
+        }
+
+        $unitOfWork = $entityManager->getUnitOfWork();
+        $foreign    = [];
+        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions()] as $entities) {
+            foreach ($entities as $entity) {
+                $class = $this->realClass($entity::class);
+                if (!$this->owned($class, $prefixes)) {
+                    $foreign[$class] = true;
+                }
+            }
+        }
+
+        foreach ($unitOfWork->getIdentityMap() as $rootClass => $entities) {
+            if ($this->owned($rootClass, $prefixes)) {
+                continue;
+            }
+
+            foreach ($entities as $entity) {
+                $class = $this->realClass($entity::class);
+                if (!isset($foreign[$class]) && !$unitOfWork->isUninitializedObject($entity) && $this->changed($entityManager, $entity)) {
+                    $foreign[$class] = true;
+                }
+            }
+        }
+
+        ksort($foreign);
+        foreach (array_keys($foreign) as $class) {
+            $key = $bundleName . '|' . $class;
+            if (!isset($this->reported[$key])) {
+                $this->reported[$key] = true; // @igor-ignore — per unit of work, emptied by reset() at every boundary
+                @trigger_error(sprintf('Your pending changes to %s were flushed by %s; 2.0 no longer does.', $class, $bundleName), E_USER_DEPRECATED);
+            }
+        }
+
+        /** @var list<class-string> $classes */
+        $classes = array_keys($foreign);
+
+        return $classes;
+    }
+
+    /** Forgets what was reported: a new unit of work (request, message, command) starts. */
+    public function reset(): void
+    {
+        $this->reported = []; // @igor-ignore — the boundary reset itself
+    }
+
+    /**
+     * @param list<string> $prefixes
+     */
+    private function owned(string $class, array $prefixes): bool
+    {
+        foreach ($prefixes as $prefix) {
+            if (str_starts_with($class, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a managed entity differs from its loaded state: a field, a to-one association, or a to-many collection
+     * that is dirty or no longer the managed one. Reads only (no change-set computation).
+     */
+    private function changed(EntityManagerInterface $entityManager, object $entity): bool
+    {
+        $metadata = $entityManager->getClassMetadata($entity::class);
+        $original = $entityManager->getUnitOfWork()->getOriginalEntityData($entity);
+
+        foreach ($metadata->getFieldNames() as $field) {
+            if (array_key_exists($field, $original) && $metadata->getFieldValue($entity, $field) !== $original[$field]) {
+                return true;
+            }
+        }
+
+        foreach ($metadata->getAssociationNames() as $field) {
+            $value = $metadata->getFieldValue($entity, $field);
+            if ($metadata->isCollectionValuedAssociation($field)
+                ? !$value instanceof PersistentCollection || $value->isDirty()
+                : array_key_exists($field, $original) && $value !== $original[$field]) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** The entity class of a Doctrine proxy class name (`…\__CG__\App\X` → `App\X`), or the class itself. */
+    private function realClass(string $class): string
+    {
+        $marker = strrpos($class, '\\__CG__\\');
+
+        return $marker !== false ? substr($class, $marker + 8) : $class;
+    }
+}

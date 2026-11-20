@@ -79,6 +79,12 @@
         "message": "Mutation of state 'touched' in AttemptObserver::start()",
         "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
       }
+    ],
+    "src/WriteUnit/Dbal/CommitTrackingConnection.php": [
+      {
+        "message": "Usage of __destruct() magic method is dangerous in Worker mode.",
+        "reason": "Per driver-connection object, never a shared service: DBAL releases it when the connection closes or is lost; the destructor only records that the open outermost transaction ended with it (the server rolls it back). Nothing request-scoped is kept (1.9, CommitLedger::outcome())."
+      }
     ]
   }
 }

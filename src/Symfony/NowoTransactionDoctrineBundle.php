@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony;
 
+use Nowo\TransactionDoctrine\HostFlushProbe;
+use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Nowo\TransactionDoctrine\Symfony\Conflict\TransientFailureConflictMapper;
 use Nowo\TransactionDoctrine\Symfony\EventListener\ConcurrencyConflictResponder;
 use Nowo\TransactionDoctrine\Symfony\EventListener\RequestCommitWatermark;
+use Nowo\TransactionDoctrine\Symfony\EventListener\UnitOfWorkBoundaryListener;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WorkerConnectionHygiene;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
@@ -27,6 +30,8 @@ use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigura
 use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Messenger\Event\WorkerMessageFailedEvent;
+use Symfony\Component\Messenger\Event\WorkerMessageHandledEvent;
+use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
 use Symfony\Component\Messenger\Middleware\MiddlewareInterface;
 
 use function array_map;
@@ -110,6 +115,8 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                     ->info('Count commits through a DBAL middleware (doctrine.middleware tag): a failed attempt that already committed is never replayed, and a conflict after a commit earlier in the same request answers CONFLICT_002 (request watermark taken at kernel.request).')->end()
                 ->booleanNode('worker_hygiene')->defaultTrue()
                     ->info('Reset closed entity managers per request and repair connections after a DBAL / ORM failure.')->end()
+                ->booleanNode('unit_of_work_boundaries')->defaultTrue()
+                    ->info('At every unit-of-work boundary (main request, Messenger message, outermost console command), reset the host-flush probe and every private entity manager (services tagged nowo_transaction_doctrine.private_entity_manager), kernel reset off included.')->end()
                 ->arrayNode('conflict_response')
                     ->info('The answer to a lock conflict the client may retry (409 + Retry-After by default; 503 keeps the 1.2 behaviour).')
                     ->canBeDisabled()
@@ -143,7 +150,7 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
      */
     public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
     {
-        /** @var array{max_attempts: int, backoff: array{floor_ms: int, base_ms: int, cap_ms: int}, replay_on: list<string>, controller_attribute: bool, controller_routes: list<string>, commit_detection: bool, messenger_middleware: bool, worker_hygiene: bool, conflict_response: array{enabled: bool, status: int, retry_after: int, template: string, json_error: string, json_path_prefixes: list<string>, map_transient_failures: bool}} $config */
+        /** @var array{max_attempts: int, backoff: array{floor_ms: int, base_ms: int, cap_ms: int}, replay_on: list<string>, controller_attribute: bool, controller_routes: list<string>, commit_detection: bool, messenger_middleware: bool, worker_hygiene: bool, unit_of_work_boundaries: bool, conflict_response: array{enabled: bool, status: int, retry_after: int, template: string, json_error: string, json_path_prefixes: list<string>, map_transient_failures: bool}} $config */
         $services = $container->services();
         $prefix   = self::ALIAS . '.';
         $conflict = $config['conflict_response'];
@@ -247,6 +254,26 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
                 ->tag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onTerminate', 'priority' => -4096]);
             if ($messenger) {
                 $hygiene->tag('kernel.event_listener', ['event' => WorkerMessageFailedEvent::class, 'method' => 'onMessageFailed', 'priority' => -4096]);
+            }
+        }
+
+        $services->set(HostFlushProbe::SERVICE_ID, HostFlushProbe::class)
+            ->tag('kernel.reset', ['method' => 'reset'])
+            ->public();
+        $services->alias(HostFlushProbe::class, HostFlushProbe::SERVICE_ID);
+        $builder->registerForAutoconfiguration(PrivateEntityManager::class)->addTag(PrivateEntityManager::TAG);
+        if ($config['unit_of_work_boundaries']) {
+            $boundaries = $services->set($prefix . 'unit_of_work_boundary_listener', UnitOfWorkBoundaryListener::class)
+                ->args([tagged_iterator(PrivateEntityManager::TAG), service(HostFlushProbe::SERVICE_ID)])
+                ->tag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onBoundary', 'priority' => 4095])
+                ->tag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary', 'priority' => -4095])
+                ->tag('kernel.event_listener', ['event' => 'console.command', 'method' => 'onCommand', 'priority' => 4095])
+                ->tag('kernel.event_listener', ['event' => 'console.terminate', 'method' => 'onCommandTerminate', 'priority' => -4095]);
+            if ($messenger) {
+                $boundaries
+                    ->tag('kernel.event_listener', ['event' => WorkerMessageReceivedEvent::class, 'method' => 'onBoundary', 'priority' => 4095])
+                    ->tag('kernel.event_listener', ['event' => WorkerMessageHandledEvent::class, 'method' => 'onBoundary', 'priority' => -4095])
+                    ->tag('kernel.event_listener', ['event' => WorkerMessageFailedEvent::class, 'method' => 'onBoundary', 'priority' => -4095]);
             }
         }
 

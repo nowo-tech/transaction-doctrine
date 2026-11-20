@@ -22,6 +22,9 @@
   - [The X-Conflict-Code header (1.6.0)](#the-x-conflict-code-header-160)
 - [How bundles comply with REQ-RUNTIME-003 using transaction-doctrine](#how-bundles-comply-with-req-runtime-003-using-transaction-doctrine)
 - [Worker connection hygiene](#worker-connection-hygiene)
+- [Outermost-commit epoch per connection (1.9)](#outermost-commit-epoch-per-connection-19)
+- [Host-flush probe (1.9)](#host-flush-probe-19)
+- [Private entity manager kit (1.9)](#private-entity-manager-kit-19)
 
 ## Run a unit of work
 
@@ -673,3 +676,89 @@ a connection that failed is checked before the next unit (FrankenPHP worker mode
 The only SQL it runs is that ping (the platform's dummy select), and only after a database failure. Every service of
 the bundle is stateless: the failure mark lives on the request, the wrapped controller on the event, and nothing of
 a request, user or tenant is kept on a service.
+
+## Outermost-commit epoch per connection (1.9)
+
+`CommitLedger::count()` tells that *something* committed since a mark, anywhere in the process. Code that defers work
+until "its" transaction commits (an outbox released at `kernel.terminate`, a cache mark held until commit) needs more:
+whether **that very transaction** committed. With commit tracking on (the bundle's `commit_detection`, or
+`Dbal\CommitTrackingMiddleware` fed by your ledger), mark the outermost transaction right after the write and read its
+outcome later:
+
+```php
+$mark = $ledger->mark($connection);   // inside the transaction that holds your write
+// … later, at the boundary …
+match ($ledger->outcome($mark)) {
+    true  => $this->release(),         // committed (or the write was auto-committed: marked outside a transaction)
+    false => $this->drop(),            // rolled back, refused at commit, or lost with its connection
+    null  => $this->keepWaiting(),     // still open (or older than the last 256 transactions of that connection)
+};
+```
+
+Each driver-level BEGIN opens the next transaction of that connection; its COMMIT, ROLLBACK, a refused COMMIT, or the
+connection going away with it open (closed, lost: the server rolls it back) records how it ended. Savepoints are plain
+SQL inside it and never count, so a bundle that released its savepoint inside a host transaction the host then rolled
+back reads `false`, however many unrelated writes commit afterwards (the "phantom" case of an audit-trail outbox).
+Marking inside a transaction the ledger did not see throws `LogicException`. Limits: a statement that commits
+implicitly inside a transaction (MySQL / MariaDB DDL) is not a COMMIT of the marked transaction; the outcome of a
+driver without a native connection object stays unknown. State is per native connection, held weakly and bounded: no
+reset is needed in worker mode.
+
+## Host-flush probe (1.9)
+
+REQ-ARCH-001 rule 6 moves the bundles' writes to a private entity manager in their 2.0. A host that relied on a bundle
+write flushing **its own** pending changes would silently lose them after the flip. A bundle that still flushes the
+host's manager (host mode) calls the probe right before that flush:
+
+```php
+public function __construct(private HostFlushProbe $probe /* nowo_transaction_doctrine.host_flush_probe */) {}
+
+$this->probe->beforeHostFlush($entityManager, 'NowoWikiBundle', ['Nowo\\WikiBundle\\Entity']);
+$entityManager->flush();
+```
+
+Every entity class outside the bundle's namespaces with pending work in the host's unit of work (a scheduled insert or
+delete, or a managed entity whose fields, to-one associations or collections differ from what was loaded) triggers one
+`E_USER_DEPRECATED` per bundle and class per unit of work: *"Your pending changes to App\\X were flushed by
+NowoWikiBundle; 2.0 no longer does."* The host's deprecation log becomes the exact migration inventory. The method
+returns those classes.
+
+It is read-only and cheap: no change-set computation, nothing flushed, cleared, closed or reset (REQ-RUNTIME-003);
+classes of the identity map inside the bundle's namespaces are skipped without looking at an entity. The Symfony
+bundle registers one shared instance (autowirable `HostFlushProbe`) and resets it at every unit-of-work boundary
+(`unit_of_work_boundaries`, on by default: main request, Messenger message, outermost console command; worker mode
+with kernel reset off included) and at `kernel.reset`. Without the bundle, create one per unit of work.
+
+## Private entity manager kit (1.9)
+
+The shared shape of the private managers TaskBoard, Wiki, ChatKit and Vault ship (REQ-ARCH-001 rule 6, zero-config):
+a bundle's repositories and services write through a manager of their own on the application's connection, so a
+bundle flush never commits an application change and a failed bundle write closes only that manager.
+
+| Piece | Role |
+|---|---|
+| `PrivateManager\PrivateEntityManager` | Stable decorator over a private `EntityManager` created on the source manager's connection, configuration (own repository factory) and event manager; SQL filters mirrored on every call; replaced when closed, on another connection, or stale after a rollback; dropped by `reset()` (pending changes logged per class) |
+| `PrivateManager\PrivateManagerRegistry` | The `ManagerRegistry` the bundle's services get: the bundle's manager name and entity namespaces resolve to the private manager, everything else to the application's registry |
+| `PrivateManager\PrivateEntityManagerMiddleware` (+ driver, connection) | DBAL middleware telling the private manager how the connection's transactions end, so a rollback of a level it wrote or loaded in makes it stale (DBAL 4 only: `supported()`) |
+| `PrivateManager\DependencyInjection\PrivateEntityManagerPass` | Checks the source manager exists and tags the middleware `doctrine.middleware` for its connection (removed on DBAL 3) |
+| `PrivateManager\PrivateManagerRepositoryFactory` | One factory per private manager (no per-instance repository leak in worker mode); DoctrineBundle service repositories still come from the source factory |
+
+Wiring in a bundle (Symfony):
+
+```php
+$services->set('my_bundle.private_entity_manager', PrivateEntityManager::class)
+    ->args([service('doctrine'), param('my_bundle.entity_manager'), MyEntity::class, 'NowoMyBundle', service('logger')->nullOnInvalid()])
+    ->tag(PrivateEntityManager::TAG);   // reset at every unit-of-work boundary by transaction-doctrine's bundle
+$services->set('my_bundle.registry', PrivateManagerRegistry::class)
+    ->args([service('doctrine'), service('my_bundle.private_entity_manager'), ['Nowo\\MyBundle\\Entity'], param('my_bundle.entity_manager')]);
+$services->set('my_bundle.private_entity_manager_middleware', PrivateEntityManagerMiddleware::class)
+    ->args([service('my_bundle.private_entity_manager'), 'nowo_my_bundle_']);
+// In the bundle's build(): $container->addCompilerPass(new PrivateEntityManagerPass('my_bundle.private_entity_manager_middleware', 'my_bundle.entity_manager', 'my_bundle.doctrine.entity_manager'));
+```
+
+The tables do not move and the connection is shared: a transaction the application opened around a bundle call
+includes the bundle's rows (its flushes then use savepoints). A rollback of a level the private manager did not write
+in, or of one of the bundle's own savepoints (the middleware's prefix), leaves it alone; one of a savepoint the
+application named itself counts as undoing everything pending. A stale manager with pending work is kept until that work
+is flushed or the boundary. On DBAL 3 the manager is only replaced when closed, on another connection, or at the
+boundary. The application's managers are never flushed, cleared, closed or reset by the kit.

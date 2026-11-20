@@ -10,9 +10,11 @@ use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
 use mysqli;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
+use Nowo\TransactionDoctrine\WriteUnit\OutermostTransactions;
 use PDO;
 use Throwable;
 
+use function is_object;
 use function preg_match;
 use function preg_replace;
 use function rtrim;
@@ -26,6 +28,10 @@ use function str_contains;
  * through the native PDO / mysqli handle, are not seen. Savepoints are plain SQL inside the open
  * transaction, so a nested commit is never counted; only the outermost COMMIT is. Its only state is that flag, which
  * belongs to the driver connection (a closed connection is replaced by a new instance).
+ *
+ * Since 1.9 it also tells the ledger how each outermost transaction of this connection ends (CommitLedger::mark() /
+ * outcome()): BEGIN opens one, COMMIT commits it, ROLLBACK or a refused COMMIT rolls it back, and a connection that goes
+ * away with a transaction open (closed, lost) rolls it back too, as the server does.
  *
  * Works with DBAL 3 and 4: the overridden signatures are valid against both (DBAL 3's untyped transaction methods
  * accept a `void` override; their boolean result was never read by DBAL's wrapper except as commit()'s own return).
@@ -62,6 +68,9 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     /** Whether the server is MySQL / MariaDB (read from the native connection the first time it matters). */
     private ?bool $mysql = null;
 
+    /** The outermost transactions of this connection in the ledger (resolved at the first BEGIN). */
+    private ?OutermostTransactions $transactions = null;
+
     public function __construct(Connection $connection, private readonly CommitLedger $ledger)
     {
         parent::__construct($connection);
@@ -92,6 +101,7 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     {
         parent::beginTransaction();
         $this->inTransaction = true; // @igor-ignore — state of this driver connection, not of a request
+        $this->transactions()?->begin();
     }
 
     public function commit(): void
@@ -113,10 +123,15 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
         // transaction; a flag left true would stop counting the autocommit writes that follow.
         try {
             $result = $commit();
+        } catch (Throwable $refused) {
+            $this->transactions?->rolledBack();
+
+            throw $refused;
         } finally {
             $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
         }
 
+        $this->transactions?->committed();
         $this->ledger->record();
 
         return $result;
@@ -125,7 +140,32 @@ final class CommitTrackingConnection extends AbstractConnectionMiddleware
     public function rollBack(): void
     {
         $this->inTransaction = false; // @igor-ignore — state of this driver connection, not of a request
+        $this->transactions?->rolledBack();
         parent::rollBack();
+    }
+
+    /** A connection released with its transaction open (closed, lost): the server rolls that transaction back. */
+    public function __destruct()
+    {
+        $this->transactions?->rolledBack();
+    }
+
+    /** This connection's entry in the ledger; null when the driver has no native connection object (a resource). */
+    private function transactions(): ?OutermostTransactions
+    {
+        if (!$this->transactions instanceof OutermostTransactions) {
+            try {
+                $native = $this->getNativeConnection();
+            } catch (Throwable) {
+                return null; // a driver without a native connection: the outcomes of its transactions stay unknown
+            }
+
+            if (is_object($native)) {
+                $this->transactions = $this->ledger->transactions($native); // @igor-ignore — this driver connection's entry in the ledger
+            }
+        }
+
+        return $this->transactions;
     }
 
     /** A statement of this connection ran successfully. */
