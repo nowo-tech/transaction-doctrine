@@ -18,6 +18,7 @@ use Throwable;
 
 use function array_key_exists;
 use function array_keys;
+use function get_debug_type;
 use function is_array;
 use function is_iterable;
 use function is_object;
@@ -56,7 +57,9 @@ use const E_USER_DEPRECATED;
  * Never breaks the caller's write (1.9.1, audit XA-3): a Throwable from the inspection (a broken proxy, an entity whose
  * state cannot be read) or from the deprecation itself (a host error handler that ignores `@` and throws on
  * E_USER_DEPRECATED) is caught; it is logged as a warning when a PSR logger is wired (the Symfony bundle wires the
- * `logger` service when there is one), otherwise swallowed. A failed inspection returns no classes.
+ * `logger` service when there is one), otherwise swallowed. The warning holds the bundle, the entity class (for a
+ * failed deprecation) and the failure's type (`exception_type`), never its message or trace (audit XB-2). A failed
+ * inspection returns no classes.
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
@@ -188,7 +191,8 @@ final class HostFlushProbe implements ResetInterface
     private function warn(string $message, string $bundleName, Throwable $throwable, ?string $class = null): void
     {
         try {
-            $this->logger?->warning($message, ['bundle' => $bundleName, 'class' => $class, 'exception' => $throwable]);
+            // Only the failure's type and the entity class: its message and trace may hold entity data (audit XB-2).
+            $this->logger?->warning($message, ['bundle' => $bundleName, 'class' => $class, 'exception_type' => get_debug_type($throwable)]);
         } catch (Throwable) {
             // The probe never breaks the caller's write, not even through its logger.
         }

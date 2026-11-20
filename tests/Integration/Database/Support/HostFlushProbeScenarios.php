@@ -261,7 +261,8 @@ trait HostFlushProbeScenarios
         self::assertSame(['warning', 'warning'], $logger->levels(), 'one warning per class, the next class still reported');
         self::assertSame(Card::class, $logger->records[0]['context']['class']);
         self::assertSame('TestBundle', $logger->records[0]['context']['bundle']);
-        self::assertInstanceOf(ErrorException::class, $logger->records[0]['context']['exception']);
+        self::assertSame(ErrorException::class, $logger->records[0]['context']['exception_type'], 'only the failure\'s type (audit XB-2)');
+        self::assertArrayNotHasKey('exception', $logger->records[0]['context'], 'never its message or trace');
         self::assertSame([], $this->deprecations(static fn (): array => $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE])), 'reported once all the same');
 
         // An inspection that throws (an entity whose class cannot be resolved, as a broken proxy).
@@ -272,7 +273,8 @@ trait HostFlushProbeScenarios
         self::assertSame([], $messages, 'nothing reported');
         self::assertSame(['warning'], $broken->levels());
         self::assertNull($broken->records[0]['context']['class']);
-        self::assertInstanceOf(RuntimeException::class, $broken->records[0]['context']['exception']);
+        self::assertSame(RuntimeException::class, $broken->records[0]['context']['exception_type']);
+        self::assertArrayNotHasKey('exception', $broken->records[0]['context']);
         self::assertSame([], (new HostFlushProbe())->beforeHostFlush($brokenManager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'no logger: swallowed');
         self::assertSame([], (new HostFlushProbe(new ThrowingLogger()))->beforeHostFlush($brokenManager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'a throwing logger: swallowed');
         self::assertSame([Card::class, Counter::class], (new HostFlushProbe())->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'the real manager still inspects');
