@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.8.2](#to-182)
 - [To 1.8.1](#to-181)
 - [To 1.8.0](#to-180)
 - [To 1.7.2](#to-172)
@@ -29,6 +30,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.8.2
+
+From **1.8.1**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 From **1.8.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change. After a write
 unit whose attempt's flush failed, whose manager host code reset, or whose attempt cleared the manager (or detached
