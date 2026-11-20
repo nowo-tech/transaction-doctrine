@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.8.2] - 2026-11-20](#182---2026-11-20)
 - [[1.8.1] - 2026-11-20](#181---2026-11-20)
 - [[1.8.0] - 2026-11-20](#180---2026-11-20)
 - [[1.7.2] - 2026-11-20](#172---2026-11-20)
@@ -64,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every service tagged `nowo_transaction_doctrine.private_entity_manager` (autoconfigured for
   `PrivateEntityManager`) at the start and end of the main request, of a Messenger message and of the outermost console
   command, kernel reset off included.
+
+## [1.8.2] - 2026-11-20
 
 ### Fixed
 
@@ -558,7 +561,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Requires `nowo-tech/transaction-contract ^1.0` and `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.
 
-[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.2...HEAD
+[1.8.2]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.2...v1.8.0
 [1.7.2]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.1...v1.7.2
