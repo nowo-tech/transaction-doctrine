@@ -8,7 +8,6 @@ use Closure;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
-use RuntimeException;
 use Throwable;
 
 use function array_combine;
@@ -384,31 +383,43 @@ final class KeptEntitiesRestorer
      * hints): fields, version, to-one associations and fresh to-many collections come back, with no cascade. Only
      * postLoad runs.
      *
-     * @throws RuntimeException When the database no longer has the row
+     * @return bool Whether the row was found (false: it is gone)
      */
-    private static function reload(EntityManagerInterface $manager, object $entity): void
+    private static function reload(EntityManagerInterface $manager, object $entity): bool
     {
         $unitOfWork = $manager->getUnitOfWork();
         $metadata   = $manager->getClassMetadata($entity::class);
         $criteria   = array_combine($metadata->getIdentifierFieldNames(), $unitOfWork->getEntityIdentifier($entity));
-        if ($unitOfWork->getEntityPersister($metadata->name)->load($criteria, $entity) === null) {
-            throw new RuntimeException('The row of a kept entity is gone.');
-        }
+
+        return $unitOfWork->getEntityPersister($metadata->name)->load($criteria, $entity) !== null;
     }
 
     /**
      * Reloads a kept entity, puts back its identifier from before the run (audit VQ6-4: ORM 2 swaps a backed-enum id
      * for its value) and checks its version (audit VQ6-2).
      *
-     * @return bool Whether it is restored: false on another version, or on a failed reload of a touched entity
+     * Only a row that is really gone (the reload found nothing) is forgiven for an entity the attempt did not touch:
+     * any other failure of the reload (a postLoad listener, a decryption failure, a lost connection) leaves the
+     * entity's state unknown, so the unit cannot be replayed (audit VQ7-1).
+     *
+     * @return bool Whether it is restored: false on another version, on a gone row of a touched entity, or on a reload
+     *              that failed
      */
     private static function reloadKept(EntityManagerInterface $manager, object $entity, AttemptObserver $attempt, int $oid, bool $touched, bool $forgetOnFailure = false): bool
     {
         $unitOfWork = $manager->getUnitOfWork();
 
         try {
-            self::reload($manager, $entity);
+            $found = self::reload($manager, $entity);
         } catch (Throwable) {
+            if ($forgetOnFailure) {
+                self::forget($unitOfWork, $entity);
+            }
+
+            return false;
+        }
+
+        if (!$found) {
             if ($forgetOnFailure) {
                 self::forget($unitOfWork, $entity);
             }
