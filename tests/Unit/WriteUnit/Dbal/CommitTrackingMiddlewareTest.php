@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\WriteUnit\Dbal;
 use Composer\InstalledVersions;
 use Doctrine\DBAL\Configuration;
 use Doctrine\DBAL\Driver;
+use Doctrine\DBAL\Driver\AbstractException;
 use Doctrine\DBAL\Driver\Connection as DriverConnection;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
@@ -17,11 +18,14 @@ use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingConnection;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingDriver;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
+use Nowo\TransactionDoctrine\WriteUnit\TransactionOutcome;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use RuntimeException;
+use stdClass;
 
+use function str_contains;
 use function str_starts_with;
 
 /**
@@ -109,11 +113,12 @@ final class CommitTrackingMiddlewareTest extends TestCase
         $connection->exec('EXPLAIN (BUFFERS true, analyse) DELETE FROM t');
         self::assertSame(4, $ledger->count());
 
+        foreach (['SET autocommit = 1', 'SET SESSION autocommit = 1', '/* c */ SET @@autocommit = 1', 'SET @@SESSION.autocommit = 1'] as $statement) {
+            $connection->beginTransaction();
+            $connection->exec($statement); // commits the transaction (audit WD-7: it is over)
+        }
+
         $connection->beginTransaction();
-        $connection->exec('SET autocommit = 1');
-        $connection->exec('SET SESSION autocommit = 1');
-        $connection->exec('/* c */ SET @@autocommit = 1');
-        $connection->exec('SET @@SESSION.autocommit = 1');
         $connection->exec('SET @@session.sql_mode = \'\'');
         self::assertSame(8, $ledger->count());
         $connection->rollBack();
@@ -235,22 +240,173 @@ final class CommitTrackingMiddlewareTest extends TestCase
         self::assertSame(2, $ledger->count(), 'The transaction is over: the autocommit write is counted.');
     }
 
-    private function connect(CommitLedger $ledger, string $server = 'pgsql'): DriverConnection
+    /**
+     * Audit WD-1: on PostgreSQL a statement that failed inside the transaction makes its COMMIT a ROLLBACK (reported as
+     * a success by the driver): the transaction reads as rolled back and nothing is counted, unless a rollback to a
+     * savepoint ended the failure. Other servers, and failures outside a transaction, are unaffected.
+     */
+    public function testAFailedStatementAbortsAPostgresTransaction(): void
     {
+        $ledger       = new CommitLedger();
+        $native       = null;
+        $connection   = $this->connect($ledger, 'pgsql', $native);
+        $transactions = $ledger->transactions($native);
+
+        $connection->beginTransaction();
+        $aborted = $transactions->current();
+        $this->fails(static fn (): int|string => $connection->exec('INSERT dup'));
+        $connection->commit();
+        self::assertFalse($aborted?->committed(), 'PostgreSQL answered the COMMIT with a ROLLBACK');
+        self::assertSame(0, $ledger->count());
+
+        $connection->beginTransaction();
+        $recovered = $transactions->current();
+        $connection->exec('SAVEPOINT DOCTRINE_2');
+        $this->fails(static fn (): Result => $connection->prepare('INSERT dup')->execute());
+        $connection->exec('ROLLBACK TO SAVEPOINT DOCTRINE_2');
+        $connection->commit();
+        self::assertTrue($recovered?->committed(), 'the savepoint rollback ended the failure');
+        self::assertSame(1, $ledger->count());
+
+        $connection->beginTransaction();
+        $rolledBack = $transactions->current();
+        $this->fails(static fn (): Result => $connection->query('SELECT dup'));
+        $connection->rollBack();
+        $connection->beginTransaction();
+        $connection->commit();
+        self::assertFalse($rolledBack?->committed());
+        self::assertSame(2, $ledger->count(), 'a new transaction starts clean');
+
+        $this->fails(static fn (): int|string => $connection->exec('INSERT dup')); // outside a transaction: nothing to abort
+        $connection->beginTransaction();
+        $connection->commit();
+        self::assertSame(3, $ledger->count());
+
+        $ledger     = new CommitLedger();
+        $connection = $this->connect($ledger, 'unknown');
+        $connection->beginTransaction();
+        $this->fails(static fn (): int|string => $connection->exec('INSERT dup'));
+        $connection->commit();
+        self::assertSame(1, $ledger->count(), 'an unknown server is not taken for PostgreSQL');
+
+        $ledger       = new CommitLedger();
+        $connection   = $this->connect($ledger, 'sqlite', $native);
+        $transactions = $ledger->transactions($native);
+        $connection->beginTransaction();
+        $kept = $transactions->current();
+        $this->fails(static fn (): int|string => $connection->exec('INSERT dup'));
+        $connection->commit();
+        self::assertTrue($kept?->committed(), 'only PostgreSQL aborts the transaction');
+    }
+
+    /**
+     * On MySQL / MariaDB a deadlock rolls the whole transaction back at once: it is over (what follows auto-commits).
+     * Audit WD-7: an implicit-commit statement (DDL) commits the open transaction.
+     */
+    public function testMySqlEndsTheTransactionOnDeadlockAndImplicitCommit(): void
+    {
+        $ledger       = new CommitLedger();
+        $native       = null;
+        $connection   = $this->connect($ledger, 'mysql', $native);
+        $transactions = $ledger->transactions($native);
+
+        $connection->beginTransaction();
+        $deadlocked = $transactions->current();
+        $this->fails(static fn (): int|string => $connection->exec('UPDATE deadlock'));
+        self::assertFalse($deadlocked?->committed());
+        self::assertNull($transactions->current());
+        $connection->exec('INSERT INTO t VALUES (1)');
+        self::assertSame(1, $ledger->count(), 'auto-committed after the deadlock');
+
+        $connection->beginTransaction();
+        $timedOut = $ledger->transactions($native)->current();
+        self::assertInstanceOf(TransactionOutcome::class, $timedOut);
+        $this->fails(static fn (): int|string => $connection->exec('UPDATE timeout')); // lock wait timeout: only the statement
+        self::assertFalse($timedOut->hasEnded());
+        $connection->exec('CREATE TABLE x (id INT)');
+        self::assertTrue($timedOut->committed(), 'DDL committed the transaction');
+        self::assertNull($transactions->current());
+        self::assertSame(2, $ledger->count());
+        $connection->exec('UPDATE t SET a = 1');
+        self::assertSame(3, $ledger->count(), 'what follows auto-commits');
+    }
+
+    /** Audit WD-7: a connection lost during COMMIT leaves the outcome unknown (null), not rolled back. */
+    public function testALostCommitHasAnUnknownOutcome(): void
+    {
+        $lost = [
+            new class('SQLSTATE[08006]: connection failure', '08006') extends AbstractException {
+            },
+            new class('server shut down', '57P01') extends AbstractException {
+            },
+            new class('MySQL error', 'HY000', 2013) extends AbstractException {
+            },
+            new RuntimeException('SQLSTATE[HY000]: General error: 2006 MySQL server has gone away'),
+            new RuntimeException('server closed the connection unexpectedly'),
+        ];
+        foreach ($lost as $failure) {
+            self::assertTrue(CommitTrackingConnection::isConnectionLoss($failure), $failure->getMessage());
+        }
+
+        foreach ([new RuntimeException('deferred unique violation'), new class('duplicate', '23505', 1062) extends AbstractException {
+        }] as $failure) {
+            self::assertFalse(CommitTrackingConnection::isConnectionLoss($failure), $failure->getMessage());
+        }
+
+        $ledger = new CommitLedger();
+        $driver = $this->createMock(NativeAwareDriverConnection::class);
+        $driver->method('getNativeConnection')->willReturn($native = new stdClass());
+        $driver->method('commit')->willThrowException($lost[0]);
+        $connection = new CommitTrackingConnection($driver, $ledger);
+        $connection->beginTransaction();
+        $transaction = $ledger->transactions($native)->current();
+
+        try {
+            $connection->commit();
+            self::fail('The commit passed.');
+        } catch (AbstractException) {
+        }
+
+        self::assertNull($transaction?->committed());
+        self::assertTrue($transaction?->hasEnded());
+        self::assertSame(0, $ledger->count());
+    }
+
+    /** @param callable(): mixed $call */
+    private function fails(callable $call): void
+    {
+        try {
+            $call();
+            self::fail('No failure.');
+        } catch (RuntimeException $failure) {
+            self::assertStringContainsString('failed', $failure->getMessage());
+        }
+    }
+
+    /** @param-out object $native */
+    private function connect(CommitLedger $ledger, string $server = 'pgsql', ?object &$native = null): DriverConnection
+    {
+        $fail = static function (string $sql): never {
+            throw str_contains($sql, 'deadlock') ? new RuntimeException('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; failed', 1213) : new RuntimeException('statement failed');
+        };
         $statement = $this->createMock(Statement::class);
         $statement->method('execute')->willReturn($this->createMock(Result::class));
+        $failing = $this->createMock(Statement::class);
+        $failing->method('execute')->willThrowException(new RuntimeException('statement failed'));
         $inner = $this->createMock(NativeAwareDriverConnection::class);
-        $inner->method('query')->willReturn($this->createMock(Result::class));
-        $inner->method('exec')->willReturn(1);
-        $inner->method('prepare')->willReturn($statement);
+        $inner->method('query')->willReturnCallback(fn (string $sql): Result => str_contains($sql, 'dup') ? $fail($sql) : $this->createMock(Result::class));
+        $inner->method('exec')->willReturnCallback(static fn (string $sql): int => str_contains($sql, 'dup') || str_contains($sql, 'deadlock') || str_contains($sql, 'timeout') ? $fail($sql) : 1);
+        $inner->method('prepare')->willReturnCallback(static fn (string $sql): Statement => str_contains($sql, 'dup') ? $failing : $statement);
         if ($server === 'unknown') {
             $inner->method('getNativeConnection')->willThrowException(new RuntimeException('no native connection'));
+            $native = new stdClass();
         } elseif ($server === 'mysqli') {
-            $inner->method('getNativeConnection')->willReturn($this->createStub(mysqli::class));
+            $inner->method('getNativeConnection')->willReturn($native = $this->createStub(mysqli::class));
         } else {
             $pdo = $this->createMock(PDO::class);
-            $pdo->expects($this->atMost(1))->method('getAttribute')->with(PDO::ATTR_DRIVER_NAME)->willReturn($server);
+            $pdo->method('getAttribute')->with(PDO::ATTR_DRIVER_NAME)->willReturn($server);
             $inner->method('getNativeConnection')->willReturn($pdo);
+            $native = $pdo;
         }
         $driver = $this->createMock(Driver::class);
         $driver->method('connect')->willReturn($inner);

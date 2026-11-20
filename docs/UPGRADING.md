@@ -31,6 +31,19 @@
 
 ## Unreleased
 
+### To 1.9.0
+
+`composer update nowo-tech/transaction-doctrine`. Additive only: no signature or default behaviour of earlier APIs
+changes. New: `CommitLedger::mark()` / `outcome()` (per-connection outermost-commit epoch), `HostFlushProbe` (the
+REQ-ARCH-001 rule 6 deprecation layer for bundles that flush the host's manager), and the `PrivateManager\` kit (see
+USAGE). With the Symfony bundle, `unit_of_work_boundaries` (on by default) registers a listener that resets the probe
+and the tagged private managers at every boundary; set it to `false` if your bundle resets its own private manager and
+you do not use the probe. `CommitLedger` gained a constructor (no arguments): code that extends it is not possible (it
+is final), so nothing changes for callers. One behaviour of commit tracking moves on MySQL / MariaDB: after a deadlock or a
+statement that commits implicitly (DDL) inside a transaction, the writes that follow are counted in
+`CommitLedger::count()` as the auto-committed writes they are, so a write unit may give up a replay it would have tried
+before (never the other way round).
+
 ## To 1.8.2
 
 From **1.8.1**:

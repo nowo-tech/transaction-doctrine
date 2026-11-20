@@ -26,6 +26,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (1.9.0)
+
+- **Outermost-commit epoch per connection:** `CommitLedger::mark(Connection)` returns a `TransactionMark` for the
+  outermost transaction open on the connection, and `CommitLedger::outcome()` tells whether exactly that transaction
+  committed (true), was rolled back, refused at commit or lost with its connection before COMMIT (false), or is still
+  open or was lost during COMMIT (null; `CommitLedger::ended()` tells the two apart). Fed by
+  `Dbal\CommitTrackingMiddleware` (driver-level BEGIN / COMMIT / ROLLBACK, a connection released with its transaction
+  open); savepoints never count. It closes the "phantom" case where a bundle released its savepoint inside a host
+  transaction the host then rolled back, while unrelated writes moved `CommitLedger::count()` (Uptime's audit-trail
+  outbox, UserKit's savepoint case). Server behaviour followed (audit WD): a COMMIT after a failed statement on
+  PostgreSQL is a rollback (false) unless a savepoint rollback ended the failure; a MySQL / MariaDB deadlock rolls the
+  transaction back and an implicit-commit statement (DDL) commits it, at once (a mark taken after that, while DBAL still
+  counts the transaction open, stands for an auto-committed write). Each mark holds its transaction's outcome,
+  so it is never forgotten however many transactions follow; the ledger keeps only the open transaction per native
+  connection, weakly.
+- **Host-flush probe (REQ-ARCH-001 rule 6 deprecation layer):** `HostFlushProbe::beforeHostFlush($entityManager,
+  $bundleName, $ownNamespaces)`, called by a bundle right before it flushes the host's manager in host mode, triggers
+  one `E_USER_DEPRECATED` per bundle and foreign entity class per unit of work: "Your pending changes to App\X were
+  flushed by <Bundle>; 2.0 no longer does." It sees scheduled inserts and deletes, orphan removals, changed fields,
+  to-ones and collections, entities a changed association would cascade-persist, and collections `clear()` scheduled
+  for deletion; each entity's own class decides (a host subclass of a bundle-owned root is reported); read-only and
+  unpersisted `DEFERRED_EXPLICIT` entities are not (Doctrine writes neither). Read-only (no change-set computation;
+  never flushes, clears, closes or resets the host's manager) and cheap on large identity maps (roots inside the
+  bundle's namespaces are skipped whole). Registered as `nowo_transaction_doctrine.host_flush_probe` (autowirable),
+  reset at every boundary.
+- **Private entity manager kit (`PrivateManager\`):** `PrivateEntityManager`, `PrivateManagerRegistry`,
+  `PrivateEntityManagerMiddleware` (with its driver and connection; DBAL 3 and 4), `PrivateManagerRepositoryFactory`,
+  `TransactionLevelListenerInterface` and `DependencyInjection\PrivateEntityManagerPass`: the shared shape of the
+  private managers TaskBoard, Wiki, ChatKit and Vault copy, for a zero-config private manager on the application's
+  connection (ORM 2.20 and 3). The private manager goes stale after a rollback of a level it wrote or loaded in, a
+  connection closed or lost with its transaction open, a failed rollback to a savepoint, or a PostgreSQL COMMIT after a
+  failed statement (the server's ROLLBACK).
+- **`CommitLedger::count()` on MySQL / MariaDB:** after a deadlock or an implicit-commit statement (DDL) inside a
+  transaction, the writes that follow are counted as the auto-committed writes they are (before, they were taken for
+  part of the transaction until its COMMIT or ROLLBACK). Counting more only makes a write unit give up a replay sooner.
+- **`unit_of_work_boundaries`** (on by default): `Symfony\EventListener\UnitOfWorkBoundaryListener` resets the probe
+  and every service tagged `nowo_transaction_doctrine.private_entity_manager` (autoconfigured for
+  `PrivateEntityManager`) at the start and end of the main request, of a Messenger message and of the outermost console
+  command, kernel reset off included.
+
 ## [1.8.2] - 2026-11-20
 
 ### Fixed
