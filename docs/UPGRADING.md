@@ -33,8 +33,13 @@
 From **1.8.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change. After a write
 unit whose attempt's flush failed, whose manager host code reset, or whose attempt cleared the manager (or detached
 every host entity), the host's entities from before the unit are managed again and reloaded, so writes made to them in
-the replay are flushed (1.8.1 and earlier: silently ignored). A host entity whose row is gone by then ends the unit with
-409 `CONFLICT_001`.
+the replay are flushed (1.8.1 and earlier: silently ignored), uninitialised proxies the host holds included. A host
+entity the attempt touched whose row is gone by then, or a versioned host entity that someone else committed a new
+version of since `run()` started, ends the unit with 409 `CONFLICT_001` (before, the version case overwrote the other
+commit). Re-attached entities are reloaded: `postLoad` listeners run for them, mapped fields, version and associations
+come back from the database, transient (unmapped) state is not preserved (a re-bound proxy starts from its class
+defaults), in-memory edits to read-only entities are reverted, and held collection objects are replaced by fresh ones
+(re-read them from the entity).
 
 ## To 1.8.1
 

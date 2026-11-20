@@ -240,8 +240,73 @@ final class RepairSqliteTest extends DatabaseTestCase
         $this->scenarioAReattachWithoutARowStopsTheReplay();
     }
 
-    public function testAnUninitialisedProxyIsNotReattached(): void
+    public function testAnUninitialisedProxyIsRegisteredAgain(): void
     {
-        $this->scenarioAnUninitialisedProxyIsNotReattached();
+        $this->scenarioAnUninitialisedProxyIsRegisteredAgain();
+    }
+
+    public function testABackedEnumIdentifierSurvivesTheReplay(): void
+    {
+        $this->scenarioABackedEnumIdentifierSurvivesTheReplay();
+    }
+
+    public function testADerivedIdentitysOwnerIsReused(): void
+    {
+        $this->scenarioADerivedIdentitysOwnerIsReused();
+    }
+
+    public function testAConcurrentVersionStopsTheReplayOnTouch(): void
+    {
+        $this->scenarioAConcurrentVersionStopsTheReplay('touch');
+    }
+
+    public function testAConcurrentVersionStopsTheReplayOnClear(): void
+    {
+        $this->scenarioAConcurrentVersionStopsTheReplay('clear');
+    }
+
+    public function testAConcurrentVersionStopsTheReplayOnReset(): void
+    {
+        $this->scenarioAConcurrentVersionStopsTheReplay('reset');
+    }
+
+    public function testADecoratedManagersFlushIsReloaded(): void
+    {
+        $this->scenarioADecoratedManagersFlushIsReloaded();
+    }
+
+    public function testADecoratedManagerResetInPlaceThenAFlushedWrite(): void
+    {
+        $this->scenarioADecoratedManagerResetInPlaceThenAFlushedWrite();
+    }
+
+    public function testAHeldProxyIsWrittenAfterAClear(): void
+    {
+        $this->scenarioAHeldProxyIsWrittenAfterAClear();
+    }
+
+    public function testAHeldProxyIsWrittenAfterAReset(): void
+    {
+        $this->scenarioAHeldProxyIsWrittenAfterAReset();
+    }
+
+    public function testAStaleUntouchedEntityDoesNotStopAReattachOnClear(): void
+    {
+        $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('clear');
+    }
+
+    public function testAStaleUntouchedEntityDoesNotStopAReattachOnReset(): void
+    {
+        $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('reset');
+    }
+
+    public function testAReattachRefusesWhatItCannotManageAgain(): void
+    {
+        $this->scenarioAReattachRefusesWhatItCannotManageAgain();
+    }
+
+    public function testAFlushTimeDeleteIsReattached(): void
+    {
+        $this->scenarioAFlushTimeDeleteIsReattached();
     }
 }

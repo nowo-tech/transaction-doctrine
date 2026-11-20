@@ -299,9 +299,100 @@ final class RepairDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
-    public function testAnUninitialisedProxyIsNotReattached(string $server): void
+    public function testAnUninitialisedProxyIsRegisteredAgain(string $server): void
     {
         $this->boot($server);
-        $this->scenarioAnUninitialisedProxyIsNotReattached();
+        $this->scenarioAnUninitialisedProxyIsRegisteredAgain();
+    }
+
+    #[DataProvider('allServers')]
+    public function testABackedEnumIdentifierSurvivesTheReplay(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioABackedEnumIdentifierSurvivesTheReplay();
+    }
+
+    #[DataProvider('allServers')]
+    public function testADerivedIdentitysOwnerIsReused(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADerivedIdentitysOwnerIsReused();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAConcurrentVersionStopsTheReplayOnTouch(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAConcurrentVersionStopsTheReplay('touch');
+    }
+
+    #[DataProvider('allServers')]
+    public function testAConcurrentVersionStopsTheReplayOnClear(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAConcurrentVersionStopsTheReplay('clear');
+    }
+
+    #[DataProvider('allServers')]
+    public function testAConcurrentVersionStopsTheReplayOnReset(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAConcurrentVersionStopsTheReplay('reset');
+    }
+
+    #[DataProvider('allServers')]
+    public function testADecoratedManagersFlushIsReloaded(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADecoratedManagersFlushIsReloaded();
+    }
+
+    #[DataProvider('allServers')]
+    public function testADecoratedManagerResetInPlaceThenAFlushedWrite(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADecoratedManagerResetInPlaceThenAFlushedWrite();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAHeldProxyIsWrittenAfterAClear(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAHeldProxyIsWrittenAfterAClear();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAHeldProxyIsWrittenAfterAReset(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAHeldProxyIsWrittenAfterAReset();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAStaleUntouchedEntityDoesNotStopAReattachOnClear(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('clear');
+    }
+
+    #[DataProvider('allServers')]
+    public function testAStaleUntouchedEntityDoesNotStopAReattachOnReset(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('reset');
+    }
+
+    #[DataProvider('allServers')]
+    public function testAReattachRefusesWhatItCannotManageAgain(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAReattachRefusesWhatItCannotManageAgain();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFlushTimeDeleteIsReattached(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushTimeDeleteIsReattached();
     }
 }

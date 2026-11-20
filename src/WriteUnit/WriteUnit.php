@@ -437,7 +437,7 @@ final readonly class WriteUnit implements WriteUnitInterface
 
             if ($follow && ($manager !== $observer->manager || $manager->getUnitOfWork() !== $observer->unitOfWork)) {
                 $observer->manager->getEventManager()->removeEventListener([Events::postLoad, Events::onFlush], $observer);
-                $kept[$name] = new AttemptObserver($manager, $observer->kept, $observer->identifiers);
+                $kept[$name] = new AttemptObserver($manager, $observer->kept, $observer->identifiers, $observer->versions);
                 $manager->getEventManager()->addEventListener([Events::postLoad, Events::onFlush], $kept[$name]); // @igor-ignore — per-run observer, removed in run()'s finally
             }
         }

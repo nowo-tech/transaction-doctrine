@@ -9,6 +9,7 @@ use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\Event\LifecycleEventArgs;
 use Doctrine\Persistence\ObjectManager;
+use Throwable;
 
 use function spl_object_id;
 
@@ -55,26 +56,48 @@ final class AttemptObserver
     public readonly array $identifiers;
 
     /**
+     * The version of each initialised, versioned kept entity when the run started, by spl_object_id (1.8.2, audit
+     * VQ6-2): a reload that finds another version means someone committed in between, which the host's own flush would
+     * have refused (OptimisticLockException); the unit then gives up instead of overwriting it.
+     *
+     * @var array<int, mixed>
+     */
+    public readonly array $versions;
+
+    /**
      * @param EntityManagerInterface $manager The manager observed
      * @param array<int, object> $kept The entities it managed before the first attempt, by spl_object_id
      * @param array<int, array<string, mixed>>|null $identifiers Their identifiers; null = read from the manager now
+     * @param array<int, mixed>|null $versions Their versions; null = read from the entities now
      */
     public function __construct(
         public readonly EntityManagerInterface $manager,
         public readonly array $kept,
         ?array $identifiers = null,
+        ?array $versions = null,
     ) {
         $this->unitOfWork = $manager->getUnitOfWork();
-        if ($identifiers === null) {
+        if ($identifiers === null || $versions === null) {
             $identifiers = [];
+            $versions    = [];
             foreach ($kept as $oid => $entity) {
-                /** @var array<string, mixed> $identifier */
-                $identifier        = $this->unitOfWork->getEntityIdentifier($entity);
-                $identifiers[$oid] = $identifier;
+                try {
+                    /** @var array<string, mixed> $identifier */
+                    $identifier        = $this->unitOfWork->getEntityIdentifier($entity);
+                    $identifiers[$oid] = $identifier;
+                    $metadata          = $manager->getClassMetadata($entity::class);
+                    if ($metadata->isVersioned && $metadata->versionField !== null && !$this->unitOfWork->isUninitializedObject($entity)) {
+                        $versions[$oid] = $metadata->getFieldValue($entity, $metadata->versionField);
+                    }
+                } catch (Throwable) {
+                    // No identifier: such an entity can never be re-attached (audit VQ6-7, unrestorable).
+                    $identifiers[$oid] = [];
+                }
             }
         }
 
         $this->identifiers = $identifiers;
+        $this->versions    = $versions;
     }
 
     /** Starts over for the next attempt. */
@@ -98,12 +121,14 @@ final class AttemptObserver
     /** A flush is about to write: the kept entities it deletes are recorded before Doctrine forgets them. */
     public function onFlush(OnFlushEventArgs $args): void
     {
-        // DoctrineBundle shares one event manager between the entity managers of a connection.
-        if ($args->getObjectManager() !== $this->manager) {
+        // DoctrineBundle shares one event manager between the entity managers of a connection. Compared by unit of work
+        // (audit VQ6-3): a decorated manager (EntityManagerDecorator, DoctrineBundle's lazy service) dispatches the
+        // event with the inner manager.
+        $unitOfWork = $args->getObjectManager()->getUnitOfWork();
+        if ($unitOfWork !== $this->unitOfWork) {
             return;
         }
 
-        $unitOfWork = $this->manager->getUnitOfWork();
         // An empty flush (it still dispatches onFlush) writes nothing.
         $this->flushed = $this->flushed || $unitOfWork->getScheduledEntityInsertions() !== [] || $unitOfWork->getScheduledEntityUpdates() !== []
             || $unitOfWork->getScheduledEntityDeletions() !== [] || $unitOfWork->getScheduledCollectionUpdates() !== []

@@ -357,8 +357,23 @@ in both cases the replay goes ahead (1.8.1). Since 1.8.2 the host's earlier enti
 the registry now serves, there and after any attempt whose own flush failed (the ORM closes the manager and the
 repairer resets it), or that detached every host entity: each initialised one whose identity no other object holds is
 registered under its identifier from before the run and reloaded through its entity persister, so the same objects
-stay managed and the replay's writes to them are flushed (audits VQ5-1 / VQ5-2). A host entity whose row is gone by
-then cannot be re-attached: the unit gives up with `ConcurrencyConflict`. An uninitialised proxy is left as it is.
+stay managed and the replay's writes to them are flushed (audits VQ5-1 / VQ5-2). An uninitialised proxy the host holds
+is registered again too: as it is when the manager kept its unit of work, reloaded through the new manager after a
+reset (the same object; audit VQ6-1). The unit gives up with `ConcurrencyConflict` (409, `CONFLICT_001`) when a host
+entity has no identifier or another object holds its identity, when one the attempt touched has lost its row, or when
+a versioned host entity has another version in the database than when `run()` started (someone committed in between:
+the host's own flush would refuse it, audit VQ6-2). An untouched host entity whose row another session deleted is
+forgotten again and stays stale, as on the restore path.
+
+What a re-attach (and any reload of a host entity) means for your objects (audit VQ6-6):
+
+- `postLoad` listeners run for each reloaded entity;
+- mapped fields, version and to-one associations come back from the database; do not rely on transient (unmapped)
+  state across a replay: a proxy bound to the new manager starts from its class defaults, and anything derived from
+  mapped state is stale;
+- in-memory edits to read-only entities (`readOnly: true`), which no flush writes anyway, are reverted;
+- to-many collections are replaced by fresh, uninitialised `PersistentCollection` objects: a collection object you
+  held before is no longer the entity's; read it again from the entity.
 
 ### Request memos between attempts (1.4.0)
 
