@@ -21,10 +21,16 @@ use function version_compare;
  * The repairer therefore rolls back first and closes only when that fails: closing loses session state (variables,
  * session-level locks), so it is the last resort.
  *
- * DBAL 3 without savepoints emulates nesting: an inner rollBack() issues no SQL and only marks the transaction
- * rollback-only, a flag that survives Connection::close() and makes the next commit fail. With emulated nesting the
- * repairer never closes a nested leftover: it rolls back level by level (the level-1 ROLLBACK clears the flag), and
- * when even that real ROLLBACK fails it closes and then begins and rolls back once, to clear the flag.
+ * The rollback-only flag (Connection::setRollbackOnly(); with DBAL 3 without savepoints, also every inner rollBack(),
+ * which issues no SQL) survives Connection::close() on DBAL 3 and DBAL 4 alike, and makes the next commit on the
+ * reopened connection fail. Only a ROLLBACK of the outermost level clears it. With emulated nesting the repairer never
+ * closes a nested leftover: it rolls back level by level (the level-1 ROLLBACK clears the flag). Whenever it does
+ * close a connection whose transaction was rollback-only (or whose flag could not be read, or with emulated nesting),
+ * it then begins and rolls back every level that BEGIN left open (one, or two with auto-commit disabled), to clear the
+ * flag (1.7.2: before, only with emulated nesting).
+ *
+ * Nesting levels are read as `(int)`: DBAL 3 declares getTransactionNestingLevel() without a native return type, so a
+ * test double of DBAL 3's Connection returns null (1.7.2).
  *
  * Stateless: safe as a shared service in a long-running worker. An optional PSR-3 logger (default NullLogger) receives
  * the repair actions (notice: levels rolled back; warning: connection closed) with structured context only: levels,
@@ -60,7 +66,7 @@ final readonly class ConnectionRepairer
      */
     public function afterFailure(Connection $connection, int $entryLevel): string
     {
-        if ($connection->getTransactionNestingLevel() <= $entryLevel) {
+        if ((int) $connection->getTransactionNestingLevel() <= $entryLevel) {
             return self::ACTION_NONE;
         }
 
@@ -77,7 +83,7 @@ final readonly class ConnectionRepairer
      */
     public function betweenRequests(Connection $connection, int $baseline = 0): string
     {
-        $level = $connection->getTransactionNestingLevel();
+        $level = (int) $connection->getTransactionNestingLevel();
 
         if ($level <= $baseline) {
             return self::ACTION_NONE;
@@ -92,15 +98,22 @@ final readonly class ConnectionRepairer
             'baseline'      => $baseline,
             'action'        => self::ACTION_CLOSED,
         ]);
+        $rollbackOnly = $this->isRollbackOnly($connection);
         $connection->close();
+
+        if ($rollbackOnly) {
+            $this->clearRollbackOnly($connection);
+        }
 
         return self::ACTION_CLOSED;
     }
 
     private function rollBackTo(Connection $connection, int $level): string
     {
-        // Read once, before the try: also the level reported if the rollback fails.
-        $from = $connection->getTransactionNestingLevel();
+        // Read once, before the try: also the level reported if the rollback fails. The flag is read while a level is
+        // still open (isRollbackOnly() throws at level 0, and a failed level-1 rollback already dropped the level).
+        $from         = (int) $connection->getTransactionNestingLevel();
+        $rollbackOnly = $this->isRollbackOnly($connection);
 
         try {
             // Bounded: with auto-commit disabled DBAL opens a new transaction after the outermost rollback.
@@ -123,7 +136,7 @@ final readonly class ConnectionRepairer
             ] + SafeLog::throwable($failure));
             $connection->close();
 
-            if ($this->emulatesNesting($connection)) {
+            if ($rollbackOnly || $this->emulatesNesting($connection)) {
                 $this->clearRollbackOnly($connection);
             }
 
@@ -142,14 +155,45 @@ final readonly class ConnectionRepairer
             && !$connection->getNestTransactionsWithSavepoints();
     }
 
+    /**
+     * Whether the open transaction is rollback-only; true when the flag cannot be read (clearing it is harmless).
+     */
+    private function isRollbackOnly(Connection $connection): bool
+    {
+        try {
+            return (bool) $connection->isRollbackOnly();
+        } catch (Throwable) {
+            return true;
+        }
+    }
+
+    /**
+     * Clears the rollback-only flag of a closed connection: only a ROLLBACK of the outermost level resets it.
+     *
+     * With auto-commit disabled (audit VQ-6) the reconnect inside BEGIN makes DBAL open level 1 by itself, so that
+     * BEGIN only adds a savepoint (level 2): one ROLLBACK would release the savepoint and keep the flag. Every level
+     * open after the BEGIN is therefore rolled back; DBAL then opens level 1 again on its own (auto-commit off).
+     */
     private function clearRollbackOnly(Connection $connection): void
     {
         try {
             $connection->beginTransaction();
-            $connection->rollBack();
+            for ($level = (int) $connection->getTransactionNestingLevel(); $level > 0; --$level) {
+                $connection->rollBack();
+            }
         } catch (Throwable $failure) {
             SafeLog::log($this->logger, 'debug', 'Could not clear the rollback-only flag after closing.', SafeLog::throwable($failure));
-            // The server is gone: the next transaction reconnects; nothing more can be done here.
+
+            // BEGIN reached the driver and failed: DBAL already counts the level. Drop it again (DBAL 4 clears the
+            // flag even when the driver's ROLLBACK fails); when the server is gone the next transaction reconnects,
+            // and DoctrineTransactionRunner clears a stale flag right after its own outermost BEGIN.
+            if ((int) $connection->getTransactionNestingLevel() > 0) {
+                try {
+                    $connection->rollBack();
+                } catch (Throwable) {
+                    $connection->close();
+                }
+            }
         }
     }
 }

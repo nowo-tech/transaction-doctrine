@@ -127,9 +127,14 @@ Supports `doctrine/dbal ^3.8.2 || ^4.0`; the entity manager variant works with O
 and real-database suites on DBAL 4 + ORM 3, DBAL 3 + ORM 3 and DBAL 3 + ORM 2. With savepoints (DBAL 4, or DBAL 3
 with `setNestTransactionsWithSavepoints(true)`) a nested leftover is closed when its `ROLLBACK TO SAVEPOINT` fails.
 With DBAL 3's emulated nesting (the DBAL 3 default) a nested rollback issues no SQL and only marks the transaction
-rollback-only, a flag `Connection::close()` does not reset: the repairer therefore rolls such leftovers back level by
-level (the real level-1 `ROLLBACK` clears the flag) and never closes them; if that `ROLLBACK` itself fails, it closes
-and then begins and rolls back once to clear the flag. Register the runner under **your own service id** and alias
+rollback-only: the repairer therefore rolls such leftovers back level by level (the real level-1 `ROLLBACK` clears the
+flag) and never closes them. The rollback-only flag (also set by `Connection::setRollbackOnly()`) survives
+`Connection::close()` on DBAL 3 and DBAL 4, and only a level-1 `ROLLBACK` clears it: whenever the repairer closes a
+connection whose transaction was rollback-only (or with emulated nesting), it then begins and rolls back every level
+that `BEGIN` opened, to clear the flag (1.7.2: on DBAL 4 and with savepoints too). With auto-commit disabled the
+reconnect opens level 1 itself, so two levels are rolled back and DBAL opens level 1 again. If the server is still
+unreachable then, the runner clears a stale flag right after its own outermost `BEGIN` (auto-commit on), so the next
+run commits. Register the runner under **your own service id** and alias
 `TransactionRunnerInterface` to it only when the interface is not defined yet, so a host's retrying adapter wins.
 
 Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as

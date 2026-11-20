@@ -77,7 +77,7 @@ final class LoggingTest extends TestCase
     public function testRepairerLogsAFailedRollbackOnlyClearAtDebug(): void
     {
         $logger     = $this->recorder();
-        $connection = $this->connection([1, 1]);
+        $connection = $this->connection([1, 1, 0]);
         $connection->method('rollBack')->willThrowException(new RuntimeException('gone'));
         $connection->method('beginTransaction')->willThrowException(new RuntimeException('gone'));
 
