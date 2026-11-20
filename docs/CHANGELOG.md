@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ahead, as in 1.7.x. A host entity detached on its own while others stay managed still ends the unit with
   `ConcurrencyConflict`.
 
+  **Known limitation (audits VQ5-1 / VQ5-2, to be closed in 1.8.2):** in those cases the host's entities captured
+  before `run()` are detached, and writes made to those old objects are silently ignored: they are not managed by the
+  new (or cleared) manager, so no flush writes them. Compared with 1.8.0 this changes two cases from a 409 to a
+  silent loss: an attempt that clears the manager, and an attempt that detaches the host's only entity (or all of
+  them), before it fails; 1.8.0 answered 409 `CONFLICT_001` there, 1.8.1 replays and the replay reports success
+  while nothing is written through the old objects. The same already happened in 1.7.x and in 1.8.0 whenever the
+  attempt's own flush failed: the ORM closes the manager and this library's repairer resets it (VQ5-1).
+
 ## [1.8.0] - 2026-11-20
 
 ### Fixed

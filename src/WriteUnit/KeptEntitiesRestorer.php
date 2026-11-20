@@ -127,8 +127,8 @@ final class KeptEntitiesRestorer
         }
 
         // 4. Back to what the database holds. When none of the kept entities is managed any more, the attempt (or host
-        // code it called) cleared the manager: nothing of the host's is left to restore or to lose, and the replay goes
-        // ahead as before 1.8 (1.8.1). One kept entity gone while others remain was detached on purpose: unrestorable.
+        // code it called) cleared the manager: the replay goes ahead as before 1.8 (1.8.1). The host's old objects stay
+        // detached, so writes to them are not flushed (audit VQ5-2, documented limitation). One kept entity gone while others remain was detached on purpose: unrestorable.
         if (!self::anyManaged($unitOfWork, $kept)) {
             return $restored;
         }
