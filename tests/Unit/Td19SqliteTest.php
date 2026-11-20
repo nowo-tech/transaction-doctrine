@@ -81,6 +81,11 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioTheProbeMatchesWhatTheFlushWrites();
     }
 
+    public function testTheProbeIgnoresAFlushedInverseOrphan(): void
+    {
+        $this->scenarioTheProbeIgnoresAFlushedInverseOrphan();
+    }
+
     public function testTheProbeComparesEnumsAsTheFlushDoes(): void
     {
         $this->scenarioTheProbeComparesEnumsAsTheFlushDoes();

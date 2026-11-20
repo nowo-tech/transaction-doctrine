@@ -213,8 +213,11 @@ final class HostFlushProbe implements ResetInterface
     }
 
     /**
-     * Whether a managed entity differs from its loaded state in a way the flush writes: a field, a to-one association,
-     * or a to-many collection that is dirty or no longer the managed one. A new entity a changed association would
+     * Whether a managed entity differs from its loaded state in a way the flush writes: a field, an owning-side to-one
+     * association, or a to-many collection that is dirty or no longer the managed one. An inverse-side to-one writes
+     * nothing for its owner (1.9.2, audit XD2-2: after the host flushed an inverse one-to-one set to null, ORM keeps the
+     * old value in the owner's loaded state); with orphan removal its managed former value is noted instead, as the
+     * flush deletes it. A new entity a changed association would
      * cascade-persist is noted too (audit WD-6). Read-only entities, and DEFERRED_EXPLICIT entities the host did not
      * persist() again, are never written: not changed (audit WD-6). Reads only (no change-set computation).
      *
@@ -251,10 +254,16 @@ final class HostFlushProbe implements ResetInterface
                 if ($value instanceof PersistentCollection || is_iterable($value)) {
                     $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), $value instanceof PersistentCollection ? $value->unwrap() : $value, $note);
                 }
-            } elseif (array_key_exists($field, $original) && $value !== $original[$field]) {
-                $changed = true;
+            } elseif (array_key_exists($field, $original) && $value !== ($loaded = $original[$field])) {
+                $mapping = $metadata->getAssociationMapping($field);
+                if (!$metadata->isAssociationInverseSide($field)) {
+                    $changed = true;
+                } elseif (is_object($loaded) && $this->isOrphanRemoval($mapping) && $unitOfWork->getEntityState($loaded, UnitOfWork::STATE_NEW) === UnitOfWork::STATE_MANAGED) {
+                    $note($loaded); // the flush deletes the managed orphan (audit XD2-2: never the owner's row)
+                }
+
                 if (is_object($value)) {
-                    $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), [$value], $note);
+                    $this->noteCascadedPersists($unitOfWork, $mapping, [$value], $note);
                 }
             }
         }
@@ -343,6 +352,16 @@ final class HostFlushProbe implements ResetInterface
                 $note($element);
             }
         }
+    }
+
+    /**
+     * Whether an association removes its orphans.
+     *
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
+     */
+    private function isOrphanRemoval(array|object $mapping): bool
+    {
+        return is_array($mapping) ? ($mapping['orphanRemoval'] ?? false) === true : ($mapping instanceof AssociationMapping && $mapping->orphanRemoval); // ORM 2 array, ORM 3 object
     }
 
     /**

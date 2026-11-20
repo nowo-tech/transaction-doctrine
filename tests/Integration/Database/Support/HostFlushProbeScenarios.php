@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\UnitOfWork;
 use ErrorException;
 use Nowo\TransactionDoctrine\HostFlushProbe;
+use Nowo\TransactionDoctrine\OrphanRemovals;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Host\BundleNote;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use RuntimeException;
@@ -126,9 +127,27 @@ trait HostFlushProbeScenarios
     private function scenarioTheProbeMatchesWhatTheFlushWrites(): void
     {
         $this->connection->insert('ddrb_card', ['id' => 19, 'board_id' => 1]);
+        $this->connection->insert('ddrb_profile', ['id' => 1]);
+        $this->connection->insert('ddrb_profile', ['id' => 2]);
+        $this->connection->insert('ddrb_badge', ['id' => 1, 'profile_id' => 1]);
         $manager = $this->manager();
         $probe   = new HostFlushProbe();
         $cases   = [
+            'inverse one-to-one set to null (orphan removal deletes the badge, nothing written for the profile)' => [static function () use ($manager): void {
+                $profile = $manager->find(Profile::class, 1);
+                self::assertInstanceOf(Profile::class, $profile);
+                $profile->badge = null;
+            }, [Badge::class]],
+            'owning one-to-one changed' => [static function () use ($manager): void {
+                // The profiles first: on PHP 8.4 with native lazy objects, ORM 3.8 gives a Profile created as Badge 1's
+                // lazy ghost an ["id"] change set (a no-op UPDATE), unrelated to what this case checks.
+                $manager->find(Profile::class, 1);
+                $profile = $manager->find(Profile::class, 2);
+                $badge   = $manager->find(Badge::class, 1);
+                self::assertInstanceOf(Badge::class, $badge);
+                self::assertInstanceOf(Profile::class, $profile);
+                $badge->profile = $profile;
+            }, [Badge::class]],
             'many-to-many clear (join rows deleted)' => [static function () use ($manager): void {
                 $shelf = $manager->find(Shelf::class, 1);
                 self::assertInstanceOf(Shelf::class, $shelf);
@@ -177,6 +196,36 @@ trait HostFlushProbeScenarios
         $this->assertTheProbeMatchesTheFlush($manager, $probe, $cases);
         $manager->clear();
         self::assertSame(0, (int) $this->freshValue("SELECT COUNT(*) FROM ddrb_owner WHERE label = 'changed'"), 'nothing flushed');
+    }
+
+    /**
+     * Audit XD2-2 (1.9.2): after the host flushed an inverse one-to-one set to null, ORM keeps the deleted Badge in the
+     * Profile's loaded state, but no later flush writes anything for either: a bundle flush then is not reported. An
+     * owning-side change is still reported.
+     */
+    private function scenarioTheProbeIgnoresAFlushedInverseOrphan(): void
+    {
+        $this->connection->insert('ddrb_profile', ['id' => 1]);
+        $this->connection->insert('ddrb_profile', ['id' => 2]);
+        $this->connection->insert('ddrb_badge', ['id' => 1, 'profile_id' => 1]);
+        $this->connection->insert('ddrb_badge', ['id' => 2, 'profile_id' => 2]);
+        $manager = $this->manager();
+        $probe   = new HostFlushProbe();
+        $profile = $manager->find(Profile::class, 1);
+        self::assertInstanceOf(Profile::class, $profile);
+        $profile->badge = null;
+        self::assertSame([Badge::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'the pending orphan removal');
+
+        $manager->flush(); // the host's own flush deletes badge 1
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_badge WHERE id = 1'));
+        $probe->reset();
+        self::assertSame([], $this->deprecations(static fn () => self::assertSame([], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]))), 'a later bundle flush: nothing reported');
+
+        $manager->find(Profile::class, 2); // before Badge 2 (see scenarioTheProbeMatchesWhatTheFlushWrites)
+        $badge = $manager->find(Badge::class, 2);
+        self::assertInstanceOf(Badge::class, $badge);
+        $badge->profile = $profile;
+        self::assertSame([Badge::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'an owning-side change is reported');
     }
 
     /**
@@ -318,8 +367,12 @@ trait HostFlushProbeScenarios
                 }
             }
 
+            foreach (OrphanRemovals::pending($unitOfWork) as $orphan) {
+                $written[$orphan::class] = true; // deleted at commit
+            }
+
             foreach ($expected as $class) {
-                self::assertTrue(isset($written[$class]) || $class === Card::class, $label . ': Doctrine writes ' . $class . ' too (orphan removals are deleted at commit)');
+                self::assertTrue(isset($written[$class]), $label . ': Doctrine writes ' . $class . ' too');
             }
 
             foreach (array_keys($written) as $class) {
