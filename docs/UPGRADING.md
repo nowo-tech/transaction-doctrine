@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.8.1](#to-181)
 - [To 1.8.0](#to-180)
 - [To 1.7.2](#to-172)
 - [To 1.7.1](#to-171)
@@ -28,6 +29,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.8.1
+
+From **1.8.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 From **1.8.0**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change. A write-unit
 replay goes ahead again when the failed attempt's flush closed the manager and host code reset it through the registry
