@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The host's entities stay managed after a reset or a clear during a write unit (audits VQ5-1 / VQ5-2; the known
+  limitation of 1.8.1, also in 1.7.x and 1.8.0 for a failed flush).** When the attempt's own flush failed (the ORM
+  closes the manager and the write unit's repairer resets it), when host code reset the manager (in place, as
+  DoctrineBundle does, or by a new object), or when the attempt cleared the manager or detached every host entity,
+  the host's objects captured before `run()` stayed detached: the replay reported success while writes made to them
+  were silently ignored. After the repair, every initialised host entity whose identity no other object holds in the
+  manager the registry now serves is registered again under its identifier from before the run and reloaded through
+  its entity persister (fields, version, to-ones, fresh collections; no cascade). The same objects are managed again
+  and the replay's writes to them are flushed. When a row is gone, that entity cannot be re-attached: it is forgotten
+  again and the unit gives up with `ConcurrencyConflict` (409, `CONFLICT_001`). An uninitialised proxy is left as it
+  is. The write unit still never clears or resets an open host entity manager itself.
+
 ## [1.8.1] - 2026-11-20
 
 ### Fixed

@@ -182,7 +182,8 @@ trait RepairScenarios
 
     /**
      * The host's manager was closed by the failed attempt: it is reset (a closed manager is not the host's open one),
-     * and the next replays start on the new manager, never "restoring" the old one's entities into it.
+     * and the next replays start on the new manager. Since 1.8.2 the host's entity from before the unit is re-attached
+     * to the new manager (registered under its identifier, reloaded), so it stays usable.
      */
     private function scenarioAResetHostManagerIsNotRestored(): void
     {
@@ -206,7 +207,7 @@ trait RepairScenarios
 
         self::assertSame(3, $result);
         self::assertSame(1, $this->registry->resets);
-        self::assertFalse($this->manager()->contains($host));
+        self::assertTrue($this->manager()->contains($host));
     }
 
     /**
@@ -1015,8 +1016,180 @@ trait RepairScenarios
         });
 
         self::assertSame(2, $result);
-        self::assertFalse($manager->contains($host), 'cleared by the attempt, not by the write unit');
+        self::assertTrue($manager->contains($host), 'cleared by the attempt, re-attached by the write unit (1.8.2)');
         self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
+    }
+
+    /**
+     * Audit VQ5-1 / P26: the attempt writes the host's counter and its flush meets a deadlock (preUpdate); the ORM closes
+     * the manager and the write unit's repairer resets it in place (DoctrineBundle-like). The host's counter is
+     * re-attached, so the replay's write is flushed (before 1.8.2: "ok" and nothing written).
+     */
+    private function scenarioAFlushTimeDeadlockKeepsTheHostEntityInPlace(): void
+    {
+        $registry = new InPlaceResetRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
+        $manager  = $registry->manager;
+        $host     = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+        $manager->getEventManager()->addEventListener([Events::preUpdate], self::failingPreUpdate());
+
+        $result = (new WriteUnit($registry, new WriteUnitPolicy(3, 0, 0, 0)))->run(static function (int $attempt) use ($manager, $host): int {
+            $host->value = 5;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, $registry->resets);
+        self::assertTrue($manager->contains($host));
+        self::assertSame(5, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /** Audit VQ5-1 / P26b: the same with a registry that replaces the manager by a new object. */
+    private function scenarioAFlushTimeDeadlockKeepsTheHostEntityInANewManager(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+        $manager->getEventManager()->addEventListener([Events::preUpdate], self::failingPreUpdate());
+        $registry = $this->registry;
+
+        $result = $this->unit()->run(static function (int $attempt) use ($registry, $host): int {
+            $host->value = 5;
+            $registry->getManager()->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($this->manager()->contains($host));
+        self::assertSame(5, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /** Audit VQ5-2 / P27: the attempt clears the host's manager, then a deadlock; the replay writes the captured entity. */
+    private function scenarioAClearedManagerKeepsTheHostEntityWritable(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $host): int {
+            if ($attempt === 1) {
+                $manager->clear();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $host->value = 5;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(5, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /** Audit VQ5-2 / P28: the host held a single entity; the attempt detaches it, then a deadlock; the replay writes it. */
+    private function scenarioADetachedOnlyHostEntityIsWritable(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $host): int {
+            if ($attempt === 1) {
+                $manager->detach($host);
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $host->value = 5;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(5, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /**
+     * 1.8.2: the attempt clears the manager and the host's row is gone meanwhile: the host's entity cannot be re-attached
+     * (its reload finds no row), so the unit gives up with ConcurrencyConflict and the entity stays detached.
+     */
+    private function scenarioAReattachWithoutARowStopsTheReplay(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+        $attempts = 0;
+
+        $conflict = null;
+        try {
+            $this->unit()->run(function () use ($manager, &$attempts): never {
+                ++$attempts;
+                $manager->clear();
+                $this->connection->executeStatement('DELETE FROM ddrb_counter WHERE id = 2'); // auto-committed
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            });
+        } catch (ConcurrencyConflict $caught) {
+            $conflict = $caught;
+        }
+
+        self::assertSame(1, $conflict->attempts);
+        self::assertSame(1, $attempts);
+        self::assertFalse($manager->contains($host));
+        self::assertSame([], $manager->getUnitOfWork()->getIdentityMap()[Counter::class] ?? []);
+    }
+
+    /**
+     * 1.8.2: the host held counter 2 and an uninitialised proxy of counter 1; the attempt clears the manager. Counter 2 is
+     * re-attached and written by the replay; the uninitialised proxy is left as it is (nothing loaded to keep).
+     */
+    private function scenarioAnUninitialisedProxyIsNotReattached(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        $proxy   = $manager->getReference(Counter::class, 1);
+        self::assertInstanceOf(Counter::class, $host);
+        self::assertInstanceOf(Counter::class, $proxy);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $host): int {
+            if ($attempt === 1) {
+                $manager->clear();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $host->value = 6;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($host));
+        self::assertFalse($manager->contains($proxy));
+        self::assertSame(6, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    private static function failingPreUpdate(): object
+    {
+        return new class {
+            private bool $fired = false;
+
+            public function preUpdate(): void
+            {
+                if (!$this->fired) {
+                    $this->fired = true;
+
+                    throw new DeadlockException(FakeDriverException::deadlock(), null);
+                }
+            }
+        };
     }
 
     private function unit(): WriteUnit

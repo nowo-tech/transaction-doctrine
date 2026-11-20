@@ -127,8 +127,8 @@ final class KeptEntitiesRestorer
         }
 
         // 4. Back to what the database holds. When none of the kept entities is managed any more, the attempt (or host
-        // code it called) cleared the manager: the replay goes ahead as before 1.8 (1.8.1). The host's old objects stay
-        // detached, so writes to them are not flushed (audit VQ5-2, documented limitation). One kept entity gone while others remain was detached on purpose: unrestorable.
+        // code it called) cleared the manager or detached them all: WriteUnit re-attaches them (reattach(), 1.8.2).
+        // One kept entity gone while others remain was detached on purpose: unrestorable.
         if (!self::anyManaged($unitOfWork, $kept)) {
             return $restored;
         }
@@ -154,9 +154,47 @@ final class KeptEntitiesRestorer
     }
 
     /**
+     * Re-attaches the kept entities to a manager that holds none of them any more (1.8.2, audits VQ5-1 / VQ5-2): the
+     * attempt's flush failed and the manager was reset (by the write unit's repairer, or by host code, in place or by a
+     * new object), or the attempt cleared it or detached every kept entity. Each initialised kept entity that no other
+     * object of the manager holds the identity of is registered under its identifier from before the run, then
+     * reloaded through its persister (fields, version, to-ones, fresh collections; no cascade), so the host's captured
+     * objects are managed again and later writes to them are flushed. An uninitialised proxy is left as it is.
+     *
+     * @return bool Whether every re-attached entity could be reloaded (a row gone: it is forgotten again, unrestorable)
+     */
+    public static function reattach(EntityManagerInterface $manager, AttemptObserver $attempt): bool
+    {
+        $unitOfWork = $manager->getUnitOfWork();
+        $attached   = [];
+        foreach ($attempt->kept as $oid => $entity) {
+            $identifier = $attempt->identifiers[$oid] ?? [];
+            if ($identifier === [] || $unitOfWork->isUninitializedObject($entity) || $unitOfWork->isInIdentityMap($entity)
+                || $unitOfWork->tryGetById($identifier, $manager->getClassMetadata($entity::class)->rootEntityName) !== false) {
+                continue;
+            }
+
+            $unitOfWork->registerManaged($entity, $identifier, []);
+            $attached[$oid] = $entity;
+        }
+
+        $restored = true;
+        foreach ($attached as $entity) {
+            if (!self::safely(static fn () => self::reload($manager, $entity))) {
+                self::forget($unitOfWork, $entity);
+                $restored = false;
+            }
+        }
+
+        return $restored;
+    }
+
+    /**
+     * Whether any kept entity is in the unit of work's identity map.
+     *
      * @param array<int, object> $kept
      */
-    private static function anyManaged(UnitOfWork $unitOfWork, array $kept): bool
+    public static function anyManaged(UnitOfWork $unitOfWork, array $kept): bool
     {
         foreach ($kept as $entity) {
             if ($unitOfWork->isInIdentityMap($entity)) {
@@ -280,6 +318,18 @@ final class KeptEntitiesRestorer
 
             return $forgotten;
         }, null, UnitOfWork::class)($unitOfWork, $kept, $restoreKept);
+    }
+
+    /**
+     * Forgets one managed entity entirely (identity-map entry first, it reads the identifier).
+     */
+    private static function forget(UnitOfWork $unitOfWork, object $entity): void
+    {
+        Closure::bind(static function (UnitOfWork $unitOfWork, object $entity): void {
+            $oid = spl_object_id($entity);
+            $unitOfWork->removeFromIdentityMap($entity);
+            unset($unitOfWork->entityStates[$oid], $unitOfWork->entityIdentifiers[$oid], $unitOfWork->originalEntityData[$oid]);
+        }, null, UnitOfWork::class)($unitOfWork, $entity);
     }
 
     /**

@@ -262,4 +262,46 @@ final class RepairDatabaseTest extends DatabaseTestCase
         $this->boot($server);
         $this->scenarioAReplayAfterTheAttemptClearedTheManagerGoesAhead();
     }
+
+    #[DataProvider('allServers')]
+    public function testAFlushTimeDeadlockKeepsTheHostEntityInPlace(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushTimeDeadlockKeepsTheHostEntityInPlace();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFlushTimeDeadlockKeepsTheHostEntityInANewManager(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushTimeDeadlockKeepsTheHostEntityInANewManager();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAClearedManagerKeepsTheHostEntityWritable(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAClearedManagerKeepsTheHostEntityWritable();
+    }
+
+    #[DataProvider('allServers')]
+    public function testADetachedOnlyHostEntityIsWritable(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADetachedOnlyHostEntityIsWritable();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAReattachWithoutARowStopsTheReplay(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAReattachWithoutARowStopsTheReplay();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAnUninitialisedProxyIsNotReattached(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUninitialisedProxyIsNotReattached();
+    }
 }

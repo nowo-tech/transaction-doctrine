@@ -353,10 +353,12 @@ meanwhile, is left as the host held it and does not stop the replay. When the un
 attempt. The manager stays open and is never cleared. A closed manager (the ORM closes it after a failed flush) is
 still reset through the registry, as before. A manager reset in place during the attempt (DoctrineBundle's lazy service: the same object, a new
 entity manager behind it) counts as replaced, and a manager the attempt cleared entirely is not counted as unrestorable:
-in both cases the replay goes ahead (1.8.1) and the host's earlier entities stay detached. Writes made to those
-detached objects are silently ignored (no flush writes them), as after any attempt whose own flush failed (the ORM
-closes the manager and the repairer resets it): load what you change again from the manager (audits VQ5-1 / VQ5-2;
-1.8.2 is planned to manage them again).
+in both cases the replay goes ahead (1.8.1). Since 1.8.2 the host's earlier entities are re-attached to the manager
+the registry now serves, there and after any attempt whose own flush failed (the ORM closes the manager and the
+repairer resets it), or that detached every host entity: each initialised one whose identity no other object holds is
+registered under its identifier from before the run and reloaded through its entity persister, so the same objects
+stay managed and the replay's writes to them are flushed (audits VQ5-1 / VQ5-2). A host entity whose row is gone by
+then cannot be re-attached: the unit gives up with `ConcurrencyConflict`. An uninitialised proxy is left as it is.
 
 ### Request memos between attempts (1.4.0)
 

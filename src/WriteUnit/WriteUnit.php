@@ -187,6 +187,7 @@ final readonly class WriteUnit implements WriteUnitInterface
         try {
             return $this->attempts($work, $unit, $kept);
         } finally {
+            // $kept may hold the observers of re-attached managers (reattach()).
             foreach ($kept as $observer) {
                 $observer->manager->getEventManager()->removeEventListener([Events::postLoad, Events::onFlush], $observer);
             }
@@ -197,11 +198,11 @@ final readonly class WriteUnit implements WriteUnitInterface
      * @template T
      *
      * @param callable(int, ?Throwable): T $work
-     * @param array<string, AttemptObserver> $kept
+     * @param array<string, AttemptObserver> $kept Updated when a manager is re-attached (a new observer)
      *
      * @return T
      */
-    private function attempts(callable $work, ?string $unit, array $kept): mixed
+    private function attempts(callable $work, ?string $unit, array &$kept): mixed
     {
         $failure = null;
 
@@ -219,7 +220,7 @@ final readonly class WriteUnit implements WriteUnitInterface
                 $failure = $caught;
             }
 
-            $unrestored = $this->repairer->discardUnitOfWork($this->managers, $this->kept($kept));
+            $unrestored = [...$this->repairer->discardUnitOfWork($this->managers, $this->kept($kept)), ...$this->reattach($kept)];
             foreach ($kept as $observer) {
                 $observer->start();
             }
@@ -378,6 +379,7 @@ final readonly class WriteUnit implements WriteUnitInterface
     {
         // The pending-work check computed change sets (they move the original data): every kept entity is reloaded.
         $this->repairer->discardUnitOfWork($this->managers !== null && $this->hasPendingChanges($this->managers) ? null : $this->managers, $this->kept($kept), true);
+        $this->reattach($kept, false);
     }
 
     /**
@@ -406,6 +408,41 @@ final readonly class WriteUnit implements WriteUnitInterface
         }
 
         return $kept;
+    }
+
+    /**
+     * Re-attaches the kept entities to every open manager that holds none of them any more (1.8.2, audits VQ5-1 /
+     * VQ5-2): reset after the attempt's flush failed (by the repairer or host code, in place or by a new object), or
+     * cleared by the attempt, or every kept entity detached. The host's captured objects are managed again and reloaded
+     * (KeptEntitiesRestorer::reattach()); the observer follows the manager the registry serves now.
+     *
+     * @param array<string, AttemptObserver> $kept
+     * @param bool $follow Replace the observer of a manager that changed (false: the run ends now, nothing to observe)
+     *
+     * @return list<string> The managers where a kept entity could not be reloaded (its row gone)
+     */
+    private function reattach(array &$kept, bool $follow = true): array
+    {
+        $failed = [];
+        foreach ($kept as $name => $observer) {
+            $manager = $this->registry->getManager($name);
+            if (!$manager instanceof EntityManagerInterface || !$manager->isOpen()
+                || KeptEntitiesRestorer::anyManaged($manager->getUnitOfWork(), $observer->kept)) {
+                continue;
+            }
+
+            if (!KeptEntitiesRestorer::reattach($manager, $observer)) {
+                $failed[] = $name;
+            }
+
+            if ($follow && ($manager !== $observer->manager || $manager->getUnitOfWork() !== $observer->unitOfWork)) {
+                $observer->manager->getEventManager()->removeEventListener([Events::postLoad, Events::onFlush], $observer);
+                $kept[$name] = new AttemptObserver($manager, $observer->kept, $observer->identifiers);
+                $manager->getEventManager()->addEventListener([Events::postLoad, Events::onFlush], $kept[$name]); // @igor-ignore — per-run observer, removed in run()'s finally
+            }
+        }
+
+        return $failed;
     }
 
     /**

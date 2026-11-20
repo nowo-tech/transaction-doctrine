@@ -214,4 +214,34 @@ final class RepairSqliteTest extends DatabaseTestCase
     {
         $this->scenarioAReplayAfterTheAttemptClearedTheManagerGoesAhead();
     }
+
+    public function testAFlushTimeDeadlockKeepsTheHostEntityInPlace(): void
+    {
+        $this->scenarioAFlushTimeDeadlockKeepsTheHostEntityInPlace();
+    }
+
+    public function testAFlushTimeDeadlockKeepsTheHostEntityInANewManager(): void
+    {
+        $this->scenarioAFlushTimeDeadlockKeepsTheHostEntityInANewManager();
+    }
+
+    public function testAClearedManagerKeepsTheHostEntityWritable(): void
+    {
+        $this->scenarioAClearedManagerKeepsTheHostEntityWritable();
+    }
+
+    public function testADetachedOnlyHostEntityIsWritable(): void
+    {
+        $this->scenarioADetachedOnlyHostEntityIsWritable();
+    }
+
+    public function testAReattachWithoutARowStopsTheReplay(): void
+    {
+        $this->scenarioAReattachWithoutARowStopsTheReplay();
+    }
+
+    public function testAnUninitialisedProxyIsNotReattached(): void
+    {
+        $this->scenarioAnUninitialisedProxyIsNotReattached();
+    }
 }

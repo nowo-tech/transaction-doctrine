@@ -47,14 +47,34 @@ final class AttemptObserver
     public readonly UnitOfWork $unitOfWork;
 
     /**
+     * The identifiers of the kept entities when the run started, by spl_object_id: what a re-attach into a reset or
+     * cleared manager registers them under (1.8.2).
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public readonly array $identifiers;
+
+    /**
      * @param EntityManagerInterface $manager The manager observed
      * @param array<int, object> $kept The entities it managed before the first attempt, by spl_object_id
+     * @param array<int, array<string, mixed>>|null $identifiers Their identifiers; null = read from the manager now
      */
     public function __construct(
         public readonly EntityManagerInterface $manager,
         public readonly array $kept,
+        ?array $identifiers = null,
     ) {
         $this->unitOfWork = $manager->getUnitOfWork();
+        if ($identifiers === null) {
+            $identifiers = [];
+            foreach ($kept as $oid => $entity) {
+                /** @var array<string, mixed> $identifier */
+                $identifier        = $this->unitOfWork->getEntityIdentifier($entity);
+                $identifiers[$oid] = $identifier;
+            }
+        }
+
+        $this->identifiers = $identifiers;
     }
 
     /** Starts over for the next attempt. */

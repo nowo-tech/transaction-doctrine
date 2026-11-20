@@ -30,6 +30,12 @@
 
 ## Unreleased
 
+From **1.8.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change. After a write
+unit whose attempt's flush failed, whose manager host code reset, or whose attempt cleared the manager (or detached
+every host entity), the host's entities from before the unit are managed again and reloaded, so writes made to them in
+the replay are flushed (1.8.1 and earlier: silently ignored). A host entity whose row is gone by then ends the unit with
+409 `CONFLICT_001`.
+
 ## To 1.8.1
 
 From **1.8.0**:
