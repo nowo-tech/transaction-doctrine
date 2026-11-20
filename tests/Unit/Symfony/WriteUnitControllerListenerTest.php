@@ -17,6 +17,7 @@ use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitPolicy;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
 use PHPUnit\Framework\TestCase;
+use stdClass;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
@@ -29,6 +30,7 @@ use Symfony\Component\HttpKernel\Event\ControllerArgumentsEvent;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\Kernel;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorage;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\User\InMemoryUser;
@@ -240,6 +242,37 @@ final class WriteUnitControllerListenerTest extends TestCase
         $response = ($event->getController())();
         self::assertInstanceOf(Response::class, $response);
         self::assertSame('tagged', $response->getContent());
+    }
+
+    /**
+     * Audit TD192-3 (1.9.2): before Symfony 8.1 nothing reads the `_controller_attributes` request attribute, so a list
+     * another listener put there never replaces the controller's attributes (#[Cache] kept). On Symfony >= 8.1 that
+     * attribute is where Symfony itself reads them, and it is passed on as is.
+     */
+    public function testAListInTheRequestAttributeOnlyCountsFromSymfony81(): void
+    {
+        $controller = new AttributedController();
+        $request    = Request::create('/tag', 'POST');
+        $event      = $this->event($controller->tag(...), [], $request);
+        $event->getAttributes();
+        $foreign = [new stdClass()];
+        $request->attributes->set('_controller_attributes', $foreign);
+
+        (new WriteUnitControllerListener($this->writeUnit()))($event);
+
+        if ($this->symfonyVersionId() >= 80100) {
+            self::assertSame($foreign, $request->attributes->get('_controller_attributes'));
+            self::assertSame([], $event->getAttributes(Cache::class));
+        } else {
+            self::assertCount(1, $event->getAttributes(Cache::class), 'the controller\'s #[Cache] is kept');
+            self::assertCount(1, $event->getAttributes(AsWriteUnit::class));
+        }
+    }
+
+    /** The installed Symfony's version id, read at runtime (the suite runs on Symfony 7.4 and 8.x). */
+    private function symfonyVersionId(): int
+    {
+        return Kernel::VERSION_ID;
     }
 
     private function user(TokenStorage $tokens): ?UserInterface
