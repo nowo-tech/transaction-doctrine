@@ -64,11 +64,12 @@ After **any** failure the runner leaves neither a poisoned connection nor pendin
   the entity manager variant; about 3 ms for 50,000 managed entities); on a refusal it compares the identity map with
   that snapshot.
 
-  **Pending-change check.** Scheduled insertions, deletions and collection changes are checked first; only when there
-  are none does the runner call `UnitOfWork::computeChangeSets()`. That call scans the whole identity map and, through
-  cascade-persist associations, persists new entities it reaches: their `prePersist` callbacks run, and generated ids
-  (sequences, UUIDs) may be assigned. A caller's not-yet-persisted draft reachable that way counts as pending, so a
-  refusal then clears it too. A unit of work that cannot compute its change sets counts as pending.
+  **Pending-change check.** Scheduled insertions, deletions, orphan removals and collection changes are checked
+  first; only when there are none does the runner call `UnitOfWork::computeChangeSets()`. That call scans the whole
+  identity map and, through cascade-persist associations, persists new entities it reaches: their `prePersist`
+  callbacks run, and generated ids (sequences, UUIDs) may be assigned. A caller's not-yet-persisted draft reachable
+  that way counts as pending, so a refusal then clears it too. A unit of work that cannot compute its change sets
+  counts as pending.
 
   **Nested runs.** A `run()` inside another one shares the caller's unit of work, and the pending-change check cannot
   tell the caller's changes from the inner run's: a nested domain failure that clears the manager **discards the
@@ -102,11 +103,17 @@ $runner = DoctrineTransactionRunner::forHostEntityManager($entityManager, $manag
 Both flush the manager before the commit and repair the connection the same way.
 
 **The host's manager must be clean when `run()` starts** (audit TA3-6). If it has pending changes (scheduled
-insertions, updates or deletions, after `UnitOfWork::computeChangeSets()`), `run()` throws `LogicException`
-(`DoctrineTransactionRunner::HOST_PENDING_MESSAGE`) before opening a transaction and the unit never runs: a flush
-inside the unit (or the runner's own) would carry the host's work into a transaction that may roll back, and it would
-be lost with the run. The host flushes or clears its work first. The check costs one `computeChangeSets()` per
-`run()`: it scans the identity map and cascade-persists new entities it reaches, as `flush()` would.
+insertions, updates or deletions, orphan removals, after `UnitOfWork::computeChangeSets()`), `run()` throws
+`LogicException` (`DoctrineTransactionRunner::HOST_PENDING_MESSAGE`) before opening a transaction and the unit never
+runs: a flush inside the unit (or the runner's own) would carry the host's work into a transaction that may roll back,
+and it would be lost with the run. The host flushes or clears its work first. The check costs one
+`computeChangeSets()` per `run()`: it scans the identity map and cascade-persists new entities it reaches, as
+`flush()` would.
+
+Orphan removals count since 1.9.2 (audit XD-1): `clear()` or `removeElement()` on an inverse one-to-many with
+`orphanRemoval`, or an inverse one-to-one with `orphanRemoval` set to `null`, schedules only the orphan's removal (no
+update, no collection change), and the run's flush would delete those rows. Both are refused like any other pending
+change; the host's own `flush()` still deletes them.
 
 After a failure
 `forHostEntityManager()`:

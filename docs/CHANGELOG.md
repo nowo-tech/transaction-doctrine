@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Host runner: orphan removals count as pending host work (audit XD-1):** `forHostEntityManager()->run()` refuses a
+  host manager with pending changes before opening a transaction, but its check ignored `UnitOfWork`'s orphan removals.
+  Two host changes schedule nothing else: `clear()` on an inverse one-to-many with `orphanRemoval`, and an inverse
+  one-to-one with `orphanRemoval` set to `null`. The run was accepted and its flush deleted the host's orphan rows
+  inside the unit's transaction. Orphan removals are now pending work (read without computing change sets, ORM 2.20 and
+  3.x), so both cases are refused with `LogicException` (`HOST_PENDING_MESSAGE`) and the host's own flush still deletes
+  them; loaded, untouched orphanRemoval associations still run. Only managed orphans count: after the host flushed an
+  inverse one-to-one set to `null`, ORM schedules the deleted entity again at every change-set computation although no
+  flush deletes anything, and those runs are still accepted. Covered on SQLite and on MySQL 8.4, MariaDB 11.4 and
+  PostgreSQL 16. `HostFlushProbe` reads orphan removals through the same internal reader, so it no longer reports
+  such a stale orphan either.
+
 ## [1.9.1] - 2026-11-20
 
 ### Fixed
