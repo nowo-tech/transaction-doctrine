@@ -300,6 +300,16 @@ final class RepairSqliteTest extends DatabaseTestCase
         $this->scenarioAStaleUntouchedEntityDoesNotStopAReattach('reset');
     }
 
+    public function testAFailedReloadIsNotAGoneRowOnClear(): void
+    {
+        $this->scenarioAFailedReloadIsNotAGoneRow('clear');
+    }
+
+    public function testAFailedReloadIsNotAGoneRowOnReset(): void
+    {
+        $this->scenarioAFailedReloadIsNotAGoneRow('reset');
+    }
+
     public function testAReattachRefusesWhatItCannotManageAgain(): void
     {
         $this->scenarioAReattachRefusesWhatItCannotManageAgain();

@@ -79,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     an entity the attempt touched whose row is gone too (VQ6-7);
   - an untouched host entity whose row another session deleted is forgotten again and does not stop the replay, as on
     the restore path (VQ6-5).
+  - only a row that is really gone is forgiven that way: any other failure of the reload (a `postLoad` listener that
+    throws, a decryption failure, a connection lost during the SELECT) makes the entity unrestorable (409
+    `CONFLICT_001`) instead of forgetting it while its row exists and losing the replay's writes to it (VQ7-1).
 
 ## [1.8.1] - 2026-11-20
 

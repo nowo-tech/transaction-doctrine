@@ -572,6 +572,11 @@ Every conflict answer carries one code (nowo-tech REQ-RUNTIME-003 rule 6). It is
 
 The status stays `conflict_response.status` (409 by default, 503 per host).
 
+`CONFLICT_002` needs commit detection (`commit_detection`, on by default, or your own `CommitLedger` passed to the
+write unit): without a ledger, an attempt that auto-committed part of its work (a flush outside a transaction) and then
+met a conflict, for example on the version it just moved, is answered `CONFLICT_001` + `Retry-After` although part was
+committed. Keep the ledger on to get `CONFLICT_002` there.
+
 ### Request commit watermark (1.6.0)
 
 "Part committed" covers the **whole request** (REQ-RUNTIME-003 rule 6, request-level detection), not only the unit

@@ -7,6 +7,7 @@ namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
@@ -1438,6 +1439,77 @@ trait RepairScenarios
 
         self::assertSame(2, $result, $variant);
         self::assertSame(3, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'), $variant);
+    }
+
+    /**
+     * Audit VQ7-1 / Q28: the reload of an untouched kept entity fails for a reason other than a gone row (a postLoad
+     * listener throws once: a stand-in for a decryption failure or a connection lost during the SELECT). The row still
+     * exists, so forgetting the entity would silently drop the replay's writes to it: the unit gives up instead (409
+     * CONFLICT_001). Never a success that lost the write.
+     */
+    private function scenarioAFailedReloadIsNotAGoneRow(string $variant): void
+    {
+        $manager = $this->manager();
+        $first   = $manager->find(Counter::class, 1);
+        $second  = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $first);
+        self::assertInstanceOf(Counter::class, $second);
+        $trap = new class {
+            public bool $armed = false;
+
+            public function postLoad(PostLoadEventArgs $args): void
+            {
+                $entity = $args->getObject();
+                if ($this->armed && $entity instanceof Counter && $entity->id === 1) {
+                    $this->armed = false;
+
+                    throw new RuntimeException('transient read failure');
+                }
+            }
+        };
+        $manager->getEventManager()->addEventListener([Events::postLoad], $trap);
+        if ($variant === 'reset') {
+            $manager->getEventManager()->addEventListener([Events::preUpdate], self::failingPreUpdate());
+        }
+
+        $registry = $this->registry;
+        $result   = null;
+
+        try {
+            $result = $this->unit()->run(static function (int $attempt) use ($registry, $manager, $first, $second, $trap, $variant): int {
+                if ($attempt === 1) {
+                    $trap->armed = true;
+                    if ($variant === 'clear') {
+                        $manager->clear();
+
+                        throw new DeadlockException(FakeDriverException::deadlock(), null);
+                    }
+
+                    $second->value = 1;
+                    $registry->getManager()->flush();
+                }
+
+                $first->value  = 9;
+                $second->value = 5;
+                $registry->getManager()->flush();
+
+                return $attempt;
+            });
+        } catch (ConcurrencyConflict) {
+        }
+
+        $stored = (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1');
+        if ($result === null) { // the unit gave up
+            self::assertSame(0, $stored, $variant);
+            self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'), $variant);
+
+            return;
+        }
+
+        self::assertSame('reset', $variant, 'clear: the same manager reloads, the trap fires, the unit must give up');
+        // The reset manager does not carry the trap (a new event manager): the reload succeeded and the replay wrote both.
+        self::assertSame(9, $stored, $variant . ': the replay\'s write to the kept entity is not lost');
+        self::assertSame(5, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'), $variant);
     }
 
     /**

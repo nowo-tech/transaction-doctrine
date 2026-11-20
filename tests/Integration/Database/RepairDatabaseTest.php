@@ -383,6 +383,20 @@ final class RepairDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testAFailedReloadIsNotAGoneRowOnClear(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFailedReloadIsNotAGoneRow('clear');
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFailedReloadIsNotAGoneRowOnReset(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFailedReloadIsNotAGoneRow('reset');
+    }
+
+    #[DataProvider('allServers')]
     public function testAReattachRefusesWhatItCannotManageAgain(string $server): void
     {
         $this->boot($server);
