@@ -55,11 +55,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HostFlushProbe` kept reporting the owner's class at every later bundle flush although Doctrine writes nothing for an
   inverse side. The probe now compares only fields and owning-side to-one associations; a pending inverse orphan
   removal is reported as the class of the entity the flush deletes, and only while that entity is managed.
+- **Host-flush probe: an already reported class is still walked (audit TD192-1):** once an entity class was reported
+  (for example by a scheduled insertion), the probe skipped the other managed entities of that class, so the orphan an
+  inverse one-to-one of one of them left, and the new entities a changed association of one of them cascade-persists,
+  were not reported although the flush deletes or inserts them. Every managed entity outside the bundle's namespaces is
+  now walked.
+- **Host-flush probe: a clean collection moved to another owner is pending work (audit TD192-2, since 1.9.0):** a
+  clean `PersistentCollection` counted as unchanged even when it was another entity's collection assigned to this
+  owner, whose flush then writes it (join rows of a many-to-many owning side). A collection is now unchanged only when
+  it is the loaded one and clean.
+- **Private entity manager: dropped orphan removals are logged (audit TD192-4):** the warning logged when a boundary
+  drops the private manager with pending changes now counts managed orphan removals too, so a manager holding only an
+  orphan removal no longer drops it silently.
 - **`#[AsWriteUnit]` controllers: no Symfony 8.1 deprecation:** `WriteUnitControllerListener` passed the replaced
   controller's attributes to `ControllerArgumentsEvent::setController()` grouped by class name, which Symfony 8.1
   deprecates ("Passing an array of attributes grouped by class name ... is deprecated"), once per write-unit request.
-  On Symfony >= 8.1 it now passes the flat list (feature-detected through the `_controller_attributes` request
-  attribute); on older Symfony versions it keeps passing them grouped. The attributes still reach the listeners after
+  On Symfony >= 8.1 (the installed `Kernel::VERSION_ID`) it now passes the flat list Symfony keeps in the
+  `_controller_attributes` request attribute; on older Symfony versions it keeps passing them grouped and ignores that
+  attribute, which they never read (audit TD192-3). The attributes still reach the listeners after
   it in both cases.
 
 ## [1.9.1] - 2026-11-20
