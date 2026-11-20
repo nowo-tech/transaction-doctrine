@@ -24,6 +24,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A write-unit replay goes ahead again after the host's manager was reset in place or cleared by the attempt
+  (regression in 1.8.0, seen in TaskBoard 2.26.0's replay tests).** When a flush inside the attempt failed (a
+  deadlock), Doctrine closed the entity manager and host code reset it through the registry
+  (`ManagerRegistry::resetManager()`, as TaskBoard's recovering flusher and `DoctrineTransactionRunner::forEntityManager()`
+  with a registry do). DoctrineBundle resets its lazy entity manager service in place: `getManager()` keeps returning
+  the same object, with a new entity manager and unit of work behind it. 1.8.0's write unit took that empty manager for
+  the one it observed, found none of the host's entities in it and gave up with `ConcurrencyConflict` (409,
+  `CONFLICT_001`) instead of replaying. A manager whose unit of work changed during the attempt is now treated as a
+  new one (nothing of the old one is kept, as for a manager replaced by a new object), and a manager the attempt
+  cleared entirely (none of the host's entities managed any more) no longer counts as unrestorable: the replay goes
+  ahead, as in 1.7.x. A host entity detached on its own while others stay managed still ends the unit with
+  `ConcurrencyConflict`.
+
+  **Known limitation (audits VQ5-1 / VQ5-2, to be closed in 1.8.2):** in those cases the host's entities captured
+  before `run()` are detached, and writes made to those old objects are silently ignored: they are not managed by the
+  new (or cleared) manager, so no flush writes them. Compared with 1.8.0 this changes two cases from a 409 to a
+  silent loss: an attempt that clears the manager, and an attempt that detaches the host's only entity (or all of
+  them), before it fails; 1.8.0 answered 409 `CONFLICT_001` there, 1.8.1 replays and the replay reports success
+  while nothing is written through the old objects. The same already happened in 1.7.x and in 1.8.0 whenever the
+  attempt's own flush failed: the ORM closes the manager and this library's repairer resets it (VQ5-1).
+
 ## [1.8.0] - 2026-11-20
 
 ### Fixed

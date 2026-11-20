@@ -204,4 +204,14 @@ final class RepairSqliteTest extends DatabaseTestCase
     {
         $this->scenarioADeletedGeneratedIdEntityIsWritableAgain();
     }
+
+    public function testAReplayAfterAnInPlaceResetGoesAhead(): void
+    {
+        $this->scenarioAReplayAfterAnInPlaceResetGoesAhead();
+    }
+
+    public function testAReplayAfterTheAttemptClearedTheManagerGoesAhead(): void
+    {
+        $this->scenarioAReplayAfterTheAttemptClearedTheManagerGoesAhead();
+    }
 }

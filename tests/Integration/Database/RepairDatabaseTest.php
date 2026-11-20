@@ -248,4 +248,18 @@ final class RepairDatabaseTest extends DatabaseTestCase
         $this->boot($server);
         $this->scenarioADeletedGeneratedIdEntityIsWritableAgain();
     }
+
+    #[DataProvider('allServers')]
+    public function testAReplayAfterAnInPlaceResetGoesAhead(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAReplayAfterAnInPlaceResetGoesAhead();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAReplayAfterTheAttemptClearedTheManagerGoesAhead(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAReplayAfterTheAttemptClearedTheManagerGoesAhead();
+    }
 }

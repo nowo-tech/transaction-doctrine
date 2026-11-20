@@ -6,6 +6,7 @@ namespace Nowo\TransactionDoctrine\WriteUnit;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Event\OnFlushEventArgs;
+use Doctrine\ORM\UnitOfWork;
 use Doctrine\Persistence\Event\LifecycleEventArgs;
 use Doctrine\Persistence\ObjectManager;
 
@@ -40,6 +41,12 @@ final class AttemptObserver
     public array $touched = [];
 
     /**
+     * The manager's unit of work when the run started. A manager reset in place (DoctrineBundle keeps the same lazy
+     * service object and builds a new entity manager behind it) has a new one: nothing of the old one is kept (1.8.1).
+     */
+    public readonly UnitOfWork $unitOfWork;
+
+    /**
      * @param EntityManagerInterface $manager The manager observed
      * @param array<int, object> $kept The entities it managed before the first attempt, by spl_object_id
      */
@@ -47,6 +54,7 @@ final class AttemptObserver
         public readonly EntityManagerInterface $manager,
         public readonly array $kept,
     ) {
+        $this->unitOfWork = $manager->getUnitOfWork();
     }
 
     /** Starts over for the next attempt. */
