@@ -39,11 +39,11 @@ use const PHP_INT_MIN;
  * message handler or a controller; a main request handled inside another main request or a message handler; a worker
  * run by a handler) no longer resets the state of the unit that runs it, and a listener that throws at a boundary
  * never leaves the process "inside" a unit for good. A console command does not hold back the requests it serves (audit
- * XB-1): a main request with no other main request and no message in flight is a unit of its own, so a server started
- * from a command (Swoole, ReactPHP, RoadRunner) resets at every request, as messages already did inside
- * `messenger:consume`. Port of the audited tracker the bundles carry (UptimeMonitorBundle `UnitOfWorkBoundaries`, the
- * superset of the StorageKit, Yopass, PageBuilderKit, BreadcrumbKit, BlogKit and DashboardMenu copies: audits NM,
- * NL2-v, NR-b, NX CR1–CR3, OB-M1, OB-L1–L3, OB2-L1).
+ * XB-1): a main request with no other main request and no message in flight is a unit of its own, so a long-running
+ * server command resets at every request, as messages already did inside `messenger:consume`. Port of the audited
+ * tracker the bundles carry (UptimeMonitorBundle `UnitOfWorkBoundaries`, the superset of the StorageKit, Yopass,
+ * PageBuilderKit, BreadcrumbKit, BlogKit and DashboardMenu copies: audits NM, NL2-v, NR-b, NX CR1–CR3, OB-M1,
+ * OB-L1–L3, OB2-L1).
  *
  * The state changes at priority `PHP_INT_MAX`, before any other listener can throw:
  * - console: a stack of frames, one per running command, keyed by the Command AND its input (a command that runs

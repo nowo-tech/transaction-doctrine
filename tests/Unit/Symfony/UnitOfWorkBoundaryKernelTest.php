@@ -104,9 +104,9 @@ final class UnitOfWorkBoundaryKernelTest extends TestCase
     }
 
     /**
-     * Audit XB-1: a server started from a console command (Swoole, ReactPHP, RoadRunner) serves each main request as a
-     * unit of its own: every request resets at its start and at its terminate (1.9.0 did; the first 1.9.1 tracker held
-     * them back as nested in the command), and the command still resets at its end.
+     * Audit XB-1: a long-running server command serves each main request as a unit of its own: every request resets at
+     * its start and at its terminate (1.9.0 did; the first 1.9.1 tracker held them back as nested in the command), and
+     * the command still resets at its end.
      */
     public function testAServerCommandResetsAtEveryRequest(): void
     {

@@ -764,9 +764,12 @@ Since 1.9.1 only the boundaries of a unit of work that runs inside no other one 
   command, a handler or a controller keeps the outer unit's state);
 - a Messenger message: when no other message is in flight (`messenger:consume` resets at every message; a worker run
   in-process by a handler keeps the outer message's state);
-- a main request: when no other main request and no message is in flight, whatever command runs. A server started from
-  a console command (Swoole, ReactPHP, RoadRunner) resets at every request; a main request handled inside another one
-  or inside a message handler keeps the outer unit's state. Sub-requests are never boundaries.
+- a main request: when no other main request and no message is in flight, whatever command runs. A long-running
+  server command resets at every request; a main request handled inside another one or inside a message handler keeps
+  the outer unit's state. Sub-requests are never boundaries. A regular command that makes a one-off in-process
+  `HttpKernel::handle()` call resets at that request's start and end too, the same as messages inside
+  `messenger:consume`: the entities the command loaded through a private manager become detached, and changes still
+  pending in that manager are logged as a warning before the reset drops them.
 
 A listener that throws at a boundary (`console.error`, `kernel.exception`, `WorkerMessageReceivedEvent`), an aborted
 worker run or a message skipped with `shouldHandle(false)` never leaves the process "inside" a unit (the next unit

@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message skipped with `shouldHandle(false)`, nested workers and nested main requests are handled, and a frame left by a
   throwing `console.error` / `kernel.exception` / `WorkerMessageReceivedEvent` listener is dropped at the next unit.
   Unit boundaries: the outermost console command; a Messenger message with no other message in flight; a main request
-  with no other main request and no message in flight, even while a console command runs, so a server started from a
-  command (Swoole, ReactPHP, RoadRunner) still resets at every request as 1.9.0 did (audit XB-1).
+  with no other main request and no message in flight, even while a console command runs, so a long-running server
+  command still resets at every request as 1.9.0 did (audit XB-1).
   Internal and BC: the listener's methods and constructor keep working (new optional third argument; without it, the
   1.9.0 counter). Real-kernel tests in worker mode with the kernel reset off cover the Messenger, console and
   nested-request cases.
