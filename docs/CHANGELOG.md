@@ -50,6 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale by a rollback was replaced when its only pending work was an orphan removal, silently dropping the bundle's
   removal. It is now kept until that work is flushed or the boundary, as for any other pending change; once nothing
   managed is pending, it is replaced as before.
+- **Host-flush probe: no report for a flushed inverse one-to-one orphan (audit XD2-2):** after the host flushed an
+  inverse one-to-one with `orphanRemoval` set to `null`, ORM keeps the deleted entity in the owner's loaded state, so
+  `HostFlushProbe` kept reporting the owner's class at every later bundle flush although Doctrine writes nothing for an
+  inverse side. The probe now compares only fields and owning-side to-one associations; a pending inverse orphan
+  removal is reported as the class of the entity the flush deletes, and only while that entity is managed.
+- **`#[AsWriteUnit]` controllers: no Symfony 8.1 deprecation:** `WriteUnitControllerListener` passed the replaced
+  controller's attributes to `ControllerArgumentsEvent::setController()` grouped by class name, which Symfony 8.1
+  deprecates ("Passing an array of attributes grouped by class name ... is deprecated"), once per write-unit request.
+  On Symfony >= 8.1 it now passes the flat list (feature-detected through the `_controller_attributes` request
+  attribute); on older Symfony versions it keeps passing them grouped. The attributes still reach the listeners after
+  it in both cases.
 
 ## [1.9.1] - 2026-11-20
 
