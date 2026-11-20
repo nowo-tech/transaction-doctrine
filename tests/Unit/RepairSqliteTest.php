@@ -179,4 +179,29 @@ final class RepairSqliteTest extends DatabaseTestCase
     {
         $this->scenarioAComputedChangeIsStillUndone();
     }
+
+    public function testARemovedOwnEntityIsWritableInTheReplay(): void
+    {
+        $this->scenarioARemovedOwnEntityIsWritableInTheReplay();
+    }
+
+    public function testARemovedChildOfAHostCollectionIsWritableInTheReplay(): void
+    {
+        $this->scenarioARemovedChildOfAHostCollectionIsWritableInTheReplay();
+    }
+
+    public function testAnUnflushedChangeOfAParentAndChildIsUndone(): void
+    {
+        $this->scenarioAnUnflushedChangeOfAParentAndChildIsUndone();
+    }
+
+    public function testAnUnflushedSwitchToALoadedParentIsUndone(): void
+    {
+        $this->scenarioAnUnflushedSwitchToALoadedParentIsUndone();
+    }
+
+    public function testADeletedGeneratedIdEntityIsWritableAgain(): void
+    {
+        $this->scenarioADeletedGeneratedIdEntityIsWritableAgain();
+    }
 }

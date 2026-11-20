@@ -201,11 +201,11 @@ process):
 - 1.7.2: the rollback-only flag does not outlive a connection the repairer closed after a failed nested rollback
   (`afterFailure()`, `betweenRequests()`, auto-commit off included), and the runner clears a flag left on a connection
   closed elsewhere;
-- 1.8 (audits VD2-4 / VQ / VQ2, probes P1 to P12, P15, P16, P23): a replay keeps the host's entities and starts from the stored state. A
+- 1.8 (audits VD2-4 / VQ / VQ2 / VQ3, probes P1 to P12, P15, P16, P23, P24): a replay keeps the host's entities and starts from the stored state. A
   host entity the failed attempt flushed (re-found, incremented, versioned) or deleted by a flush is reloaded or
   managed again (readonly ids and versions included); a rolled-back `removeElement()` / `clear()` on an orphanRemoval
   collection deletes nothing, flushed or not; unflushed removals (of host entities, and of the attempt's own, which
-  are forgotten) and changes are undone, also behind a `computeChangeSets()` call; a never-persisted child left in an
+  are forgotten: the replay can find and write them again) and changes are undone, also behind a `computeChangeSets()` call; a never-persisted child left in an
   inverse cascade-persist collection is never inserted; the flush of `forHostEntityManager()` inside a unit is
   reloaded like any other; a stale host entity the attempt did not touch does not stop the replay; a to-one or collection pointing at an entity the attempt brought in is reloaded
   through the persister; a re-initialised proxy is reloaded from the committed row. When a host entity cannot be

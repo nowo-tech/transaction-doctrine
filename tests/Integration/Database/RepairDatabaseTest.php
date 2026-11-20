@@ -213,4 +213,39 @@ final class RepairDatabaseTest extends DatabaseTestCase
         $this->boot($server);
         $this->scenarioAComputedChangeIsStillUndone();
     }
+
+    #[DataProvider('allServers')]
+    public function testARemovedOwnEntityIsWritableInTheReplay(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARemovedOwnEntityIsWritableInTheReplay();
+    }
+
+    #[DataProvider('allServers')]
+    public function testARemovedChildOfAHostCollectionIsWritableInTheReplay(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARemovedChildOfAHostCollectionIsWritableInTheReplay();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAnUnflushedChangeOfAParentAndChildIsUndone(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUnflushedChangeOfAParentAndChildIsUndone();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAnUnflushedSwitchToALoadedParentIsUndone(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAnUnflushedSwitchToALoadedParentIsUndone();
+    }
+
+    #[DataProvider('allServers')]
+    public function testADeletedGeneratedIdEntityIsWritableAgain(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADeletedGeneratedIdEntityIsWritableAgain();
+    }
 }

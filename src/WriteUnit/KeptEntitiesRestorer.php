@@ -97,7 +97,8 @@ final class KeptEntitiesRestorer
         }
 
         // 2. What the attempt scheduled without flushing. Decide what to reload first: the unlinking below changes it.
-        // An entity the attempt loaded itself and removed is no longer in the identity map (audit VQ2-1): brought too.
+        // An entity the attempt loaded itself and removed (audit VQ2-1) is brought too, whether or not it is still in the
+        // identity map.
         $brought = array_diff_key(self::managed($manager) + self::scheduledDeletions($unitOfWork), $kept);
         $touched = [];
         foreach ($kept as $oid => $entity) {
@@ -226,6 +227,9 @@ final class KeptEntitiesRestorer
                     continue;
                 }
 
+                // remove() keeps the identity-map entry: drop it first (it reads the identifier), or a find() would
+                // serve an entity no flush ever writes again (audit VQ3-1).
+                $unitOfWork->removeFromIdentityMap($entity);
                 unset($unitOfWork->entityStates[$oid], $unitOfWork->entityIdentifiers[$oid], $unitOfWork->originalEntityData[$oid]);
             }
 

@@ -780,6 +780,157 @@ trait RepairScenarios
         self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
     }
 
+    /**
+     * Audit VQ3-1 / P16 (write again): the attempt removed counter 1, which it loaded itself; the replay re-finds it,
+     * increments it and flushes. The forgotten removal leaves no stale identity-map entry, so the write reaches the row.
+     */
+    private function scenarioARemovedOwnEntityIsWritableInTheReplay(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager): int {
+            $own = $manager->find(Counter::class, 1);
+            self::assertInstanceOf(Counter::class, $own);
+            if ($attempt === 1) {
+                $manager->remove($own);
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            ++$own->value;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        $manager->flush();
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 1'));
+        self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
+    }
+
+    /**
+     * Audit VQ3-1 / P24: the attempt initialises the host folder's collection and removes the leaf it loaded that way
+     * (no flush); the replay edits that leaf again and flushes (before the fix: ORMInvalidArgumentException).
+     */
+    private function scenarioARemovedChildOfAHostCollectionIsWritableInTheReplay(): void
+    {
+        $manager = $this->manager();
+        $folder  = $manager->find(Folder::class, 1); // leaves not initialised
+
+        self::assertInstanceOf(Folder::class, $folder);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $folder): int {
+            $leaf = $folder->leaves->first();
+            self::assertInstanceOf(Leaf::class, $leaf);
+            if ($attempt === 1) {
+                $manager->remove($leaf);
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $leaf->label = 'r2';
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        $manager->flush();
+        self::assertSame('r2', $this->freshValue('SELECT label FROM ddrb_leaf WHERE id = 1'));
+        self::assertCount(1, $folder->leaves);
+    }
+
+    /** Audit VQ3 / P5 unflushed: the attempt changed the host folder and its leaf without flushing; differs() reloads both. */
+    private function scenarioAnUnflushedChangeOfAParentAndChildIsUndone(): void
+    {
+        $manager = $this->manager();
+        $folder  = $manager->find(Folder::class, 1);
+        self::assertInstanceOf(Folder::class, $folder);
+        self::assertCount(1, $folder->leaves);
+        $leaf = $folder->leaves->first();
+        self::assertInstanceOf(Leaf::class, $leaf);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $folder, $leaf): int {
+            if ($attempt === 1) {
+                $folder->label = 'zz';
+                $leaf->label   = 'yy';
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame('a', $folder->label);
+        self::assertSame('c1', $leaf->label);
+        self::assertTrue($manager->contains($leaf));
+        self::assertTrue($folder->leaves->contains($leaf));
+        self::assertSame('a', $this->freshValue('SELECT label FROM ddrb_folder WHERE id = 1'));
+    }
+
+    /** Audit VQ3 / P8 unflushed: the attempt pointed the host leaf at a folder it loaded (cascade refresh), no flush. */
+    private function scenarioAnUnflushedSwitchToALoadedParentIsUndone(): void
+    {
+        $manager = $this->manager();
+        $leaf    = $manager->find(Leaf::class, 1);
+        self::assertInstanceOf(Leaf::class, $leaf);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $leaf): int {
+            if ($attempt === 1) {
+                $other = $manager->find(Folder::class, 2);
+                self::assertInstanceOf(Folder::class, $other);
+                $leaf->folder = $other;
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, $leaf->folder->id);
+        self::assertSame(1, (int) $this->freshValue('SELECT folder_id FROM ddrb_leaf WHERE id = 1'));
+    }
+
+    /**
+     * Audit VQ3 / P11 with a generated (IDENTITY) id, which Doctrine nulls after the DELETE: the row deleted by a flush of
+     * the attempt (through forHostEntityManager()) is managed again, keeps its id and is writable.
+     */
+    private function scenarioADeletedGeneratedIdEntityIsWritableAgain(): void
+    {
+        $manager = $this->manager();
+        $row     = $manager->getRepository(AutoRow::class)->findOneBy([]);
+        self::assertInstanceOf(AutoRow::class, $row);
+        $id = $row->id;
+
+        $result = $this->unit()->run(fn (int $attempt): int => DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry)->run(static function () use ($manager, $row, $attempt): int {
+            if ($attempt === 1) {
+                $manager->remove($row);
+                $manager->flush();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            return $attempt;
+        }));
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($row));
+        self::assertSame($id, $row->id);
+        $row->label = 'after';
+        $manager->flush();
+        self::assertSame('after', $this->freshValue('SELECT label FROM ddrb_auto WHERE id = ' . (int) $id));
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_auto'));
+    }
+
     private function unit(): WriteUnit
     {
         return new WriteUnit($this->registry, new WriteUnitPolicy(3, 0, 0, 0));
