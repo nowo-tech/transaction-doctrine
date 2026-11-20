@@ -183,7 +183,8 @@ PostgreSQL 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020; de
 - At most `max_attempts` attempts (3), with a **full-jitter** pause between two of them: uniform between `floor_ms`
   and `min(cap_ms, base_ms × 2^(attempt − 1))` (20–100 ms, then 20–200 ms).
 - Between two attempts the transaction levels the unit left open are rolled back (`ConnectionRepairer`), closed
-  entity managers are reset and open ones cleared (`DoctrineStateRepairer`): an attempt never sees what the failed one
+  entity managers are reset and open ones cleared (`DoctrineStateRepairer`; one that managed entities before `run()`
+  is restored instead, 1.8, see below): an attempt never sees what the failed one
   loaded.
 - **Outermost unit only:** when any connection of the registry is already inside a transaction (the caller's or an
   outer unit's), the work runs once and a failure propagates unchanged, because the database may have rolled back the
@@ -191,8 +192,10 @@ PostgreSQL 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020; de
   a Messenger `HandlerFailedException`), is never replayed again by an outer one.
 - **Pending changes:** when an open entity manager already holds unflushed work before the first attempt (a caller's
   edits or `persist()` calls), the work runs once without replay: clearing the manager would lose them silently.
-- **A replay detaches everything the caller loaded:** between two attempts the open entity managers are cleared, so
-  entities the caller held before `run()` are no longer managed afterwards. Load again what you change after the unit.
+- **A replay keeps what the caller loaded (1.8):** an open entity manager that already managed entities before
+  `run()` is never cleared between attempts; see [Replays and the host's entities](#replays-and-the-hosts-entities-18).
+  A manager that managed nothing before `run()` is still cleared. (Before 1.8 every open manager was cleared, so the
+  caller's entities were detached afterwards.)
 - **Messenger wrappers:** a `HandlerFailedException` (or `DelayedMessageHandlingException`) is replayed only when
   **every** wrapped exception is a replayable conflict and no handler already succeeded (`HandledStamp`); a domain
   error next to a deadlock goes out unchanged, so the failure transport and `ErrorDetailsStamp` keep the real error.
@@ -244,7 +247,8 @@ depend on it; `WriteUnit` is the Doctrine adapter behind it.
 
 #### A bundle's own entity manager (1.7)
 
-A replay clears every open entity manager by default, the host's default one included. A bundle whose unit writes
+A replay repairs every entity manager by default, the host's default one included (since 1.8 without clearing one that
+managed entities before the unit, see [Replays and the host's entities](#replays-and-the-hosts-entities-18)). A bundle whose unit writes
 only through its own manager scopes the repair, so the host's entities stay managed (audit UD2-L-2):
 
 ```php
@@ -321,9 +325,38 @@ from messages dispatched after the handler (`DelayedMessageHandlingException`), 
 last attempt the `ConcurrencyConflict` goes out inside a `HandlerFailedException`, so retry strategies and the failure
 transport see the usual shape.
 
+### Replays and the host's entities (1.8)
+
+Audits VD2-4 / VQ, REQ-RUNTIME-003 rule 2 (never clear or reset an open host entity manager). The unit starts only
+when no manager holds pending work, so whatever is pending or changed after a failed attempt is the attempt's. For
+each open manager that already managed entities before `run()`, after the rollback and before the next attempt:
+
+1. host entities a flush of the attempt deleted are managed again (the rollback restored their rows);
+2. the attempt's unflushed work is dropped: `remove()` of a host entity cancelled, a `remove()` of an entity the
+   attempt loaded itself forgotten (that entity is detached), orphan removals cancelled (a `removeElement()` or
+   `clear()` on an `orphanRemoval` collection schedules the delete at once), computed updates and collection work
+   forgotten;
+3. what the attempt brought in (loaded, referenced, persisted) is unlinked from the host's entities and detached,
+   without cascading into them;
+4. host entities are reloaded from the database through their entity persister (never `EntityManager::refresh()`,
+   which cascades and stops at a detached entity): **every** initialised host entity when a flush wrote during the
+   attempt (a flush moves Doctrine's original data to the rolled-back values, and bumps a `#[Version]`), otherwise the
+   ones the attempt touched: changed (also behind a `computeChangeSets()` call inside the attempt, which moves the
+   original data too), re-hydrated (`refresh()`, a proxy initialised), removed, or written by one of its flushes. A reload costs one query
+   per entity and brings back fields, version, to-one associations and fresh (uninitialised) collections.
+
+The same objects stay managed and the next attempt starts from their stored state. When a host entity cannot be
+brought back (the attempt detached it, or it touched it and its row is gone or its reload threw: a failing `postLoad`
+listener) the unit is **not** replayed. A host entity the attempt did not touch, whose row another session deleted
+meanwhile, is left as the host held it and does not stop the replay. When the unit is not replayed: it ends with `ConcurrencyConflict` (409, `Retry-After`,
+`CONFLICT_001`: nothing committed), after every other step ran, so the host's next flush writes nothing of the
+attempt. The manager stays open and is never cleared. A closed manager (the ORM closes it after a failed flush) is
+still reset through the registry, as before.
+
 ### Request memos between attempts (1.4.0)
 
-Between two attempts the unit clears every open entity manager (or resets a closed one): every entity loaded by the
+Between two attempts the unit clears every open entity manager (or resets a closed one; since 1.8 a manager that
+managed entities before the unit is restored instead): every entity loaded by the
 failed attempt is **detached**. A per-request (or per-message) memo that kept one of them hands the replay a detached
 entity: writing it into an association fails the flush with `ORMInvalidArgumentException` (a 500 instead of the
 conflict answer), and changes made to it are silently never written.

@@ -34,10 +34,14 @@ and a manager whose unit of work the failed run touched is cleared (see [Usage](
 With `forHostEntityManager()` (the host's manager, REQ-RUNTIME-003 rule 2) an open manager is never closed, cleared or
 reset: only what the failed run brought in is detached, and a closed manager is replaced through the registry (see
 [Usage](USAGE.md#the-hosts-entity-manager-forhostentitymanager-160)).
-Between two attempts a write unit clears the open managers, which `ResetBetweenAttemptsInterface` makes safe for
-request memos. That includes the host's default manager (REQ-RUNTIME-003 rule 2): a bundle whose unit writes only
-through its own manager scopes the repair with `WriteUnit::forManagers('my_bundle')` (1.7, audit UD2-L-2), so the
-host's manager keeps its entities (see [Nested transactions and replays](#nested-transactions-and-replays)).
+Between two attempts a write unit detaches what the failed attempt loaded, which `ResetBetweenAttemptsInterface` makes
+safe for request memos. Since 1.8 (audits VD2-4 / VQ, REQ-RUNTIME-003 rule 2) an open manager that managed entities
+before the unit, the host's default one included, is never cleared: it is put back to what the database holds (see
+[Usage](USAGE.md#replays-and-the-hosts-entities-18)); when a host entity cannot be brought back the unit gives up with
+`ConcurrencyConflict` (`CONFLICT_001`) after restoring everything else. A manager that managed nothing before the unit
+is cleared. A bundle whose unit writes only through
+its own manager can still scope the repair with `WriteUnit::forManagers('my_bundle')` (1.7, audit UD2-L-2) (see
+[Nested transactions and replays](#nested-transactions-and-replays)).
 
 ## Conflict classification
 
@@ -128,11 +132,12 @@ reaches the kernel outside a write unit is answered only with `conflict_response
   `ROLLBACK TO SAVEPOINT` fails (the server dropped the savepoints after a deadlock) the connection is closed, never
   left poisoned. A failed rollback is never reported as success.
 - Between two attempts `DoctrineStateRepairer::discardUnitOfWork()` rolls back leftover levels, resets closed managers
-  and clears open ones; then the `ResetBetweenAttemptsInterface` services and `WriteUnitRetryEvent` listeners run.
+  and clears open ones, except an open manager that managed entities before the unit (1.8: the write unit passes an
+  observer of each such manager), which is restored instead (`KeptEntitiesRestorer`); then the `ResetBetweenAttemptsInterface` services and `WriteUnitRetryEvent` listeners run.
   It rolls back every open level on every connection, so a bundle calling it from its own repair code calls it only
   outside a caller's transaction (audit UI2-2): inside one, it rolls the caller's transaction back.
-- By default that covers every manager and connection of the registry, the host's default manager included: a replay
-  detaches every entity the host loaded before the unit (audit UD2-L-2). A bundle whose unit writes only through its
+- By default that covers every manager and connection of the registry, the host's default manager included; before
+  1.8 a replay detached every entity the host loaded before the unit (audit UD2-L-2), since 1.8 those stay managed. A bundle whose unit writes only through its
   own manager scopes it (1.7): `WriteUnit::forManagers('my_bundle')`, or `new WriteUnit(..., managers: ['my_bundle'])`.
   Only those managers are reset or cleared; leftover levels are still rolled back on every connection (a unit only
   starts outside any transaction, so an open level is always the unit's or a retry listener's, audit UI-1). Name every
@@ -191,7 +196,21 @@ process):
   a `HandlerFailedException` are detected (409, not 500; the lost savepoint `CONFLICT_002`), and a real unique
   violation there is not (1.7, audits TA42-3 / UA2-5);
 - a write unit scoped to a bundle's own manager on its own connection replays a real lock wait timeout without
-  clearing the host's manager (its entity still managed), while the unscoped unit clears it (1.7, audit UD2-L-2);
+  clearing the host's manager (its entity still managed); since 1.8 the unscoped unit keeps it managed too (audit
+  VD2-4);
+- 1.7.2: the rollback-only flag does not outlive a connection the repairer closed after a failed nested rollback
+  (`afterFailure()`, `betweenRequests()`, auto-commit off included), and the runner clears a flag left on a connection
+  closed elsewhere;
+- 1.8 (audits VD2-4 / VQ / VQ2 / VQ3, probes P1 to P12, P15, P16, P23, P24): a replay keeps the host's entities and starts from the stored state. A
+  host entity the failed attempt flushed (re-found, incremented, versioned) or deleted by a flush is reloaded or
+  managed again (readonly ids and versions included); a rolled-back `removeElement()` / `clear()` on an orphanRemoval
+  collection deletes nothing, flushed or not; unflushed removals (of host entities, and of the attempt's own, which
+  are forgotten: the replay can find and write them again) and changes are undone, also behind a `computeChangeSets()` call; a never-persisted child left in an
+  inverse cascade-persist collection is never inserted; the flush of `forHostEntityManager()` inside a unit is
+  reloaded like any other; a stale host entity the attempt did not touch does not stop the replay; a to-one or collection pointing at an entity the attempt brought in is reloaded
+  through the persister; a re-initialised proxy is reloaded from the committed row. When a host entity cannot be
+  brought back (detached by the attempt, its row gone, a reload that throws) the unit answers `ConcurrencyConflict`
+  after restoring everything else, and the host's next flush writes nothing of the attempt;
 - a scoped unit whose retry listener opens a transaction on the host's connection and throws, or persists through
   the host's manager, is abandoned with level 0 on both connections and no pending host change (1.7, audit UI-1);
 - with commit tracking on, a real COMMIT returns the driver's `true` on DBAL 3 (`void` on DBAL 4), is recorded, and a

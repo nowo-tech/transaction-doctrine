@@ -23,6 +23,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`forHostEntityManager()` forgets an entity the failed run removed (audit VQ4-1; affects 1.6.0 to 1.7.2).** When
+  a run on the host's entity manager loaded an entity, `remove()`d it and then failed before the runner's flush (any
+  failure: a deadlock, a lock wait, a domain exception), `releaseHostManager()` left the entity scheduled for removal
+  (`UnitOfWork::doDetach()` does nothing for a REMOVED entity), so the host's next `flush()` deleted its row. The
+  removal is now forgotten entirely (the identity-map entry, the scheduled removal, state, identifier and original
+  data) and the entity unlinked from the caller's entities, like everything else the run brought in. A removal of an
+  entity the host managed before the run still stays, as any other change the run made to the caller's entities.
+
+### Changed
+
+- **A write-unit replay no longer clears the host's entity manager (audits VD2-4 / VQ, REQ-RUNTIME-003 rule 2).**
+  Between two attempts `WriteUnit` cleared every open entity manager (unless scoped with `forManagers()`), so every
+  entity the host had loaded before `run()` was detached, even when the unit wrote only through DBAL. An open manager
+  that managed entities before the first attempt is now put back to what the database holds instead (internal
+  `KeptEntitiesRestorer`, fed by a per-run `AttemptObserver` on `postLoad` and `onFlush`):
+  - host entities a flush of the attempt deleted are managed again;
+  - the attempt's unflushed work is dropped: removals of host entities (and of entities the attempt loaded itself,
+    which are detached), orphan removals (`removeElement()` / `clear()` on an `orphanRemoval` collection), computed
+    updates and collection work;
+  - what the attempt brought in is unlinked from the host's entities and detached without cascading into them;
+  - host entities are reloaded through their entity persister (no cascade): every initialised one when a flush wrote
+    during the attempt (the flush moved the original data to the rolled-back values and bumped any version), else the
+    ones the attempt touched: changed (also behind a `computeChangeSets()` inside the attempt), re-hydrated, removed
+    or written by one of its flushes.
+
+  When a host entity cannot be brought back (detached by the attempt, or touched by it and then its row gone or its
+  reload failing; an untouched host entity whose row another session deleted does not count), the unit
+  gives up with `ConcurrencyConflict` (`Retry-After`, `CONFLICT_001`) after every other step, so the host's next
+  flush writes nothing of the attempt; the manager stays open and is not cleared, with a warning. A manager that
+  managed nothing before `run()` is cleared as before; a closed manager is still reset.
+- `DoctrineStateRepairer::discardUnitOfWork()` takes two optional arguments (the write unit's per-manager observers,
+  an internal type, and whether to reload every kept entity) and returns the list of managers it could not fully
+  restore (it returned nothing before). Called without them it behaves as before.
+
 ## [1.7.2] - 2026-11-20
 
 ### Fixed

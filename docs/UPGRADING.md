@@ -28,6 +28,26 @@
 
 ## Unreleased
 
+From **1.7.2**: `composer update nowo-tech/transaction-doctrine`. No configuration change. Behaviour change:
+
+- **A write-unit replay keeps the host's entities (audits VD2-4 / VQ).** Before, a replay cleared every open entity
+  manager (the host's default one included, unless the unit was scoped with `forManagers()`), so entities loaded
+  before `run()` were detached afterwards. Now an open manager that managed entities before the unit is never
+  cleared: the same objects stay managed, and they are reloaded from the database when the failed attempt changed,
+  flushed, removed or re-hydrated them (one query each; every initialised one after an attempt that flushed). Code
+  that re-loaded entities after the unit keeps working; code that kept using the caller's entities after a replay now
+  gets managed objects holding the stored state instead of detached ones.
+- A replay whose failed attempt detached a host entity, or touched one that cannot be reloaded (its row gone, a
+  failing `postLoad` listener), is no longer replayed: it ends with `ConcurrencyConflict` (409,
+  `Retry-After`, `CONFLICT_001`) after the rest was restored. Entities the failed attempt loaded are still detached,
+  so request memos still need `ResetBetweenAttemptsInterface`.
+- Bundle tests that asserted the host manager was cleared after an unscoped replay (`contains()` false) need
+  updating.
+- `DoctrineTransactionRunner::forHostEntityManager()`: an entity the failed run loaded and removed is now forgotten
+  with the run (audit VQ4-1, 1.6.0 to 1.7.2), so the host's next flush no longer deletes its row. Nothing to change.
+- `DoctrineStateRepairer::discardUnitOfWork()` now returns a list and takes two optional arguments; a caller that
+  ignored the (void) result is unaffected.
+
 ## To 1.7.2
 
 From **1.7.1**:

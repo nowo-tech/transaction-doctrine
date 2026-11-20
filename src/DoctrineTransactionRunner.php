@@ -16,6 +16,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use LogicException;
 use Nowo\TransactionContract\TransactionRunnerInterface;
 use Nowo\TransactionContract\TransientStorageFailure;
+use Nowo\TransactionDoctrine\WriteUnit\KeptEntitiesRestorer;
 use PDOException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -301,7 +302,8 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      * The host's manager after a failed run: a closed one is replaced, an open one is never closed, cleared or reset.
      * Only what the run brought in is forgotten: it is detached without cascading into the caller's entities (audit
      * TA3-1), and unlinked from them (TA3-2): removed from their initialized collections and replaced, on a to-one
-     * association, by the association's original value. Anything else the operation changed on the caller's entities
+     * association, by the association's original value. An entity the run loaded and removed is forgotten too (1.8,
+     * audit VQ4-1), so no later flush deletes its row. Anything else the operation changed on the caller's entities
      * stays; a notice says so.
      *
      * @param array<int, object> $before The entities managed or scheduled for insertion when the run started
@@ -321,6 +323,9 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
 
         $unitOfWork = $manager->getUnitOfWork();
         $brought    = array_diff_key($this->managedEntities($manager) + $unitOfWork->getScheduledEntityInsertions(), $before);
+        // Audit VQ4-1 (1.6.0 to 1.7.2): an entity the run loaded and remove()d stays REMOVED (doDetach() ignores it) and
+        // the host's next flush would delete its row. Forgotten entirely, and unlinked from the caller's entities below.
+        $brought += KeptEntitiesRestorer::forgetRemovals($unitOfWork, $before, false);
         // UnitOfWork::detach() follows cascade: detach into any entity; doDetach() with the caller's entities already
         // "visited" stops there. Same private signature in ORM 2.20 and 3.x.
         $detach = Closure::bind(static function (UnitOfWork $unitOfWork, object $entity, array $visited): void {

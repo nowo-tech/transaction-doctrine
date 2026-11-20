@@ -59,6 +59,7 @@ final class WriteUnitTest extends TestCase
             'getScheduledEntityDeletions'     => [],
             'getScheduledCollectionDeletions' => [],
             'getScheduledCollectionUpdates'   => [],
+            'getIdentityMap'                  => [],
         ]));
         $manager->expects($this->once())->method('clear');
         $clock    = new MockClock('2026-11-17 10:00:00');
@@ -637,6 +638,7 @@ final class WriteUnitTest extends TestCase
             'getScheduledEntityDeletions'     => [],
             'getScheduledCollectionDeletions' => [],
             'getScheduledCollectionUpdates'   => [],
+            'getIdentityMap'                  => [],
         ]));
 
         return $manager;

@@ -45,6 +45,40 @@
         "message": "Mutation of state 'writes' in CommitLedger::record()",
         "reason": "Monotonic per-process counter of durable writes; it holds no request, user or tenant data, and write units only read differences around one attempt (audit SL-M1, tests/Unit/WriteUnit/Dbal/CommitTrackingMiddlewareTest.php)."
       }
+    ],
+    "src/WriteUnit/AttemptObserver.php": [
+      {
+        "message": "Mutation of state 'flushed' in AttemptObserver::onFlush()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'deleted' in AttemptObserver::onFlush()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'loaded' in AttemptObserver::start()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'flushed' in AttemptObserver::start()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'deleted' in AttemptObserver::start()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'loaded' in AttemptObserver::postLoad()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'touched' in AttemptObserver::onFlush()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      },
+      {
+        "message": "Mutation of state 'touched' in AttemptObserver::start()",
+        "reason": "@internal value object: WriteUnit::run() creates one per open host entity manager, attaches it to that manager's event manager and removes it in the finally block of the same try, so it is never a shared service and its state ends with the call (tests/Unit/RepairSqliteTest.php)."
+      }
     ]
   }
 }
