@@ -16,6 +16,11 @@ use Symfony\Component\Console\Event\ConsoleTerminateEvent;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Event\FinishRequestEvent;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
+use Symfony\Component\HttpKernel\Event\TerminateEvent;
+use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Messenger\Event\WorkerStartedEvent;
 use Symfony\Component\Messenger\Event\WorkerStoppedEvent;
@@ -243,6 +248,37 @@ final class UnitOfWorkFramesTest extends TestCase
         $failInside(static fn (): Request => $events->request());
         $events->kernelTerminate();
         self::assertTrue($boundaries->isOutermost(new stdClass()), 'a top-level terminate ends the request');
+    }
+
+    /**
+     * Audit XB-1: a running console command does not hold back the main requests it serves (a server command); a main
+     * request inside another one or inside a message is not outermost.
+     */
+    #[Test]
+    public function aCommandDoesNotHoldBackTheRequestsItServes(): void
+    {
+        $boundaries = new UnitOfWorkFrames();
+        $events     = new BoundaryEvents($boundaries);
+        $serve      = new Command('app:serve');
+        $events->command($serve);
+
+        for ($i = 0; $i < 2; ++$i) {
+            $request = new Request();
+            $start   = new RequestEvent(new StubHttpKernel(), $request, HttpKernelInterface::MAIN_REQUEST);
+            $events->dispatcher->dispatch($start, KernelEvents::REQUEST);
+            self::assertTrue($boundaries->isOutermost($start), 'a request served by a command is a unit of its own');
+            $events->dispatcher->dispatch(new FinishRequestEvent(new StubHttpKernel(), $request, HttpKernelInterface::MAIN_REQUEST), KernelEvents::FINISH_REQUEST);
+            $end = new TerminateEvent(new StubHttpKernel(), $request, new Response());
+            $events->dispatcher->dispatch($end, KernelEvents::TERMINATE);
+            self::assertTrue($boundaries->isOutermost($end));
+        }
+
+        $events->message(UnitOfWorkFrames::MESSENGER_WORKER_MESSAGE_RECEIVED);
+        $inMessage = new RequestEvent(new StubHttpKernel(), new Request(), HttpKernelInterface::MAIN_REQUEST);
+        $events->dispatcher->dispatch($inMessage, KernelEvents::REQUEST);
+        self::assertFalse($boundaries->isOutermost($inMessage), 'a request inside a message belongs to the message');
+        $events->terminate($serve);
+        self::assertSame(0, $boundaries->runningCommands());
     }
 
     #[Test]

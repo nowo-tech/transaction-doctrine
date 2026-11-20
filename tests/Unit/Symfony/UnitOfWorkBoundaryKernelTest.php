@@ -82,17 +82,14 @@ final class UnitOfWorkBoundaryKernelTest extends TestCase
         $this->kernel->shutdown();
     }
 
-    /** A command, a request and a worker run inside a command keep the command's private manager. */
-    public function testNestedUnitsInsideACommandKeepItsManager(): void
+    /** A command run inside a command keeps the outer command's private manager. */
+    public function testNestedCommandsKeepTheOuterCommandsManager(): void
     {
         $this->addCommand('app:inner', static fn (): int => 0);
         $kept = [];
         $this->addCommand('app:outer', function () use (&$kept): int {
             $this->manager->live();
             $this->runCommand('app:inner');
-            $kept[] = $this->manager->isInitialized();
-            $this->serve(static function (): void {
-            });
             $kept[] = $this->manager->isInitialized();
             self::assertNotSame(0, $this->runCommand('zzz:no-such-command'));
             $kept[] = $this->manager->isInitialized();
@@ -101,9 +98,39 @@ final class UnitOfWorkBoundaryKernelTest extends TestCase
         });
 
         self::assertSame(0, $this->runCommand('app:outer'));
-        self::assertSame([true, true, true], $kept, 'nested command, in-process request, unknown nested command');
+        self::assertSame([true, true], $kept, 'nested command, unknown nested command');
         self::assertFalse($this->manager->isInitialized(), 'the outermost command reset it');
-        $this->assertRequestResets('after nested units');
+        $this->assertRequestResets('after nested commands');
+    }
+
+    /**
+     * Audit XB-1: a server started from a console command (Swoole, ReactPHP, RoadRunner) serves each main request as a
+     * unit of its own: every request resets at its start and at its terminate (1.9.0 did; the first 1.9.1 tracker held
+     * them back as nested in the command), and the command still resets at its end.
+     */
+    public function testAServerCommandResetsAtEveryRequest(): void
+    {
+        $resets  = null;
+        $atStart = [];
+        $this->addCommand('app:serve', function () use (&$resets, &$atStart): int {
+            $before = $this->manager->resets;
+            for ($i = 0; $i < 3; ++$i) {
+                $this->manager->live();
+                $this->serve(function () use (&$atStart): void {
+                    $atStart[] = $this->manager->isInitialized();
+                    $this->manager->live();
+                });
+            }
+            $resets = $this->manager->resets - $before;
+
+            return 0;
+        });
+
+        self::assertSame(0, $this->runCommand('app:serve'));
+        self::assertSame(6, $resets, 'start and terminate of each of the 3 requests');
+        self::assertSame([false, false, false], $atStart);
+        self::assertFalse($this->manager->isInitialized());
+        $this->assertCommandResets('after a server command');
     }
 
     /** A main request handled in-process inside another one (and its terminate) keeps the outer request's manager. */

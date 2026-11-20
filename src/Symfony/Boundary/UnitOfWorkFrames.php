@@ -36,9 +36,12 @@ use const PHP_INT_MIN;
  * Tracks which unit of work is running in this process, so {@see UnitOfWorkBoundaryListener} resets the host-flush
  * probe and the private entity managers only at the OUTERMOST boundary of a request, a Messenger message or a console
  * command (1.9.1, REQ-RUNTIME-002 rule 4). A unit run in-process inside another one (a command started by a command, a
- * message handler or a controller; a request handled by a command or a handler; a worker run by a handler) no longer
- * resets the state of the unit that runs it, and a listener that throws at a boundary never leaves the process "inside"
- * a unit for good. Port of the audited tracker the bundles carry (UptimeMonitorBundle `UnitOfWorkBoundaries`, the
+ * message handler or a controller; a main request handled inside another main request or a message handler; a worker
+ * run by a handler) no longer resets the state of the unit that runs it, and a listener that throws at a boundary
+ * never leaves the process "inside" a unit for good. A console command does not hold back the requests it serves (audit
+ * XB-1): a main request with no other main request and no message in flight is a unit of its own, so a server started
+ * from a command (Swoole, ReactPHP, RoadRunner) resets at every request, as messages already did inside
+ * `messenger:consume`. Port of the audited tracker the bundles carry (UptimeMonitorBundle `UnitOfWorkBoundaries`, the
  * superset of the StorageKit, Yopass, PageBuilderKit, BreadcrumbKit, BlogKit and DashboardMenu copies: audits NM,
  * NL2-v, NR-b, NX CR1–CR3, OB-M1, OB-L1–L3, OB2-L1).
  *
@@ -54,12 +57,13 @@ use const PHP_INT_MIN;
  *   never dispatches that terminate: the marked frame (and those above it) is dropped at the next request, message,
  *   command or worker event (self-healing, so the process never stays "inside a command" for good);
  * - main requests: a STACK of the main `Request` objects in flight (audit NX CR2). A main request is the outermost
- *   unit only when no other main request is in flight, so a main request handled in-process inside another one never
- *   clears the outer one. `kernel.finish_request` / `kernel.terminate` pop their request and the requests above it
+ *   unit when no other main request and no message is in flight, whatever command runs (audit XB-1), so a main request
+ *   handled in-process inside another one (or inside a message handler) never clears the outer unit. `kernel.finish_request` / `kernel.terminate` pop their request and the requests above it
  *   (nested requests whose end never came); an unknown request pops nothing. A main request that is the HTTP
  *   kernel's own main request (its `RequestStack`, popped in a `finally`) drops the requests left on the stack by a
  *   request whose end never came (a throwing `kernel.exception` listener). `kernel.terminate` is the outermost unit
- *   only when nothing runs any more (the terminate of a nested main request keeps the outer one, audit OB-L3);
+ *   only when no main request and no message runs any more (the terminate of a nested main request keeps the outer
+ *   one, audit OB-L3);
  * - Messenger: a STACK of the running workers (`WorkerStartedEvent` → `WorkerStoppedEvent`), each with its message in
  *   flight (audit NX CR1). A worker run in-process inside a message handler gets its own entry, so its events never
  *   end the outer message. A message ends at handled / failed / `WorkerMessageSkipEvent` (dispatched only by
@@ -150,7 +154,8 @@ final class UnitOfWorkFrames implements EventSubscriberInterface
     }
 
     /**
-     * Main `kernel.request`: outermost only when nothing runs, not even another main request (audit NX CR2).
+     * Main `kernel.request`: outermost when no other main request (audit NX CR2) and no message is in flight; a running
+     * console command does not count (audit XB-1: a server command serving requests).
      */
     public function onRequest(RequestEvent $event): void
     {
@@ -172,7 +177,7 @@ final class UnitOfWorkFrames implements EventSubscriberInterface
         }
 
         // @igor-ignore - Per-event verdict; the WeakMap entry dies with the event.
-        $this->verdicts[$event] = $this->isIdle();
+        $this->verdicts[$event] = $this->isHttpIdle();
         // @igor-ignore - Stack of the main requests in flight, popped at their own finish_request / terminate.
         $this->requests[] = $request;
     }
@@ -189,8 +194,8 @@ final class UnitOfWorkFrames implements EventSubscriberInterface
     }
 
     /**
-     * End of a request: pops it (and the requests above it whose end never came). The outermost unit only when nothing
-     * runs any more, so the `kernel.terminate` of a main request handled in-process inside another one never clears the
+     * End of a request: pops it (and the requests above it whose end never came). The outermost unit when no main request
+     * and no message runs any more (a running console command does not count, audit XB-1), so the `kernel.terminate` of a main request handled in-process inside another one never clears the
      * outer request (audit OB-L3). Requests left below by a request whose end never came are dropped at the next main
      * request of the HTTP kernel ({@see onRequest()}).
      */
@@ -199,7 +204,7 @@ final class UnitOfWorkFrames implements EventSubscriberInterface
         $this->dropStaleUnits();
         $this->endRequest($event->getRequest());
         // @igor-ignore - Per-event verdict; the WeakMap entry dies with the event.
-        $this->verdicts[$event] = $this->isIdle();
+        $this->verdicts[$event] = $this->isHttpIdle();
     }
 
     /**
@@ -428,6 +433,12 @@ final class UnitOfWorkFrames implements EventSubscriberInterface
         $this->dropAbortedRuns();
 
         return $this->messageInFlight();
+    }
+
+    /** No main request and no message in flight (a running console command does not count, audit XB-1). */
+    private function isHttpIdle(): bool
+    {
+        return $this->requests === [] && !$this->messageInFlight();
     }
 
     private function isIdle(): bool

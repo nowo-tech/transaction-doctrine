@@ -16,8 +16,9 @@ use Symfony\Contracts\Service\ResetInterface;
  * `kernel.reset`.
  *
  * Since 1.9.1 the Symfony bundle gives it the {@see UnitOfWorkFrames} tracker, which judges each boundary event
- * (OUTERMOST units only): a command, a request or a worker run in-process inside another unit never resets the state
- * of the unit that runs it; an aborted Messenger run, a message skipped with `shouldHandle(false)`, a nested main
+ * (OUTERMOST units only): a command run inside another unit, a main request inside another main request or a message
+ * handler, and a worker run by a handler never reset the state of the unit that runs them, while a main request served
+ * by a running command (a server command) is a unit of its own (audit XB-1); an aborted Messenger run, a message skipped with `shouldHandle(false)`, a nested main
  * request, and a `console.error` / `kernel.exception` / `WorkerMessageReceivedEvent` listener that throws never leave
  * the process "inside" a unit for good (audits NX CR1–CR3, OB-M1, OB-L1–L3, ported from the bundles' trackers).
  *
