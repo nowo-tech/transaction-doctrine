@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.7.2](#to-172)
 - [To 1.7.1](#to-171)
 - [To 1.7.1](#to-171-1)
 - [To 1.7.0](#to-170)
@@ -27,17 +28,7 @@
 
 ## Unreleased
 
-From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
-
-- After the repairer closes a connection whose transaction was rollback-only, the next transaction commits again
-  (DBAL 4, and DBAL 3 with savepoints; before, `CommitFailedRollbackOnly`). A host that worked around that error after
-  a deadlock-and-close can drop the workaround.
-- A DBAL 3 test double of `Connection` (whose `getTransactionNestingLevel()` returns `null`) no longer makes the
-  runner throw a `TypeError`: the test sees the run's own failure.
-
-### To 1.8.0 (after 1.7.2)
-
-`composer update nowo-tech/transaction-doctrine`. No configuration change. Behaviour change:
+From **1.7.2**: `composer update nowo-tech/transaction-doctrine`. No configuration change. Behaviour change:
 
 - **A write-unit replay keeps the host's entities (audits VD2-4 / VQ).** Before, a replay cleared every open entity
   manager (the host's default one included, unless the unit was scoped with `forManagers()`), so entities loaded
@@ -54,6 +45,22 @@ From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configurati
   updating.
 - `DoctrineStateRepairer::discardUnitOfWork()` now returns a list and takes two optional arguments; a caller that
   ignored the (void) result is unaffected.
+
+## To 1.7.2
+
+From **1.7.1**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
+
+From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change.
+
+- After the repairer closes a connection whose transaction was rollback-only, the next transaction commits again
+  (DBAL 4, and DBAL 3 with savepoints; before, `CommitFailedRollbackOnly`). A host that worked around that error after
+  a deadlock-and-close can drop the workaround.
+- A DBAL 3 test double of `Connection` (whose `getTransactionNestingLevel()` returns `null`) no longer makes the
+  runner throw a `TypeError`: the test sees the run's own failure.
 
 ## To 1.7.1
 

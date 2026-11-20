@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.7.2] - 2026-11-20](#172---2026-11-20)
 - [[1.7.1] - 2026-11-19](#171---2026-11-19)
 - [[1.7.0] - 2026-11-19](#170---2026-11-19)
 - [[1.6.1] - 2026-11-19](#161---2026-11-19)
@@ -22,27 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **No TypeError with DBAL 3 test doubles.** DBAL 3 declares `Connection::getTransactionNestingLevel()` and
-  `isRollbackOnly()` without native return types, so a PHPUnit double of DBAL 3's `Connection` returns `null`;
-  `DoctrineTransactionRunner::run()` passed it to `ConnectionRepairer::afterFailure(Connection, int)`, which threw a
-  `TypeError` instead of the run's own failure (seen in ChatKit's DBAL 3 unit tests). Both values are now read as
-  `(int)` / `(bool)` in the runner and the repairer (Rector's `RecastingRemovalRector` is skipped for those two files).
-- **The rollback-only flag no longer outlives a closed connection (DBAL 3 and DBAL 4).** DBAL keeps the flag set by
-  `Connection::setRollbackOnly()` (or, on DBAL 3 without savepoints, by an inner `rollBack()`) across
-  `Connection::close()`; only a level-1 `ROLLBACK` resets it. When `ConnectionRepairer` closed a connection whose
-  nested rollback failed (the server dropped the savepoints after a deadlock or a lost connection), it cleared the
-  flag only with DBAL 3's emulated nesting, so on DBAL 4 (or DBAL 3 with savepoints) the next transaction on the
-  reopened connection failed at commit with `CommitFailedRollbackOnly`. The repairer now reads the flag before
-  closing (`afterFailure()` and `betweenRequests()`; an unreadable flag counts as set) and then begins and rolls back
-  every level that `BEGIN` left open: one, or two with auto-commit disabled, where the reconnect opens level 1 itself
-  (audit VQ-6). A `BEGIN` that fails there is rolled back or the connection closed again, so no level stays counted.
-  As a second line, `DoctrineTransactionRunner::run()` clears a stale flag right after its own outermost `BEGIN` (one
-  `ROLLBACK` and a new `BEGIN`, with a notice); with auto-commit disabled the run enters at level 1, where the flag
-  may be the caller's, so only the repairer clears it there. No entity manager is touched by either.
-
-### Changed (1.8.0)
+### Changed
 
 - **A write-unit replay no longer clears the host's entity manager (audits VD2-4 / VQ, REQ-RUNTIME-003 rule 2).**
   Between two attempts `WriteUnit` cleared every open entity manager (unless scoped with `forManagers()`), so every
@@ -67,6 +48,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DoctrineStateRepairer::discardUnitOfWork()` takes two optional arguments (the write unit's per-manager observers,
   an internal type, and whether to reload every kept entity) and returns the list of managers it could not fully
   restore (it returned nothing before). Called without them it behaves as before.
+
+## [1.7.2] - 2026-11-20
+
+### Fixed
+
+- **No TypeError with DBAL 3 test doubles.** DBAL 3 declares `Connection::getTransactionNestingLevel()` and
+  `isRollbackOnly()` without native return types, so a PHPUnit double of DBAL 3's `Connection` returns `null`;
+  `DoctrineTransactionRunner::run()` passed it to `ConnectionRepairer::afterFailure(Connection, int)`, which threw a
+  `TypeError` instead of the run's own failure (seen in ChatKit's DBAL 3 unit tests). Both values are now read as
+  `(int)` / `(bool)` in the runner and the repairer (Rector's `RecastingRemovalRector` is skipped for those two files).
+- **The rollback-only flag no longer outlives a closed connection (DBAL 3 and DBAL 4).** DBAL keeps the flag set by
+  `Connection::setRollbackOnly()` (or, on DBAL 3 without savepoints, by an inner `rollBack()`) across
+  `Connection::close()`; only a level-1 `ROLLBACK` resets it. When `ConnectionRepairer` closed a connection whose
+  nested rollback failed (the server dropped the savepoints after a deadlock or a lost connection), it cleared the
+  flag only with DBAL 3's emulated nesting, so on DBAL 4 (or DBAL 3 with savepoints) the next transaction on the
+  reopened connection failed at commit with `CommitFailedRollbackOnly`. The repairer now reads the flag before
+  closing (`afterFailure()` and `betweenRequests()`; an unreadable flag counts as set) and then begins and rolls back
+  every level that `BEGIN` left open: one, or two with auto-commit disabled, where the reconnect opens level 1 itself
+  (audit VQ-6). A `BEGIN` that fails there is rolled back or the connection closed again, so no level stays counted.
+  As a second line, `DoctrineTransactionRunner::run()` clears a stale flag right after its own outermost `BEGIN` (one
+  `ROLLBACK` and a new `BEGIN`, with a notice); with auto-commit disabled the run enters at level 1, where the flag
+  may be the caller's, so only the repairer clears it there. No entity manager is touched by either.
 
 ## [1.7.1] - 2026-11-19
 
@@ -443,7 +446,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Requires `nowo-tech/transaction-contract ^1.0` and `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.
 
-[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.6.0...v1.6.1
