@@ -285,7 +285,8 @@ final class PrivateEntityManager extends EntityManagerDecorator implements Reset
         $unitOfWork = $manager->getUnitOfWork();
         $unitOfWork->computeChangeSets();
         $changes = [];
-        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityUpdates(), $unitOfWork->getScheduledEntityDeletions()] as $entities) {
+        // Managed orphan removals are dropped changes too (1.9.2, audit TD192-4).
+        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityUpdates(), $unitOfWork->getScheduledEntityDeletions(), OrphanRemovals::pending($unitOfWork)] as $entities) {
             foreach ($entities as $entity) {
                 $class           = PrivateManagerRegistry::realClass($entity::class);
                 $changes[$class] = ($changes[$class] ?? 0) + 1;

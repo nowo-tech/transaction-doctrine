@@ -88,6 +88,26 @@ trait PrivateManagerScenarios
         $private->reset();
     }
 
+    /**
+     * Audit TD192-4 (1.9.2): a private manager dropped at a boundary with only an orphan removal pending (clear() on an
+     * inverse one-to-many with orphanRemoval) logs it as a dropped change, and nothing is deleted.
+     */
+    private function scenarioADroppedOrphanRemovalIsLogged(): void
+    {
+        $this->connection->insert('ddrb_card', ['id' => 95, 'board_id' => 1]);
+        $logger  = new RecordingLogger();
+        $private = $this->privateManager($logger);
+        $board   = $private->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $board);
+        self::assertCount(1, $board->cards);
+        $board->cards->clear();
+
+        $private->reset();
+        self::assertSame(['warning'], $logger->levels());
+        self::assertSame(['bundle' => 'TestBundle', 'count' => 1, 'changes' => [Card::class => 1]], $logger->records[0]['context']);
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 95'));
+    }
+
     /** A closed private manager (its own failed flush) is replaced; the host's manager stays open. */
     private function scenarioAClosedPrivateManagerIsReplaced(): void
     {

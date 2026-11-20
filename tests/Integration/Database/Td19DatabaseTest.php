@@ -104,6 +104,13 @@ final class Td19DatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testTheProbeWalksReportedClassesAndSwappedCollections(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioTheProbeWalksReportedClassesAndSwappedCollections();
+    }
+
+    #[DataProvider('allServers')]
     public function testTheProbeComparesEnumsAsTheFlushDoes(string $server): void
     {
         $this->ledger = new CommitLedger();
@@ -174,6 +181,13 @@ final class Td19DatabaseTest extends DatabaseTestCase
     {
         $this->boot($server);
         $this->scenarioAStalePrivateManagerWithAPendingOrphanRemovalIsKept();
+    }
+
+    #[DataProvider('allServers')]
+    public function testADroppedOrphanRemovalIsLogged(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADroppedOrphanRemovalIsLogged();
     }
 
     #[DataProvider('allServers')]

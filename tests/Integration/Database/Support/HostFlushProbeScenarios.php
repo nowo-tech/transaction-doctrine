@@ -229,6 +229,50 @@ trait HostFlushProbeScenarios
     }
 
     /**
+     * Audit TD192-1 (1.9.2): an entity whose class is already reported is still walked, so the orphan its inverse
+     * one-to-one leaves and the new entity its collection cascade-persists are reported. Audit TD192-2: a clean
+     * collection of another entity assigned to a many-to-many owning side is written for its new owner: reported.
+     * Each case is checked against what the flush then writes.
+     */
+    private function scenarioTheProbeWalksReportedClassesAndSwappedCollections(): void
+    {
+        $this->connection->insert('ddrb_profile', ['id' => 1]);
+        $this->connection->insert('ddrb_badge', ['id' => 1, 'profile_id' => 1]);
+        $manager = $this->manager();
+        $probe   = new HostFlushProbe();
+
+        $profile = $manager->find(Profile::class, 1);
+        self::assertInstanceOf(Profile::class, $profile);
+        $profile->badge = null;
+        $manager->persist(new Profile(9)); // Profile is reported by the insertion
+        self::assertSame([Badge::class, Profile::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'the orphan of an already reported class');
+        $manager->flush();
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_badge'), 'the flush deleted the badge');
+
+        $manager->clear();
+        $probe->reset();
+        $board = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $board);
+        $manager->persist(new Board(5)); // Board is reported by the insertion
+        $board->cards->add(new Card(32, $board)); // cascade persist inserts the card
+        self::assertSame([Board::class, Card::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'the cascade of an already reported class');
+        $manager->flush();
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 32'), 'the flush inserted the card');
+
+        $manager->clear();
+        $probe->reset();
+        $first  = $manager->find(Shelf::class, 1);
+        $second = $manager->find(Shelf::class, 5);
+        self::assertInstanceOf(Shelf::class, $first);
+        self::assertInstanceOf(Shelf::class, $second);
+        self::assertCount(1, $first->counters); // initialised, still clean
+        $second->counters = $first->counters;
+        self::assertSame([Shelf::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'a clean collection of another owner');
+        $manager->flush();
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_shelf_counter WHERE shelf_id = 5 AND counter_id = 1'), 'the flush wrote the join row for the new owner');
+    }
+
+    /**
      * Audit XA-1: a backed-enum field is loaded as its case(s) but read as its backing value(s); compared the way
      * UnitOfWork::computeChangeSet() does (ORM 2.20, 3.7, 3.8), an untouched entity is not pending work.
      */

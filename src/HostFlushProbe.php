@@ -172,7 +172,9 @@ final class HostFlushProbe implements ResetInterface
 
             foreach ($entities as $entity) {
                 $class = $this->realClass($entity::class);
-                if (!isset($foreign[$class]) && !$this->owned($class, $prefixes) && !$unitOfWork->isUninitializedObject($entity)
+                // An already reported class is walked too (1.9.2, audit TD192-1): changed() also notes the orphans an
+                // inverse to-one leaves and the new entities a changed association cascade-persists.
+                if (!$this->owned($class, $prefixes) && !$unitOfWork->isUninitializedObject($entity)
                     && $this->changed($entityManager, $entity, $note)) {
                     $foreign[$class] = true;
                 }
@@ -246,7 +248,9 @@ final class HostFlushProbe implements ResetInterface
         foreach ($metadata->getAssociationNames() as $field) {
             $value = $metadata->getFieldValue($entity, $field);
             if ($metadata->isCollectionValuedAssociation($field)) {
-                if ($value instanceof PersistentCollection && !$value->isDirty()) {
+                // Unchanged only when it is the loaded collection itself and clean (1.9.2, audit TD192-2): a clean
+                // collection of another entity assigned here makes the flush write it for this owner.
+                if ($value instanceof PersistentCollection && !$value->isDirty() && array_key_exists($field, $original) && $value === $original[$field]) {
                     continue;
                 }
 
