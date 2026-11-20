@@ -17,6 +17,8 @@ use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInt
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
+use function array_is_list;
+use function is_array;
 use function is_object;
 use function is_string;
 use function preg_match;
@@ -78,7 +80,7 @@ final readonly class WriteUnitControllerListener
         $arguments  = $event->getArguments();
         $route      = $event->getRequest()->attributes->get('_route');
         $unit       = is_string($route) ? $route : null;
-        $event->setController(fn (): mixed => $this->runAsUnit($controller, $arguments, $unit), $event->getAttributes());
+        $event->setController(fn (): mixed => $this->runAsUnit($controller, $arguments, $unit), $this->attributes($event));
     }
 
     public function listed(Request $request): bool
@@ -95,6 +97,22 @@ final readonly class WriteUnitControllerListener
         }
 
         return false;
+    }
+
+    /**
+     * The replaced controller's attributes, in the shape setController() takes (1.9.2): a flat list on Symfony >= 8.1,
+     * which deprecates attributes grouped by class name, grouped by class name before. Feature-detected: since 8.1
+     * getAttributes() also keeps them as a flat list in the `_controller_attributes` request attribute (public since
+     * 8.1, unused before), so that list is passed when present and the grouped array otherwise.
+     *
+     * @return array<array-key, mixed>
+     */
+    private function attributes(ControllerArgumentsEvent $event): array
+    {
+        $grouped = $event->getAttributes();
+        $flat    = $event->getRequest()->attributes->get('_controller_attributes');
+
+        return is_array($flat) && array_is_list($flat) ? $flat : $grouped;
     }
 
     private function applies(ControllerArgumentsEvent $event, Request $request): bool

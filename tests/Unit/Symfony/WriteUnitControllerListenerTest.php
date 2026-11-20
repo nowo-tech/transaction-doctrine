@@ -21,6 +21,7 @@ use Symfony\Component\Clock\MockClock;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Attribute\Cache;
 use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\HttpKernel\Controller\ArgumentResolver;
 use Symfony\Component\HttpKernel\Controller\ArgumentResolver\RequestPayloadValueResolver;
@@ -38,6 +39,10 @@ use Symfony\Component\Serializer\Serializer;
 
 use function count;
 use function in_array;
+use function restore_error_handler;
+use function set_error_handler;
+
+use const E_USER_DEPRECATED;
 
 /**
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -202,6 +207,41 @@ final class WriteUnitControllerListenerTest extends TestCase
         self::assertSame($original, $event->getController());
     }
 
+    /**
+     * 1.9.2: the wrapped controller keeps the replaced controller's attributes (#[AsWriteUnit] and the others, read by
+     * the listeners after this one), and passing them raises no deprecation: a flat list on Symfony >= 8.1 (grouped by
+     * class name is deprecated there), grouped by class name before. Runs against whichever Symfony is installed (7.4 on
+     * PHP 8.2, 8.x on PHP 8.4 / 8.5 in CI).
+     */
+    public function testTheAttributesAreKeptWithoutADeprecation(): void
+    {
+        $controller   = new AttributedController();
+        $request      = Request::create('/tag', 'POST');
+        $event        = $this->event($controller->tag(...), [], $request);
+        $deprecations = [];
+        // @phpstan-ignore frankenphp.worker.noSetErrorExceptionHandler (test helper, restored in finally)
+        set_error_handler(static function (int $level, string $message) use (&$deprecations): bool {
+            $deprecations[] = $message;
+
+            return true;
+        }, E_USER_DEPRECATED);
+
+        try {
+            (new WriteUnitControllerListener($this->writeUnit()))($event);
+        } finally {
+            restore_error_handler();
+        }
+
+        self::assertSame([], $deprecations);
+        self::assertCount(1, $event->getAttributes(AsWriteUnit::class));
+        $cache = $event->getAttributes(Cache::class);
+        self::assertCount(1, $cache);
+        self::assertSame(60, $cache[0]->maxage);
+        $response = ($event->getController())();
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame('tagged', $response->getContent());
+    }
+
     private function user(TokenStorage $tokens): ?UserInterface
     {
         return $tokens->getToken()?->getUser();
@@ -358,6 +398,19 @@ final class PayloadController
         }
 
         return new Response('saved ' . $dto->title . ' after ' . $this->calls);
+    }
+}
+
+/**
+ * @internal
+ */
+final class AttributedController
+{
+    #[AsWriteUnit]
+    #[Cache(maxage: 60)]
+    public function tag(): Response
+    {
+        return new Response('tagged');
     }
 }
 
