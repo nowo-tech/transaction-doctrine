@@ -97,6 +97,22 @@ final class Td19DatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testTheProbeComparesEnumsAsTheFlushDoes(string $server): void
+    {
+        $this->ledger = new CommitLedger();
+        $this->boot($server);
+        $this->scenarioTheProbeComparesEnumsAsTheFlushDoes();
+    }
+
+    #[DataProvider('allServers')]
+    public function testTheProbeNeverBreaksTheWrite(string $server): void
+    {
+        $this->ledger = new CommitLedger();
+        $this->boot($server);
+        $this->scenarioTheProbeNeverBreaksTheWrite();
+    }
+
+    #[DataProvider('allServers')]
     public function testThePrivateManagerNeverFlushesTheHostsWork(string $server): void
     {
         $this->ledger = new CommitLedger();

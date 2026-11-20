@@ -6,6 +6,7 @@ namespace Nowo\TransactionDoctrine\Symfony;
 
 use Nowo\TransactionDoctrine\HostFlushProbe;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
+use Nowo\TransactionDoctrine\Symfony\Boundary\UnitOfWorkFrames;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
@@ -258,13 +259,20 @@ final class NowoTransactionDoctrineBundle extends AbstractBundle
         }
 
         $services->set(HostFlushProbe::SERVICE_ID, HostFlushProbe::class)
+            ->args([service('logger')->nullOnInvalid()])
+            ->tag('monolog.logger', ['channel' => 'transaction_doctrine'])
             ->tag('kernel.reset', ['method' => 'reset'])
             ->public();
         $services->alias(HostFlushProbe::class, HostFlushProbe::SERVICE_ID);
         $builder->registerForAutoconfiguration(PrivateEntityManager::class)->addTag(PrivateEntityManager::TAG);
         if ($config['unit_of_work_boundaries']) {
+            // 1.9.1: the unit tracker judges every boundary at the extreme priorities (outermost units only; audits NX
+            // CR1–CR3, OB-M1, OB-L1–L3). Process-lifetime state, never reset by kernel.reset.
+            $services->set($prefix . 'unit_of_work_frames', UnitOfWorkFrames::class)
+                ->args([service('request_stack')->nullOnInvalid()])
+                ->tag('kernel.event_subscriber');
             $boundaries = $services->set($prefix . 'unit_of_work_boundary_listener', UnitOfWorkBoundaryListener::class)
-                ->args([tagged_iterator(PrivateEntityManager::TAG), service(HostFlushProbe::SERVICE_ID)])
+                ->args([tagged_iterator(PrivateEntityManager::TAG), service(HostFlushProbe::SERVICE_ID), service($prefix . 'unit_of_work_frames')])
                 ->tag('kernel.event_listener', ['event' => KernelEvents::REQUEST, 'method' => 'onBoundary', 'priority' => 4095])
                 ->tag('kernel.event_listener', ['event' => KernelEvents::TERMINATE, 'method' => 'onBoundary', 'priority' => -4095])
                 ->tag('kernel.event_listener', ['event' => 'console.command', 'method' => 'onCommand', 'priority' => 4095])

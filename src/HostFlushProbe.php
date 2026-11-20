@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine;
 
+use BackedEnum;
 use Closure;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\AssociationMapping;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\Mapping\FieldMapping;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
+use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Service\ResetInterface;
+use Throwable;
 
 use function array_key_exists;
 use function array_keys;
+use function get_debug_type;
 use function is_array;
 use function is_iterable;
 use function is_object;
@@ -49,6 +54,13 @@ use const E_USER_DEPRECATED;
  * Messenger message, outermost console command; FrankenPHP worker with kernel reset off included) and at
  * `kernel.reset`. Without the Symfony bundle, create one per unit of work, or call reset() at your boundaries.
  *
+ * Never breaks the caller's write (1.9.1, audit XA-3): a Throwable from the inspection (a broken proxy, an entity whose
+ * state cannot be read) or from the deprecation itself (a host error handler that ignores `@` and throws on
+ * E_USER_DEPRECATED) is caught; it is logged as a warning when a PSR logger is wired (the Symfony bundle wires the
+ * `logger` service when there is one), otherwise swallowed. The warning holds the bundle, the entity class (for a
+ * failed deprecation) and the failure's type (`exception_type`), never its message or trace (audit XB-2). A failed
+ * inspection returns no classes.
+ *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech
  */
@@ -61,6 +73,13 @@ final class HostFlushProbe implements ResetInterface
     private array $reported = [];
 
     /**
+     * @param LoggerInterface|null $logger Where a failed inspection or deprecation is logged (warning); null swallows it
+     */
+    public function __construct(private readonly ?LoggerInterface $logger = null)
+    {
+    }
+
+    /**
      * Reports the host's pending changes the bundle's next flush of that manager would write, and returns their
      * classes (sorted). Call it right before the bundle flushes the host's manager in host mode; it changes nothing.
      *
@@ -69,9 +88,49 @@ final class HostFlushProbe implements ResetInterface
      * @param list<string> $ownNamespaces The bundle's entity namespaces (for example ["Nowo\WikiBundle\Entity"]): their
      *                                    classes are never reported
      *
-     * @return list<class-string> The foreign entity classes with pending work (reported or already reported)
+     * @return list<class-string> The foreign entity classes with pending work (reported or already reported); none when
+     *                            the inspection failed (logged, never thrown)
      */
     public function beforeHostFlush(EntityManagerInterface $entityManager, string $bundleName, array $ownNamespaces): array
+    {
+        try {
+            $foreign = $this->pendingClasses($entityManager, $ownNamespaces);
+        } catch (Throwable $throwable) {
+            $this->warn('Host-flush probe: inspecting the pending changes {bundle} is about to flush failed; nothing reported.', $bundleName, $throwable);
+
+            return [];
+        }
+
+        foreach ($foreign as $class) {
+            $key = $bundleName . '|' . $class;
+            if (!isset($this->reported[$key])) {
+                $this->reported[$key] = true; // @igor-ignore — per unit of work, emptied by reset() at every boundary
+
+                try {
+                    @trigger_error(sprintf('Your pending changes to %s were flushed by %s; 2.0 no longer does.', $class, $bundleName), E_USER_DEPRECATED);
+                } catch (Throwable $throwable) { // a host error handler that ignores @ and throws (audit XA-3)
+                    $this->warn('Host-flush probe: the deprecation for {class} flushed by {bundle} threw; the write goes on.', $bundleName, $throwable, $class);
+                }
+            }
+        }
+
+        return $foreign;
+    }
+
+    /** Forgets what was reported: a new unit of work (request, message, command) starts. */
+    public function reset(): void
+    {
+        $this->reported = []; // @igor-ignore — the boundary reset itself
+    }
+
+    /**
+     * The foreign entity classes with pending work in the host's unit of work, sorted.
+     *
+     * @param list<string> $ownNamespaces
+     *
+     * @return list<class-string>
+     */
+    private function pendingClasses(EntityManagerInterface $entityManager, array $ownNamespaces): array
     {
         $prefixes = [];
         foreach ($ownNamespaces as $namespace) {
@@ -121,13 +180,6 @@ final class HostFlushProbe implements ResetInterface
         }
 
         ksort($foreign);
-        foreach (array_keys($foreign) as $class) {
-            $key = $bundleName . '|' . $class;
-            if (!isset($this->reported[$key])) {
-                $this->reported[$key] = true; // @igor-ignore — per unit of work, emptied by reset() at every boundary
-                @trigger_error(sprintf('Your pending changes to %s were flushed by %s; 2.0 no longer does.', $class, $bundleName), E_USER_DEPRECATED);
-            }
-        }
 
         /** @var list<class-string> $classes */
         $classes = array_keys($foreign);
@@ -135,10 +187,15 @@ final class HostFlushProbe implements ResetInterface
         return $classes;
     }
 
-    /** Forgets what was reported: a new unit of work (request, message, command) starts. */
-    public function reset(): void
+    /** Logs a probe failure as a warning when a logger is wired; a failing logger is swallowed too (never thrown). */
+    private function warn(string $message, string $bundleName, Throwable $throwable, ?string $class = null): void
     {
-        $this->reported = []; // @igor-ignore — the boundary reset itself
+        try {
+            // Only the failure's type and the entity class: its message and trace may hold entity data (audit XB-2).
+            $this->logger?->warning($message, ['bundle' => $bundleName, 'class' => $class, 'exception_type' => get_debug_type($throwable)]);
+        } catch (Throwable) {
+            // The probe never breaks the caller's write, not even through its logger.
+        }
     }
 
     /**
@@ -175,8 +232,8 @@ final class HostFlushProbe implements ResetInterface
         $original = $unitOfWork->getOriginalEntityData($entity);
         $changed  = false;
         foreach ($metadata->getFieldNames() as $field) {
-            if (array_key_exists($field, $original) && ($value = $metadata->getFieldValue($entity, $field)) !== $original[$field]
-                && !$this->sameDatabaseValue($unitOfWork, $metadata, $field, $original[$field], $value)) {
+            if (array_key_exists($field, $original) && ($value = $metadata->getFieldValue($entity, $field)) !== ($loaded = $this->loadedValue($metadata, $field, $original[$field]))
+                && !$this->sameDatabaseValue($unitOfWork, $metadata, $field, $loaded, $value)) {
                 $changed = true;
 
                 break;
@@ -203,6 +260,48 @@ final class HostFlushProbe implements ResetInterface
         }
 
         return $changed;
+    }
+
+    /**
+     * The loaded value of a field as the flush compares it: an enum field's case(s) become backing value(s).
+     *
+     * @param ClassMetadata<object> $metadata
+     */
+    private function loadedValue(ClassMetadata $metadata, string $field, mixed $loaded): mixed
+    {
+        return $this->isEnumField($metadata->fieldMappings[$field]) ? $this->backingValues($loaded) : $loaded;
+    }
+
+    /**
+     * Whether the field maps a backed enum (`enumType`, also on array / simple_array columns).
+     *
+     * @param array<string, mixed>|object $mapping The field mapping (ORM 2 array, ORM 3 FieldMapping)
+     */
+    private function isEnumField(array|object $mapping): bool
+    {
+        $enumType = is_array($mapping) ? ($mapping['enumType'] ?? null) : ($mapping instanceof FieldMapping ? $mapping->enumType : null); // ORM 2 array, ORM 3 object
+
+        return $enumType !== null && $enumType !== '';
+    }
+
+    /**
+     * The loaded value of an enum field as UnitOfWork::computeChangeSet() compares it (ORM 2.20, 3.7 and 3.8 alike): the
+     * loaded state holds the enum case(s), the entity's field value (getFieldValue()) the backing value(s). A case, and
+     * each case of an array, becomes its backing value; anything else (null, a scalar) is compared as loaded (audit XA-1).
+     */
+    private function backingValues(mixed $loaded): mixed
+    {
+        if (is_array($loaded)) {
+            foreach ($loaded as $key => $case) {
+                if ($case instanceof BackedEnum) {
+                    $loaded[$key] = $case->value;
+                }
+            }
+
+            return $loaded;
+        }
+
+        return $loaded instanceof BackedEnum ? $loaded->value : $loaded;
     }
 
     /**

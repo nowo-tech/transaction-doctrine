@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
 use DateTimeImmutable;
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\UnitOfWork;
+use ErrorException;
 use Nowo\TransactionDoctrine\HostFlushProbe;
 use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Host\BundleNote;
+use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
+use RuntimeException;
 
 use function array_keys;
 use function in_array;
@@ -170,6 +174,127 @@ trait HostFlushProbeScenarios
             }, self::ormComparesObjectValues() ? [] : [Stamp::class]],
         ];
 
+        $this->assertTheProbeMatchesTheFlush($manager, $probe, $cases);
+        $manager->clear();
+        self::assertSame(0, (int) $this->freshValue("SELECT COUNT(*) FROM ddrb_owner WHERE label = 'changed'"), 'nothing flushed');
+    }
+
+    /**
+     * Audit XA-1: a backed-enum field is loaded as its case(s) but read as its backing value(s); compared the way
+     * UnitOfWork::computeChangeSet() does (ORM 2.20, 3.7, 3.8), an untouched entity is not pending work.
+     */
+    private function scenarioTheProbeComparesEnumsAsTheFlushDoes(): void
+    {
+        $manager = $this->manager();
+        $probe   = new HostFlushProbe();
+        $ticket  = static function () use ($manager): Ticket {
+            $ticket = $manager->find(Ticket::class, 1);
+            self::assertInstanceOf(Ticket::class, $ticket);
+
+            return $ticket;
+        };
+        $cases = [
+            'loaded and untouched' => [static function () use ($manager): void {
+                self::assertCount(2, $manager->getRepository(Ticket::class)->findAll());
+                self::assertInstanceOf(EnumKeyed::class, $manager->find(EnumKeyed::class, Kind::Alpha)); // an enum identifier
+            }, []],
+            'enum changed' => [static function () use ($ticket): void {
+                $ticket()->status = Kind::Beta;
+            }, [Ticket::class]],
+            'enum set to the same case' => [static function () use ($ticket): void {
+                $ticket()->status = Kind::Alpha;
+            }, []],
+            'array of enums untouched, other fields too' => [static function () use ($ticket): void {
+                self::assertSame([Kind::Alpha, Kind::Beta], $ticket()->kinds);
+            }, []],
+            'array of enums replaced by an equal one' => [static function () use ($ticket): void {
+                $ticket()->kinds = [Kind::Alpha, Kind::Beta];
+            }, []],
+            'array of enums changed' => [static function () use ($ticket): void {
+                $ticket()->kinds = [Kind::Beta];
+            }, [Ticket::class]],
+            'nullable enum set to null' => [static function () use ($ticket): void {
+                $ticket()->priority = null;
+            }, [Ticket::class]],
+            'nullable enum loaded null, set to a case' => [static function () use ($manager): void {
+                $ticket = $manager->find(Ticket::class, 2);
+                self::assertInstanceOf(Ticket::class, $ticket);
+                self::assertNull($ticket->priority);
+                $ticket->priority = Kind::Alpha;
+            }, [Ticket::class]],
+        ];
+
+        $this->assertTheProbeMatchesTheFlush($manager, $probe, $cases);
+        $manager->clear();
+        self::assertSame(1, (int) $this->freshValue("SELECT COUNT(*) FROM ddrb_ticket WHERE status = 'alpha' AND priority = 'beta' AND kinds = 'alpha,beta'"), 'nothing flushed');
+    }
+
+    /**
+     * Audit XA-3: the probe never breaks the caller's write. A host error handler that ignores @ and throws on the
+     * deprecation, an inspection that throws, and a logger that throws are all caught (logged when a logger is wired).
+     */
+    private function scenarioTheProbeNeverBreaksTheWrite(): void
+    {
+        $manager = $this->manager();
+        $counter = $manager->find(Counter::class, 1);
+        $board   = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Counter::class, $counter);
+        self::assertInstanceOf(Board::class, $board);
+        ++$counter->value;
+        $manager->persist(new Card(40, $board));
+
+        $logger = new RecordingLogger();
+        $probe  = new HostFlushProbe($logger);
+        // @phpstan-ignore frankenphp.worker.noSetErrorExceptionHandler (test helper, restored in finally)
+        set_error_handler(static function (int $level, string $message): never {
+            throw new ErrorException($message, 0, $level); // ignores @, as some hosts do
+        });
+
+        try {
+            self::assertSame([Card::class, Counter::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]));
+            self::assertSame([Card::class, Counter::class], (new HostFlushProbe())->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'no logger: swallowed');
+            self::assertSame([Card::class, Counter::class], (new HostFlushProbe(new ThrowingLogger()))->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'a throwing logger: swallowed');
+        } finally {
+            restore_error_handler();
+        }
+
+        self::assertSame(['warning', 'warning'], $logger->levels(), 'one warning per class, the next class still reported');
+        self::assertSame(Card::class, $logger->records[0]['context']['class']);
+        self::assertSame('TestBundle', $logger->records[0]['context']['bundle']);
+        self::assertSame(ErrorException::class, $logger->records[0]['context']['exception_type'], 'only the failure\'s type (audit XB-2)');
+        self::assertArrayNotHasKey('exception', $logger->records[0]['context'], 'never its message or trace');
+        self::assertSame([], $this->deprecations(static fn (): array => $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE])), 'reported once all the same');
+
+        // An inspection that throws (an entity whose class cannot be resolved, as a broken proxy).
+        $brokenManager = new BrokenMetadataManager($manager);
+        $broken        = new RecordingLogger();
+        $probe         = new HostFlushProbe($broken);
+        $messages      = $this->deprecations(static fn () => self::assertSame([], $probe->beforeHostFlush($brokenManager, 'TestBundle', [self::BUNDLE_NAMESPACE])));
+        self::assertSame([], $messages, 'nothing reported');
+        self::assertSame(['warning'], $broken->levels());
+        self::assertNull($broken->records[0]['context']['class']);
+        self::assertSame(RuntimeException::class, $broken->records[0]['context']['exception_type']);
+        self::assertArrayNotHasKey('exception', $broken->records[0]['context']);
+        self::assertSame([], (new HostFlushProbe())->beforeHostFlush($brokenManager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'no logger: swallowed');
+        self::assertSame([], (new HostFlushProbe(new ThrowingLogger()))->beforeHostFlush($brokenManager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'a throwing logger: swallowed');
+        self::assertSame([Card::class, Counter::class], (new HostFlushProbe())->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'the real manager still inspects');
+        self::assertTrue($manager->isOpen());
+    }
+
+    /** Whether the installed ORM compares a replaced object field by its database value (recent ORM 3; not ORM 2). */
+    private static function ormComparesObjectValues(): bool
+    {
+        return method_exists(UnitOfWork::class, 'isSameConvertedDatabaseValue'); // @phpstan-ignore function.alreadyNarrowedType (absent from older ORMs)
+    }
+
+    /**
+     * Runs each case on a cleared manager and a reset probe: the probe reports exactly the expected classes, and
+     * Doctrine's own change-set computation (on the side, after the probe) writes exactly those (plus the bundle's).
+     *
+     * @param array<string, array{callable(): void, list<class-string>}> $cases
+     */
+    private function assertTheProbeMatchesTheFlush(EntityManagerInterface $manager, HostFlushProbe $probe, array $cases): void
+    {
         foreach ($cases as $label => [$mutate, $expected]) {
             $manager->clear();
             $probe->reset();
@@ -201,14 +326,5 @@ trait HostFlushProbeScenarios
                 self::assertTrue(str_starts_with($class, self::BUNDLE_NAMESPACE . '\\') || in_array($class, $expected, true), $label . ': ' . $class . ' is written but not reported');
             }
         }
-
-        $manager->clear();
-        self::assertSame(0, (int) $this->freshValue("SELECT COUNT(*) FROM ddrb_owner WHERE label = 'changed'"), 'nothing flushed');
-    }
-
-    /** Whether the installed ORM compares a replaced object field by its database value (recent ORM 3; not ORM 2). */
-    private static function ormComparesObjectValues(): bool
-    {
-        return method_exists(UnitOfWork::class, 'isSameConvertedDatabaseValue'); // @phpstan-ignore function.alreadyNarrowedType (absent from older ORMs)
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit\Symfony\Fixtures;
 
+use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Nowo\TransactionDoctrine\Symfony\NowoTransactionDoctrineBundle;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\RecordingRegistry;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitRetryEvent;
@@ -83,6 +84,7 @@ final class TestKernel extends Kernel
             ->tag('kernel.event_listener', ['event' => WriteUnitRetryEvent::class, 'method' => 'onRetry']);
         $services->set(LowResetter::class)->autowire()->autoconfigure();
         $services->set(HighResetter::class)->autowire()->autoconfigure();
+        $services->set(RecordingPrivateManager::class)->public()->tag(PrivateEntityManager::TAG);
         $services->set(ConflictController::class)->autowire()->autoconfigure()->tag('controller.service_arguments')->public();
     }
 
