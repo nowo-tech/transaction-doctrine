@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.9.1](#to-191)
 - [To 1.9.0](#to-190)
 - [To 1.8.2](#to-182)
 - [To 1.8.1](#to-181)
@@ -29,6 +30,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.9.1
+
+From **v1.9.0**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 From **1.9.0**: `composer update nowo-tech/transaction-doctrine`. No configuration change. `HostFlushProbe` no longer
 reports loaded, untouched entities with backed-enum fields (audit XA-1): deprecations the probe raised only for such
