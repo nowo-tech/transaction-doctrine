@@ -123,6 +123,11 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioAFailedHostStatementBeforeCommit();
     }
 
+    public function testAStalePrivateManagerWithAPendingOrphanRemovalIsKept(): void
+    {
+        $this->scenarioAStalePrivateManagerWithAPendingOrphanRemovalIsKept();
+    }
+
     public function testABoundaryNeverFails(): void
     {
         $this->scenarioABoundaryNeverFails();

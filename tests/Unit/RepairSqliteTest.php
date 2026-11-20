@@ -95,6 +95,11 @@ final class RepairSqliteTest extends DatabaseTestCase
         $this->scenarioARolledBackOrphanRemovalIsCancelled(true);
     }
 
+    public function testAPendingOrphanRemovalMakesTheUnitRunOnce(): void
+    {
+        $this->scenarioAPendingOrphanRemovalMakesTheUnitRunOnce();
+    }
+
     public function testAnUnflushedRemovalIsCancelled(): void
     {
         $this->scenarioAnUnflushedRemovalIsCancelled();

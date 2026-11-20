@@ -18,6 +18,7 @@ use Doctrine\Persistence\Event\LifecycleEventArgs;
 use Doctrine\Persistence\ManagerRegistry;
 use Doctrine\Persistence\ObjectManager;
 use LogicException;
+use Nowo\TransactionDoctrine\OrphanRemovals;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Service\ResetInterface;
 use Throwable;
@@ -303,6 +304,10 @@ final class PrivateEntityManager extends EntityManagerDecorator implements Reset
         ]);
     }
 
+    /**
+     * Managed orphan removals count (1.9.2, audit XD-1): `clear()` on an inverse one-to-many with orphanRemoval, or an
+     * inverse one-to-one with orphanRemoval set to null, schedules nothing else, and replacing the manager drops it.
+     */
     private function hasScheduledWork(EntityManagerInterface $manager): bool
     {
         $unitOfWork = $manager->getUnitOfWork();
@@ -312,7 +317,8 @@ final class PrivateEntityManager extends EntityManagerDecorator implements Reset
             || $unitOfWork->getScheduledEntityUpdates() !== []
             || $unitOfWork->getScheduledEntityDeletions() !== []
             || $unitOfWork->getScheduledCollectionUpdates() !== []
-            || $unitOfWork->getScheduledCollectionDeletions() !== [];
+            || $unitOfWork->getScheduledCollectionDeletions() !== []
+            || OrphanRemovals::pending($unitOfWork) !== [];
     }
 
     /**

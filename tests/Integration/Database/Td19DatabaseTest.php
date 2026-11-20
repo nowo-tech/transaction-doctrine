@@ -163,6 +163,13 @@ final class Td19DatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testAStalePrivateManagerWithAPendingOrphanRemovalIsKept(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAStalePrivateManagerWithAPendingOrphanRemovalIsKept();
+    }
+
+    #[DataProvider('allServers')]
     public function testABoundaryNeverFails(string $server): void
     {
         $this->ledger = new CommitLedger();

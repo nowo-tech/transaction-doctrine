@@ -245,6 +245,53 @@ trait PrivateManagerScenarios
     }
 
     /**
+     * Audit XD-1 (1.9.2): a managed orphan removal is pending work, so a stale private manager holding one is kept
+     * until it is flushed (replacing it would silently drop the bundle's removal). Both orphanRemoval shapes: clear()
+     * on an inverse one-to-many, and an inverse one-to-one set to null. Once the removal is flushed, the deleted Badge
+     * ORM keeps scheduling again (no longer managed, no flush deletes it) is no pending work: the stale manager is
+     * replaced.
+     */
+    private function scenarioAStalePrivateManagerWithAPendingOrphanRemovalIsKept(): void
+    {
+        $this->connection->insert('ddrb_card', ['id' => 81, 'board_id' => 1]);
+        $this->connection->insert('ddrb_profile', ['id' => 1]);
+        $this->connection->insert('ddrb_badge', ['id' => 1, 'profile_id' => 1]);
+        [$connection, $private] = $this->trackedPrivateManager();
+
+        try {
+            foreach ([
+                'ddrb_card' => static function (EntityManagerInterface $manager): void {
+                    $board = $manager->find(Board::class, 1);
+                    self::assertInstanceOf(Board::class, $board);
+                    self::assertCount(1, $board->cards);
+                    $board->cards->clear();
+                },
+                'ddrb_badge' => static function (EntityManagerInterface $manager): void {
+                    $profile = $manager->find(Profile::class, 1);
+                    self::assertInstanceOf(Profile::class, $profile);
+                    self::assertInstanceOf(Badge::class, $profile->badge);
+                    $profile->badge = null;
+                },
+            ] as $table => $orphan) {
+                $connection->beginTransaction();
+                $kept = $private->live();
+                $orphan($private); // loaded inside the transaction, then only an orphan removal is pending
+                $connection->rollBack();
+                self::assertTrue($private->isStale());
+                self::assertSame($kept, $private->live(), 'a pending orphan removal keeps the stale manager');
+
+                $private->flush();
+                self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ' . $table), 'the kept removal is written');
+                self::assertNotSame($kept, $private->live(), 'nothing pending any more: the stale manager is replaced');
+                self::assertFalse($private->isStale());
+            }
+        } finally {
+            $private->reset();
+            $connection->close();
+        }
+    }
+
+    /**
      * A private manager on its own connection, wrapped by PrivateEntityManagerMiddleware (and commit tracking, so both
      * middlewares are stacked as in an application). Savepoints on, also on DBAL 3.
      *
