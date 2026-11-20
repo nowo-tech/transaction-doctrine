@@ -36,6 +36,9 @@ final class AttemptObserver
     /** @var list<array{object, array<string, mixed>, array<string, mixed>}> Kept entities a flush deleted: entity, identifier, original data */
     public array $deleted = [];
 
+    /** @var array<int, true> Kept entities a flush of the attempt updated, deleted or whose collection it wrote, by spl_object_id */
+    public array $touched = [];
+
     /**
      * @param EntityManagerInterface $manager The manager observed
      * @param array<int, object> $kept The entities it managed before the first attempt, by spl_object_id
@@ -52,6 +55,7 @@ final class AttemptObserver
         $this->loaded  = [];
         $this->flushed = false;
         $this->deleted = [];
+        $this->touched = [];
     }
 
     /**
@@ -76,6 +80,20 @@ final class AttemptObserver
         $this->flushed = $this->flushed || $unitOfWork->getScheduledEntityInsertions() !== [] || $unitOfWork->getScheduledEntityUpdates() !== []
             || $unitOfWork->getScheduledEntityDeletions() !== [] || $unitOfWork->getScheduledCollectionUpdates() !== []
             || $unitOfWork->getScheduledCollectionDeletions() !== [];
+        $written = [...$unitOfWork->getScheduledEntityUpdates(), ...$unitOfWork->getScheduledEntityDeletions()];
+        foreach ([...$unitOfWork->getScheduledCollectionUpdates(), ...$unitOfWork->getScheduledCollectionDeletions()] as $collection) {
+            $owner = $collection->getOwner();
+            if ($owner !== null) {
+                $written[] = $owner;
+            }
+        }
+
+        foreach ($written as $entity) {
+            if (isset($this->kept[spl_object_id($entity)])) {
+                $this->touched[spl_object_id($entity)] = true;
+            }
+        }
+
         foreach ($unitOfWork->getScheduledEntityDeletions() as $entity) {
             if (isset($this->kept[spl_object_id($entity)])) {
                 /** @var array<string, mixed> $identifier */

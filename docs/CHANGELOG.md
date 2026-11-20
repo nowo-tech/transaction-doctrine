@@ -50,14 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that managed entities before the first attempt is now put back to what the database holds instead (internal
   `KeptEntitiesRestorer`, fed by a per-run `AttemptObserver` on `postLoad` and `onFlush`):
   - host entities a flush of the attempt deleted are managed again;
-  - the attempt's unflushed work is dropped: removals of host entities, orphan removals (`removeElement()` /
-    `clear()` on an `orphanRemoval` collection), computed updates and collection work;
+  - the attempt's unflushed work is dropped: removals of host entities (and of entities the attempt loaded itself,
+    which are detached), orphan removals (`removeElement()` / `clear()` on an `orphanRemoval` collection), computed
+    updates and collection work;
   - what the attempt brought in is unlinked from the host's entities and detached without cascading into them;
   - host entities are reloaded through their entity persister (no cascade): every initialised one when a flush wrote
     during the attempt (the flush moved the original data to the rolled-back values and bumped any version), else the
-    ones the attempt changed, re-hydrated or un-removed.
+    ones the attempt touched: changed (also behind a `computeChangeSets()` inside the attempt), re-hydrated, removed
+    or written by one of its flushes.
 
-  When a host entity cannot be brought back (detached by the attempt, its row gone, a reload that throws), the unit
+  When a host entity cannot be brought back (detached by the attempt, or touched by it and then its row gone or its
+  reload failing; an untouched host entity whose row another session deleted does not count), the unit
   gives up with `ConcurrencyConflict` (`Retry-After`, `CONFLICT_001`) after every other step, so the host's next
   flush writes nothing of the attempt; the manager stays open and is not cleared, with a warning. A manager that
   managed nothing before `run()` is cleared as before; a closed manager is still reset.

@@ -332,20 +332,23 @@ when no manager holds pending work, so whatever is pending or changed after a fa
 each open manager that already managed entities before `run()`, after the rollback and before the next attempt:
 
 1. host entities a flush of the attempt deleted are managed again (the rollback restored their rows);
-2. the attempt's unflushed work is dropped: `remove()` of a host entity cancelled, orphan removals cancelled (a
-   `removeElement()` or `clear()` on an `orphanRemoval` collection schedules the delete at once), computed updates
-   and collection work forgotten;
+2. the attempt's unflushed work is dropped: `remove()` of a host entity cancelled, a `remove()` of an entity the
+   attempt loaded itself forgotten (that entity is detached), orphan removals cancelled (a `removeElement()` or
+   `clear()` on an `orphanRemoval` collection schedules the delete at once), computed updates and collection work
+   forgotten;
 3. what the attempt brought in (loaded, referenced, persisted) is unlinked from the host's entities and detached,
    without cascading into them;
 4. host entities are reloaded from the database through their entity persister (never `EntityManager::refresh()`,
    which cascades and stops at a detached entity): **every** initialised host entity when a flush wrote during the
    attempt (a flush moves Doctrine's original data to the rolled-back values, and bumps a `#[Version]`), otherwise the
-   ones the attempt changed, re-hydrated (`refresh()`, a proxy initialised) or un-removed. A reload costs one query
+   ones the attempt touched: changed (also behind a `computeChangeSets()` call inside the attempt, which moves the
+   original data too), re-hydrated (`refresh()`, a proxy initialised), removed, or written by one of its flushes. A reload costs one query
    per entity and brings back fields, version, to-one associations and fresh (uninitialised) collections.
 
 The same objects stay managed and the next attempt starts from their stored state. When a host entity cannot be
-brought back (the attempt detached it, its row is gone, or its reload threw: a readonly property, a failing
-`postLoad` listener) the unit is **not** replayed: it ends with `ConcurrencyConflict` (409, `Retry-After`,
+brought back (the attempt detached it, or it touched it and its row is gone or its reload threw: a failing `postLoad`
+listener) the unit is **not** replayed. A host entity the attempt did not touch, whose row another session deleted
+meanwhile, is left as the host held it and does not stop the replay. When the unit is not replayed: it ends with `ConcurrencyConflict` (409, `Retry-After`,
 `CONFLICT_001`: nothing committed), after every other step ran, so the host's next flush writes nothing of the
 attempt. The manager stays open and is never cleared. A closed manager (the ORM closes it after a failed flush) is
 still reset through the registry, as before.

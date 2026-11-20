@@ -119,4 +119,64 @@ final class RepairSqliteTest extends DatabaseTestCase
     {
         $this->scenarioAGoneRowStopsTheReplay();
     }
+
+    public function testAHostRunnerFlushIsReloadedWrite(): void
+    {
+        $this->scenarioAHostRunnerFlushIsReloaded(false);
+    }
+
+    public function testAHostRunnerFlushIsReloadedIncrement(): void
+    {
+        $this->scenarioAHostRunnerFlushIsReloaded(true);
+    }
+
+    public function testAReadonlyVersionedParentIsReloaded(): void
+    {
+        $this->scenarioAReadonlyVersionedParentIsReloaded();
+    }
+
+    public function testACascadeDetachFromABroughtEntityStopsAtTheHost(): void
+    {
+        $this->scenarioACascadeDetachFromABroughtEntityStopsAtTheHost();
+    }
+
+    public function testANeverPersistedChildIsNotInserted(): void
+    {
+        $this->scenarioANeverPersistedChildIsNotInserted(false);
+    }
+
+    public function testANeverPersistedChildIsNotInsertedWithAnInitialisedCollection(): void
+    {
+        $this->scenarioANeverPersistedChildIsNotInserted(true);
+    }
+
+    public function testAMoveToALoadedParentIsUndone(): void
+    {
+        $this->scenarioAMoveToALoadedParentIsUndone();
+    }
+
+    public function testADeletedReadonlyParentIsWritableAgain(): void
+    {
+        $this->scenarioADeletedReadonlyParentIsWritableAgain();
+    }
+
+    public function testAFlushedOrphanRemovalIsUndone(): void
+    {
+        $this->scenarioAFlushedOrphanRemovalIsUndone();
+    }
+
+    public function testAStaleUntouchedHostEntityDoesNotStopTheReplay(): void
+    {
+        $this->scenarioAStaleUntouchedHostEntityDoesNotStopTheReplay();
+    }
+
+    public function testARemovalOfTheAttemptsOwnEntityIsForgotten(): void
+    {
+        $this->scenarioARemovalOfTheAttemptsOwnEntityIsForgotten();
+    }
+
+    public function testAComputedChangeIsStillUndone(): void
+    {
+        $this->scenarioAComputedChangeIsStillUndone();
+    }
 }

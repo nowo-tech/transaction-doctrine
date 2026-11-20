@@ -129,4 +129,88 @@ final class RepairDatabaseTest extends DatabaseTestCase
         $this->boot($server);
         $this->scenarioAGoneRowStopsTheReplay();
     }
+
+    #[DataProvider('allServers')]
+    public function testAHostRunnerFlushIsReloadedWrite(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAHostRunnerFlushIsReloaded(false);
+    }
+
+    #[DataProvider('allServers')]
+    public function testAHostRunnerFlushIsReloadedIncrement(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAHostRunnerFlushIsReloaded(true);
+    }
+
+    #[DataProvider('allServers')]
+    public function testAReadonlyVersionedParentIsReloaded(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAReadonlyVersionedParentIsReloaded();
+    }
+
+    #[DataProvider('allServers')]
+    public function testACascadeDetachFromABroughtEntityStopsAtTheHost(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioACascadeDetachFromABroughtEntityStopsAtTheHost();
+    }
+
+    #[DataProvider('allServers')]
+    public function testANeverPersistedChildIsNotInserted(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioANeverPersistedChildIsNotInserted(false);
+    }
+
+    #[DataProvider('allServers')]
+    public function testANeverPersistedChildIsNotInsertedWithAnInitialisedCollection(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioANeverPersistedChildIsNotInserted(true);
+    }
+
+    #[DataProvider('allServers')]
+    public function testAMoveToALoadedParentIsUndone(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAMoveToALoadedParentIsUndone();
+    }
+
+    #[DataProvider('allServers')]
+    public function testADeletedReadonlyParentIsWritableAgain(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioADeletedReadonlyParentIsWritableAgain();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAFlushedOrphanRemovalIsUndone(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAFlushedOrphanRemovalIsUndone();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAStaleUntouchedHostEntityDoesNotStopTheReplay(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAStaleUntouchedHostEntityDoesNotStopTheReplay();
+    }
+
+    #[DataProvider('allServers')]
+    public function testARemovalOfTheAttemptsOwnEntityIsForgotten(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioARemovalOfTheAttemptsOwnEntityIsForgotten();
+    }
+
+    #[DataProvider('allServers')]
+    public function testAComputedChangeIsStillUndone(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAComputedChangeIsStillUndone();
+    }
 }

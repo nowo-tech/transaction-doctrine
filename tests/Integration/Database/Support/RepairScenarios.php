@@ -6,6 +6,7 @@ namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\ORM\Events;
+use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
 use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
@@ -485,6 +486,298 @@ trait RepairScenarios
 
         self::assertTrue($manager->isOpen());
         self::assertTrue($manager->contains($host), 'The manager was not cleared.');
+    }
+
+    /** Audit VQ2 / P1, P1b through DoctrineTransactionRunner::forHostEntityManager(): the flushed write is reloaded. */
+    private function scenarioAHostRunnerFlushIsReloaded(bool $increment): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $this->unit()->run(function (int $attempt) use ($manager, $host, $increment): void {
+            DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry)->run(static function () use ($manager, $host, $increment, $attempt): void {
+                if ($increment) {
+                    ++$host->value;
+                } else {
+                    $host->value = 5;
+                }
+
+                $manager->flush();
+                if ($attempt === 1) {
+                    throw new DeadlockException(FakeDriverException::deadlock(), null);
+                }
+            });
+        });
+
+        $expected = $increment ? 1 : 5;
+        self::assertTrue($manager->contains($host));
+        self::assertSame($expected, $host->value);
+        self::assertSame($expected, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
+    }
+
+    /** Audit VQ2 / P5: a parent with a readonly id, a version and a cascade-refresh collection, flushed by the attempt. */
+    private function scenarioAReadonlyVersionedParentIsReloaded(): void
+    {
+        $manager = $this->manager();
+        $folder  = $manager->find(Folder::class, 1);
+        self::assertInstanceOf(Folder::class, $folder);
+        $leaf = $folder->leaves->first();
+        self::assertInstanceOf(Leaf::class, $leaf);
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager, $folder, $leaf): int {
+            self::assertSame('a', $folder->label);
+            self::assertSame(1, $folder->version);
+            self::assertSame('c1', $leaf->label);
+            if ($attempt === 1) {
+                $this->connection->beginTransaction();
+                $folder->label = 'zz';
+                $leaf->label   = 'yy';
+                $manager->flush();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            self::assertTrue($manager->contains($leaf));
+            self::assertTrue($folder->leaves->contains($leaf));
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, $folder->id);
+        self::assertSame('a', $this->freshValue('SELECT label FROM ddrb_folder WHERE id = 1'));
+        self::assertSame('c1', $this->freshValue('SELECT label FROM ddrb_leaf WHERE id = 1'));
+    }
+
+    /** Audit VQ2 / P6: detaching a brought note (cascade detach towards the counter) never detaches the host's counter. */
+    private function scenarioACascadeDetachFromABroughtEntityStopsAtTheHost(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 1);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $host): int {
+            $note = $manager->find(Note::class, 1);
+            self::assertInstanceOf(Note::class, $note);
+            self::assertSame($host, $note->counter);
+            if ($attempt === 1) {
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($host));
+    }
+
+    /**
+     * Audit VQ2 / P7: a never-persisted leaf reached only through the host folder's inverse cascade-persist collection.
+     * The replay's flush does not insert it.
+     */
+    private function scenarioANeverPersistedChildIsNotInserted(bool $initialised): void
+    {
+        $manager = $this->manager();
+        $folder  = $manager->find(Folder::class, 1);
+        self::assertInstanceOf(Folder::class, $folder);
+        if ($initialised) {
+            self::assertCount(1, $folder->leaves);
+        }
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $folder): int {
+            if ($attempt === 1) {
+                $folder->leaves->add(new Leaf(5, $folder, 'phantom'));
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $counter = $manager->find(Counter::class, 1);
+            self::assertInstanceOf(Counter::class, $counter);
+            ++$counter->value;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_leaf WHERE id = 5'));
+        self::assertCount(1, $folder->leaves);
+    }
+
+    /** Audit VQ2 / P8: the attempt moved the host's leaf to an existing folder it loaded, on both sides, and flushed. */
+    private function scenarioAMoveToALoadedParentIsUndone(): void
+    {
+        $manager = $this->manager();
+        $leaf    = $manager->find(Leaf::class, 1);
+        self::assertInstanceOf(Leaf::class, $leaf);
+        $parent = $leaf->folder;
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager, $leaf, $parent): int {
+            self::assertSame($parent, $leaf->folder);
+            if ($attempt === 1) {
+                $this->connection->beginTransaction();
+                $other = $manager->find(Folder::class, 2);
+                self::assertInstanceOf(Folder::class, $other);
+                $leaf->folder = $other;
+                $other->leaves->add($leaf);
+                $manager->flush();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, $leaf->folder->id);
+        self::assertSame(1, (int) $this->freshValue('SELECT folder_id FROM ddrb_leaf WHERE id = 1'));
+    }
+
+    /** Audit VQ2 / P11: a readonly-id, versioned host entity deleted by a flush of the attempt is managed again and writable. */
+    private function scenarioADeletedReadonlyParentIsWritableAgain(): void
+    {
+        $manager = $this->manager();
+        $folder  = $manager->find(Folder::class, 2);
+        self::assertInstanceOf(Folder::class, $folder);
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager, $folder): int {
+            if ($attempt === 1) {
+                $this->connection->beginTransaction();
+                $manager->remove($folder);
+                $manager->flush();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($folder));
+        self::assertSame(2, $folder->id);
+        $folder->label = 'after';
+        $manager->flush();
+        self::assertSame('after', $this->freshValue('SELECT label FROM ddrb_folder WHERE id = 2'));
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_folder WHERE id = 2'));
+    }
+
+    /** Audit VQ2 / P12: a host leaf orphan-removed and deleted by a flush of the attempt is back in its folder and writable. */
+    private function scenarioAFlushedOrphanRemovalIsUndone(): void
+    {
+        $manager = $this->manager();
+        $folder  = $manager->find(Folder::class, 1);
+        self::assertInstanceOf(Folder::class, $folder);
+        $leaf = $folder->leaves->first();
+        self::assertInstanceOf(Leaf::class, $leaf);
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager, $folder, $leaf): int {
+            if ($attempt === 1) {
+                $this->connection->beginTransaction();
+                $folder->leaves->removeElement($leaf);
+                $manager->flush();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($leaf));
+        self::assertTrue($folder->leaves->contains($leaf));
+        $leaf->label = 'edited';
+        $manager->flush();
+        self::assertSame('edited', $this->freshValue('SELECT label FROM ddrb_leaf WHERE id = 1'));
+    }
+
+    /**
+     * Audit VQ2-2 / P15: the host holds a counter whose row another session deleted. An attempt that flushed elsewhere
+     * reloads every kept entity; the stale, untouched one does not stop the replay.
+     */
+    private function scenarioAStaleUntouchedHostEntityDoesNotStopTheReplay(): void
+    {
+        $manager = $this->manager();
+        $stale   = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $stale);
+        $other = $this->connect();
+        $other->executeStatement('DELETE FROM ddrb_counter WHERE id = 2');
+        $other->close();
+
+        $result = $this->unit()->run(function (int $attempt) use ($manager): int {
+            $this->connection->beginTransaction();
+            $counter = $manager->find(Counter::class, 1);
+            self::assertInstanceOf(Counter::class, $counter);
+            ++$counter->value;
+            $manager->flush();
+            if ($attempt === 1) {
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            $this->connection->commit();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertTrue($manager->contains($stale));
+        self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
+    }
+
+    /**
+     * Audit VQ2-1 / P16: the attempt loaded an entity itself and removed it without flushing. Its removal is forgotten
+     * (the entity detached): the replay goes ahead and no later flush deletes the row.
+     */
+    private function scenarioARemovalOfTheAttemptsOwnEntityIsForgotten(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager): int {
+            if ($attempt === 1) {
+                $own = $manager->find(Counter::class, 1);
+                self::assertInstanceOf(Counter::class, $own);
+                $manager->remove($own);
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            self::assertSame([], $manager->getUnitOfWork()->getScheduledEntityDeletions());
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame([], $manager->getUnitOfWork()->getScheduledEntityDeletions());
+        $manager->flush(); // the host's own next flush
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_counter WHERE id = 1'));
+        self::assertTrue($manager->contains($host));
+    }
+
+    /** Audit VQ2-3 / P23: computeChangeSets() inside the attempt moves the original data; the change is still undone. */
+    private function scenarioAComputedChangeIsStillUndone(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager, $host): int {
+            if ($attempt === 1) {
+                $host->value = 9;
+                $manager->getUnitOfWork()->computeChangeSets();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            self::assertSame(0, $host->value);
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 2'));
     }
 
     private function unit(): WriteUnit

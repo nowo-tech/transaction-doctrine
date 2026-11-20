@@ -46,8 +46,8 @@ From **1.7.1**: `composer update nowo-tech/transaction-doctrine`. No configurati
   flushed, removed or re-hydrated them (one query each; every initialised one after an attempt that flushed). Code
   that re-loaded entities after the unit keeps working; code that kept using the caller's entities after a replay now
   gets managed objects holding the stored state instead of detached ones.
-- A replay whose failed attempt detached a host entity, or whose host entity cannot be reloaded (its row gone, a
-  readonly property, a failing `postLoad` listener), is no longer replayed: it ends with `ConcurrencyConflict` (409,
+- A replay whose failed attempt detached a host entity, or touched one that cannot be reloaded (its row gone, a
+  failing `postLoad` listener), is no longer replayed: it ends with `ConcurrencyConflict` (409,
   `Retry-After`, `CONFLICT_001`) after the rest was restored. Entities the failed attempt loaded are still detached,
   so request memos still need `ResetBetweenAttemptsInterface`.
 - Bundle tests that asserted the host manager was cleared after an unscoped replay (`contains()` false) need

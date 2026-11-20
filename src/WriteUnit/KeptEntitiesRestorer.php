@@ -34,11 +34,13 @@ use function spl_object_id;
  * 4. kept entities are reloaded from the database through their persister, never EntityManager::refresh(), which
  *    cascades first and stops at a detached entity (audit VQ-4): every initialised one when a flush wrote during the
  *    attempt (audit VQ-1: a flush moves the original data to the rolled-back values, so nothing would look changed;
- *    a version would be stale), else the ones the attempt changed, re-hydrated or un-removed. A reload brings back
- *    fields, version, to-one associations and fresh (uninitialised) collections.
+ *    a version would be stale), else the ones the attempt touched: changed (also behind a computeChangeSets() inside
+ *    the attempt, audit VQ2-3), re-hydrated, removed, or written by one of its flushes. A reload brings back fields,
+ *    version, to-one associations and fresh (uninitialised) collections.
  *
- * restore() answers false when a kept entity could not be brought back (the attempt detached it, or a step threw for it:
- * a row gone, a readonly property): the write unit then gives up with ConcurrencyConflict instead of replaying, and the
+ * restore() answers false when a kept entity could not be brought back (the attempt detached it, or a step threw for an
+ * entity the attempt touched: its row gone, a failing reload; an untouched kept entity whose row another session
+ * deleted is left as the host held it, audit VQ2-2): the write unit then gives up with ConcurrencyConflict instead of replaying, and the
  * manager keeps whatever could be restored, still open and never cleared.
  *
  * Stateless: every call works on the manager it is given.
@@ -95,12 +97,15 @@ final class KeptEntitiesRestorer
         }
 
         // 2. What the attempt scheduled without flushing. Decide what to reload first: the unlinking below changes it.
-        $brought = array_diff_key(self::managed($manager), $kept);
-        $reload  = [];
+        // An entity the attempt loaded itself and removed is no longer in the identity map (audit VQ2-1): brought too.
+        $brought = array_diff_key(self::managed($manager) + self::scheduledDeletions($unitOfWork), $kept);
+        $touched = [];
         foreach ($kept as $oid => $entity) {
-            if ($everything || $attempt->flushed || isset($attempt->loaded[$oid]) || $unitOfWork->isScheduledForDelete($entity)
+            // computeChangeSets() inside the attempt moves the original data, hiding the change (audit VQ2-3).
+            if (isset($attempt->loaded[$oid]) || isset($attempt->touched[$oid]) || $unitOfWork->isScheduledForDelete($entity)
+                || $unitOfWork->getEntityChangeSet($entity) !== []
                 || ($unitOfWork->isInIdentityMap($entity) && !$unitOfWork->isUninitializedObject($entity) && self::differs($manager, $entity, $brought))) {
-                $reload[$oid] = $entity;
+                $touched[$oid] = true;
             }
         }
 
@@ -128,9 +133,14 @@ final class KeptEntitiesRestorer
                 continue;
             }
 
-            if (isset($reload[$oid]) && !$unitOfWork->isUninitializedObject($entity)) {
-                $restored = self::safely(static fn () => self::reload($manager, $entity)) && $restored;
+            if ($unitOfWork->isUninitializedObject($entity) || (!isset($touched[$oid]) && !$everything && !$attempt->flushed)) {
+                continue;
             }
+
+            // After a flush every kept entity is reloaded, but only one the attempt touched counts when its reload fails:
+            // an untouched entity whose row another session deleted stays as the host held it (audit VQ2-2).
+            $reloaded = self::safely(static fn () => self::reload($manager, $entity));
+            $restored = ($reloaded || !isset($touched[$oid])) && $restored;
         }
 
         return $restored;
@@ -184,8 +194,22 @@ final class KeptEntitiesRestorer
     }
 
     /**
+     * @return array<int, object> The entities scheduled for removal, by spl_object_id
+     */
+    private static function scheduledDeletions(UnitOfWork $unitOfWork): array
+    {
+        $entities = [];
+        foreach ($unitOfWork->getScheduledEntityDeletions() as $entity) {
+            $entities[spl_object_id($entity)] = $entity;
+        }
+
+        return $entities;
+    }
+
+    /**
      * Drops the attempt's unflushed work from the unit of work: kept entities scheduled for removal are managed again
-     * (no cascade), orphan removals cancelled, computed updates and collection work forgotten. Nothing of it existed
+     * (no cascade), any other scheduled removal forgotten entirely (the entity detached: audit VQ2-1, it was the
+     * attempt's own), orphan removals cancelled, computed updates and collection work forgotten. Nothing of it existed
      * before the unit (it only starts without pending work). Same private properties in ORM 2.20 and 3.x.
      *
      * @param array<int, object> $kept
@@ -194,11 +218,15 @@ final class KeptEntitiesRestorer
     {
         Closure::bind(static function (UnitOfWork $unitOfWork, array $kept): void {
             foreach ($unitOfWork->entityDeletions as $oid => $entity) {
+                unset($unitOfWork->entityDeletions[$oid]);
                 if (isset($kept[$oid])) {
-                    unset($unitOfWork->entityDeletions[$oid]);
                     $unitOfWork->entityStates[$oid] = UnitOfWork::STATE_MANAGED;
                     $unitOfWork->addToIdentityMap($entity);
+
+                    continue;
                 }
+
+                unset($unitOfWork->entityStates[$oid], $unitOfWork->entityIdentifiers[$oid], $unitOfWork->originalEntityData[$oid]);
             }
 
             $unitOfWork->orphanRemovals      = [];

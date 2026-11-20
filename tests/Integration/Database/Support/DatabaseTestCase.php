@@ -83,6 +83,8 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_counter');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ballast');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_doc');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_leaf');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_folder');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
@@ -93,6 +95,10 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('INSERT INTO ddrb_board (id) VALUES (1)');
         $this->connection->executeStatement('CREATE TABLE ddrb_doc (id INT NOT NULL PRIMARY KEY, label VARCHAR(20) NOT NULL, version INT NOT NULL)');
         $this->connection->executeStatement("INSERT INTO ddrb_doc (id, label, version) VALUES (1, 'a', 1)");
+        $this->connection->executeStatement('CREATE TABLE ddrb_folder (id INT NOT NULL PRIMARY KEY, label VARCHAR(20) NOT NULL, version INT NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_folder (id, label, version) VALUES (1, 'a', 1), (2, 'b', 1)");
+        $this->connection->executeStatement('CREATE TABLE ddrb_leaf (id INT NOT NULL PRIMARY KEY, folder_id INT NOT NULL, label VARCHAR(20) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_leaf (id, folder_id, label) VALUES (1, 1, 'c1')");
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }
