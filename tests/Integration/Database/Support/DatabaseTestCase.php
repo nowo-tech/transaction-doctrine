@@ -92,6 +92,7 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_item');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_shelf_counter');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_stamp');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ticket');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
@@ -124,6 +125,8 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('INSERT INTO ddrb_shelf_counter (shelf_id, counter_id) VALUES (1, 1)');
         $this->connection->executeStatement('CREATE TABLE ddrb_stamp (id INT NOT NULL PRIMARY KEY, stamped_at VARCHAR(19) NOT NULL)');
         $this->connection->executeStatement("INSERT INTO ddrb_stamp (id, stamped_at) VALUES (1, '2026-01-01 10:00:00')");
+        $this->connection->executeStatement('CREATE TABLE ddrb_ticket (id INT NOT NULL PRIMARY KEY, status VARCHAR(10) NOT NULL, priority VARCHAR(10) NULL, kinds VARCHAR(100) NOT NULL)');
+        $this->connection->executeStatement("INSERT INTO ddrb_ticket (id, status, priority, kinds) VALUES (1, 'alpha', 'beta', 'alpha,beta'), (2, 'beta', NULL, 'beta')");
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }

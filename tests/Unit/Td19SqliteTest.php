@@ -81,6 +81,16 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioTheProbeMatchesWhatTheFlushWrites();
     }
 
+    public function testTheProbeComparesEnumsAsTheFlushDoes(): void
+    {
+        $this->scenarioTheProbeComparesEnumsAsTheFlushDoes();
+    }
+
+    public function testTheProbeNeverBreaksTheWrite(): void
+    {
+        $this->scenarioTheProbeNeverBreaksTheWrite();
+    }
+
     public function testThePrivateManagerNeverFlushesTheHostsWork(): void
     {
         $this->scenarioThePrivateManagerNeverFlushesTheHostsWork();
