@@ -126,7 +126,13 @@ final class KeptEntitiesRestorer
             $restored = self::safely(static fn () => $detach($unitOfWork, $entity, $kept)) && $restored;
         }
 
-        // 4. Back to what the database holds.
+        // 4. Back to what the database holds. When none of the kept entities is managed any more, the attempt (or host
+        // code it called) cleared the manager: nothing of the host's is left to restore or to lose, and the replay goes
+        // ahead as before 1.8 (1.8.1). One kept entity gone while others remain was detached on purpose: unrestorable.
+        if (!self::anyManaged($unitOfWork, $kept)) {
+            return $restored;
+        }
+
         foreach ($kept as $oid => $entity) {
             if (!$unitOfWork->isInIdentityMap($entity)) {
                 $restored = false; // detached by the attempt: its original data is gone
@@ -145,6 +151,20 @@ final class KeptEntitiesRestorer
         }
 
         return $restored;
+    }
+
+    /**
+     * @param array<int, object> $kept
+     */
+    private static function anyManaged(UnitOfWork $unitOfWork, array $kept): bool
+    {
+        foreach ($kept as $entity) {
+            if ($unitOfWork->isInIdentityMap($entity)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

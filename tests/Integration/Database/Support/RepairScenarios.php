@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
+use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DeadlockException;
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Events;
 use Nowo\TransactionDoctrine\DoctrineTransactionRunner;
 use Nowo\TransactionDoctrine\Tests\Unit\Support\FakeDriverException;
@@ -929,6 +931,92 @@ trait RepairScenarios
         $manager->flush();
         self::assertSame('after', $this->freshValue('SELECT label FROM ddrb_auto WHERE id = ' . (int) $id));
         self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_auto'));
+    }
+
+    /**
+     * 1.8.1 (TaskBoard 2.26.0 replay tests): the attempt creates a card for a board the host loaded before the unit (the
+     * request's actor); its flush meets a deadlock, Doctrine closes the manager and host code resets it through the
+     * registry, in place (DoctrineBundle's lazy service: the same object, a new entity manager behind it), then
+     * rethrows. Nothing of the old manager can be restored: the replay goes ahead (1.8.0 answered 409 CONFLICT_001)
+     * and commits once, with the actor loaded again from the reset manager.
+     */
+    private function scenarioAReplayAfterAnInPlaceResetGoesAhead(): void
+    {
+        $registry = new InPlaceResetRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
+        $manager  = $registry->manager;
+        $actor    = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $actor);
+        $deadlocks = 0;
+
+        $result = (new WriteUnit($registry, new WriteUnitPolicy(3, 0, 0, 0)))->run(static function (int $attempt) use ($manager, $registry, &$deadlocks): int {
+            $board = $manager->find(Board::class, 1);
+            self::assertInstanceOf(Board::class, $board);
+            $manager->persist(new Card(5, $board));
+            try {
+                if ($attempt === 1) {
+                    ++$deadlocks;
+                    // One-shot: with DBAL 3 the new manager shares the connection's event manager.
+                    $manager->getEventManager()->addEventListener([Events::postPersist], new class {
+                        private bool $fired = false;
+
+                        public function postPersist(): void
+                        {
+                            if (!$this->fired) {
+                                $this->fired = true;
+
+                                throw new DeadlockException(FakeDriverException::deadlock(), null);
+                            }
+                        }
+                    });
+                }
+
+                $manager->flush();
+            } catch (DeadlockException $deadlock) {
+                if (!$manager->isOpen()) {
+                    $registry->resetManager('default'); // host code recovering the closed manager, in place
+                }
+
+                throw $deadlock;
+            }
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertSame(1, $deadlocks);
+        self::assertSame(1, $registry->resets);
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card WHERE id = 5 AND board_id = 1'));
+        self::assertTrue($manager->isOpen());
+    }
+
+    /**
+     * 1.8.1: the attempt (or host code it called) cleared the host's manager entirely before failing. None of the host's
+     * entities is managed any more, so there is nothing to restore or to lose: the replay goes ahead, as before 1.8.
+     */
+    private function scenarioAReplayAfterTheAttemptClearedTheManagerGoesAhead(): void
+    {
+        $manager = $this->manager();
+        $host    = $manager->find(Counter::class, 2);
+        self::assertInstanceOf(Counter::class, $host);
+
+        $result = $this->unit()->run(static function (int $attempt) use ($manager): int {
+            $counter = $manager->find(Counter::class, 1);
+            self::assertInstanceOf(Counter::class, $counter);
+            if ($attempt === 1) {
+                $manager->clear();
+
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            ++$counter->value;
+            $manager->flush();
+
+            return $attempt;
+        });
+
+        self::assertSame(2, $result);
+        self::assertFalse($manager->contains($host), 'cleared by the attempt, not by the write unit');
+        self::assertSame(1, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'));
     }
 
     private function unit(): WriteUnit

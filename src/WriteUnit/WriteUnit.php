@@ -409,8 +409,11 @@ final readonly class WriteUnit implements WriteUnitInterface
     }
 
     /**
-     * The observers of the managers the registry still serves (a manager reset after it was closed is a new one:
-     * nothing of the old one is kept).
+     * The observers of the managers the registry still serves with the same unit of work: a manager reset after it was
+     * closed is a new one, nothing of the old one is kept. That includes a reset in place, which DoctrineBundle does on
+     * its lazy entity manager service (the same object, a new entity manager and unit of work behind it): host code
+     * (or a DoctrineTransactionRunner::forEntityManager() with a registry) that resets a manager a failed flush closed
+     * leaves an empty manager whose old entities can never be restored (1.8.1).
      *
      * @param array<string, AttemptObserver> $kept
      *
@@ -421,7 +424,7 @@ final readonly class WriteUnit implements WriteUnitInterface
         $current = [];
 
         foreach ($kept as $name => $observer) {
-            if ($this->registry->getManager($name) === $observer->manager) {
+            if ($this->registry->getManager($name) === $observer->manager && $observer->manager->getUnitOfWork() === $observer->unitOfWork) {
                 $current[$name] = $observer;
             }
         }

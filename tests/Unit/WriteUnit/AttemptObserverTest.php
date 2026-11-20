@@ -6,6 +6,7 @@ namespace Nowo\TransactionDoctrine\Tests\Unit\WriteUnit;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Event\OnFlushEventArgs;
+use Doctrine\ORM\UnitOfWork;
 use Nowo\TransactionDoctrine\WriteUnit\AttemptObserver;
 use PHPUnit\Framework\TestCase;
 
@@ -19,7 +20,8 @@ final class AttemptObserverTest extends TestCase
     public function testAFlushOfAnotherManagerIsIgnored(): void
     {
         $observed = $this->createMock(EntityManagerInterface::class);
-        $observed->expects($this->never())->method('getUnitOfWork');
+        // Read once, when the observer records the unit of work it watches (1.8.1); never for another manager's flush.
+        $observed->expects($this->once())->method('getUnitOfWork')->willReturn($this->createStub(UnitOfWork::class));
         $observer = new AttemptObserver($observed, []);
 
         $observer->onFlush(new OnFlushEventArgs($this->createMock(EntityManagerInterface::class)));

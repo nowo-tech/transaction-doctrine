@@ -351,7 +351,9 @@ listener) the unit is **not** replayed. A host entity the attempt did not touch,
 meanwhile, is left as the host held it and does not stop the replay. When the unit is not replayed: it ends with `ConcurrencyConflict` (409, `Retry-After`,
 `CONFLICT_001`: nothing committed), after every other step ran, so the host's next flush writes nothing of the
 attempt. The manager stays open and is never cleared. A closed manager (the ORM closes it after a failed flush) is
-still reset through the registry, as before.
+still reset through the registry, as before. A manager reset in place during the attempt (DoctrineBundle's lazy service: the same object, a new
+entity manager behind it) counts as replaced, and a manager the attempt cleared entirely counts as nothing to restore:
+in both cases the replay goes ahead (1.8.1) and the host's earlier entities stay detached.
 
 ### Request memos between attempts (1.4.0)
 

@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A write-unit replay goes ahead again after the host's manager was reset in place or cleared by the attempt
+  (regression in 1.8.0, seen in TaskBoard 2.26.0's replay tests).** When a flush inside the attempt failed (a
+  deadlock), Doctrine closed the entity manager and host code reset it through the registry
+  (`ManagerRegistry::resetManager()`, as TaskBoard's recovering flusher and `DoctrineTransactionRunner::forEntityManager()`
+  with a registry do). DoctrineBundle resets its lazy entity manager service in place: `getManager()` keeps returning
+  the same object, with a new entity manager and unit of work behind it. 1.8.0's write unit took that empty manager for
+  the one it observed, found none of the host's entities in it and gave up with `ConcurrencyConflict` (409,
+  `CONFLICT_001`) instead of replaying. A manager whose unit of work changed during the attempt is now treated as a
+  new one (nothing of the old one is kept, as for a manager replaced by a new object), and a manager the attempt
+  cleared entirely (none of the host's entities managed any more) no longer counts as unrestorable: the replay goes
+  ahead, as in 1.7.x. A host entity detached on its own while others stay managed still ends the unit with
+  `ConcurrencyConflict`.
+
 ## [1.8.0] - 2026-11-20
 
 ### Fixed

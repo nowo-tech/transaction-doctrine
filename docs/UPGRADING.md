@@ -29,6 +29,11 @@
 
 ## Unreleased
 
+From **1.8.0**: `composer update nowo-tech/transaction-doctrine`. No configuration or signature change. A write-unit
+replay goes ahead again when the failed attempt's flush closed the manager and host code reset it through the registry
+(in place, as DoctrineBundle does), or when the attempt cleared the manager: 1.8.0 answered 409 `CONFLICT_001` there.
+The host's entities from before the unit are then detached, as in 1.7.x: load them again in the replay.
+
 ## To 1.8.0
 
 From **1.7.2**:
