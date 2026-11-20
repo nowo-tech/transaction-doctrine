@@ -37,6 +37,10 @@ inverse one-to-many with `orphanRemoval`, or an inverse one-to-one with `orphanR
 run's flush deleted those rows inside the unit's transaction. If such a call now throws `LogicException`
 (`HOST_PENDING_MESSAGE`), flush the host's work before calling the unit, as for any other pending change.
 
+The same pending orphan removal now makes a `WriteUnit` run once (no replay; the failure propagates unchanged instead
+of a replay that dropped the removal), and keeps a stale `PrivateEntityManager` until it is flushed instead of
+replacing it.
+
 ## To 1.9.1
 
 From **v1.9.0**:

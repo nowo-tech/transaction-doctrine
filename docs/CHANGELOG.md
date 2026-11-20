@@ -41,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flush deletes anything, and those runs are still accepted. Covered on SQLite and on MySQL 8.4, MariaDB 11.4 and
   PostgreSQL 16. `HostFlushProbe` reads orphan removals through the same internal reader, so it no longer reports
   such a stale orphan either.
+- **Write unit: a pending orphan removal makes the unit run once (audit XD-1):** `WriteUnit`'s pending-changes check
+  ignored orphan removals too, so a caller's `clear()` on an inverse one-to-many with `orphanRemoval`, or inverse
+  one-to-one set to `null`, did not stop a replay, and the repair between attempts silently dropped that removal. A
+  managed orphan removal now counts in the run-once, replay and discard decisions: the unit runs once, the failure
+  propagates, and the caller's flush still deletes the orphan. Stale, unmanaged orphans do not count.
+- **Private entity manager: a pending orphan removal keeps a stale manager (audit XD-1):** a private manager made
+  stale by a rollback was replaced when its only pending work was an orphan removal, silently dropping the bundle's
+  removal. It is now kept until that work is flushed or the boundary, as for any other pending change; once nothing
+  managed is pending, it is replaced as before.
 
 ## [1.9.1] - 2026-11-20
 

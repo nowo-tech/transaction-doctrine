@@ -201,7 +201,9 @@ PostgreSQL 55P03) or a serialization failure (PostgreSQL 40001, MariaDB 1020; de
   caller's whole transaction. A `ConcurrencyConflict` of an inner unit, even wrapped (in the previous chain or inside
   a Messenger `HandlerFailedException`), is never replayed again by an outer one.
 - **Pending changes:** when an open entity manager already holds unflushed work before the first attempt (a caller's
-  edits or `persist()` calls), the work runs once without replay: clearing the manager would lose them silently.
+  edits or `persist()` calls, or since 1.9.2 a managed orphan removal: `clear()` on an inverse one-to-many with
+  `orphanRemoval`, an inverse one-to-one with `orphanRemoval` set to `null`), the work runs once without replay:
+  clearing the manager would lose them silently.
 - **A replay keeps what the caller loaded (1.8):** an open entity manager that already managed entities before
   `run()` is never cleared between attempts; see [Replays and the host's entities](#replays-and-the-hosts-entities-18).
   A manager that managed nothing before `run()` is still cleared. (Before 1.8 every open manager was cleared, so the
@@ -822,12 +824,12 @@ $services->set('my_bundle.private_entity_manager_middleware', PrivateEntityManag
 The tables do not move and the connection is shared: a transaction the application opened around a bundle call
 includes the bundle's rows (its flushes then use savepoints). A rollback of a level the private manager did not write
 in, or of one of the bundle's own savepoints (the middleware's prefix), leaves it alone; one of a savepoint the
-application named itself counts as undoing everything pending. A stale manager with pending work is kept until that work
-is flushed or the boundary. A connection closed or lost with its transaction open (`ConnectionRepairer`,
-`DoctrineTransactionRunner`, `WorkerConnectionHygiene`), a rollback to a savepoint that fails (MySQL / MariaDB after
-a deadlock), and a PostgreSQL COMMIT after a statement failed in the transaction (the server answers it with a
-ROLLBACK), make it stale too: no ghost entity of a rolled-back write, no silent 0-row `UPDATE`. The application's
-managers are never flushed, cleared, closed or reset by the kit.
+application named itself counts as undoing everything pending. A stale manager with pending work (a managed orphan
+removal included, since 1.9.2) is kept until that work is flushed or the boundary. A connection closed or lost with
+its transaction open (`ConnectionRepairer`, `DoctrineTransactionRunner`, `WorkerConnectionHygiene`), a rollback to a
+savepoint that fails (MySQL / MariaDB after a deadlock), and a PostgreSQL COMMIT after a statement failed in the
+transaction (the server answers it with a ROLLBACK), make it stale too: no ghost entity of a rolled-back write, no
+silent 0-row `UPDATE`. The application's managers are never flushed, cleared, closed or reset by the kit.
 
 Things to know when moving a bundle onto the kit:
 
