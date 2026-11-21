@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.9.3](#to-193)
 - [To 1.9.2](#to-192)
 - [To 1.9.1](#to-191)
 - [To 1.9.0](#to-190)
@@ -31,6 +32,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.9.3
+
+From **1.9.2**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 ## To 1.9.2
 
