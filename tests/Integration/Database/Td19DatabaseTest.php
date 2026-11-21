@@ -111,6 +111,13 @@ final class Td19DatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testTheProbeModelsCollectionWrites(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioTheProbeModelsCollectionWrites();
+    }
+
+    #[DataProvider('allServers')]
     public function testTheProbeComparesEnumsAsTheFlushDoes(string $server): void
     {
         $this->ledger = new CommitLedger();

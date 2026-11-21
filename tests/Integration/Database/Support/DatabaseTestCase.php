@@ -95,6 +95,9 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_ticket');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_badge');
         $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_profile');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_team_member');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_team');
+        $this->connection->executeStatement('DROP TABLE IF EXISTS ddrb_member');
         $this->connection->executeStatement('CREATE TABLE ddrb_counter (id INT NOT NULL PRIMARY KEY, counter_value INT NOT NULL)');
         $this->connection->executeStatement('CREATE TABLE ddrb_ballast (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('INSERT INTO ddrb_counter (id, counter_value) VALUES (1, 0), (2, 0)');
@@ -131,6 +134,12 @@ abstract class DatabaseTestCase extends TestCase
         $this->connection->executeStatement("INSERT INTO ddrb_ticket (id, status, priority, kinds) VALUES (1, 'alpha', 'beta', 'alpha,beta'), (2, 'beta', NULL, 'beta')");
         $this->connection->executeStatement('CREATE TABLE ddrb_profile (id INT NOT NULL PRIMARY KEY)');
         $this->connection->executeStatement('CREATE TABLE ddrb_badge (id INT NOT NULL PRIMARY KEY, profile_id INT NOT NULL)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_team (id INT NOT NULL PRIMARY KEY, label VARCHAR(50) NOT NULL)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_member (id INT NOT NULL PRIMARY KEY, label VARCHAR(50) NOT NULL)');
+        $this->connection->executeStatement('CREATE TABLE ddrb_team_member (team_id INT NOT NULL, member_id INT NOT NULL, PRIMARY KEY (team_id, member_id))');
+        $this->connection->executeStatement("INSERT INTO ddrb_team (id, label) VALUES (1, 't1'), (2, 't2')");
+        $this->connection->executeStatement("INSERT INTO ddrb_member (id, label) VALUES (1, 'm1'), (2, 'm2')");
+        $this->connection->executeStatement('INSERT INTO ddrb_team_member (team_id, member_id) VALUES (1, 1)');
 
         $this->registry = new TestManagerRegistry($this->connection, static fn (Connection $connection): EntityManagerInterface => self::entityManager($connection));
     }

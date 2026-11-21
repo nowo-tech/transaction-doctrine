@@ -29,6 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Host-flush probe: probe reported hydrated entities with clean inverse-side collections as pending host changes:**
+  `HostFlushProbe` counted a collection as changed unless it was the clean collection held in the entity's loaded state.
+  ORM leaves the collections out of that state once a host `onFlush` listener called `recomputeSingleEntityChangeSet()`
+  (an "updated at / updated by" listener), so every such entity with a one-to-many was reported as "flushed by" the
+  bundle although the flush writes nothing for it (Beacon census: `User`, `Project`, `Task`). The probe now models what
+  `UnitOfWork::computeChangeSets()` and the collection persisters write: an owning side's insert and delete diffs, the
+  deletion of a replaced collection (owning side, or one-to-many with orphan removal; skipped like ORM when the
+  collection is not in the loaded state), orphan removals and cascaded persists of new elements. An inverse side, dirty
+  or not, is otherwise never a change, nor an uninitialised collection. Scheduled collection updates and deletions only
+  count when a persister writes them. A real pending host write is still reported; the probe stays read-only and
+  stateless beyond its per-unit-of-work report list. No BC break.
+
 ## [1.9.2] - 2026-11-21
 
 ### Fixed

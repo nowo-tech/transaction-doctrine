@@ -5,7 +5,12 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
 
 use DateTimeImmutable;
+use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Events;
+use Doctrine\ORM\Mapping\AssociationMapping;
+use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\UnitOfWork;
 use ErrorException;
 use Nowo\TransactionDoctrine\HostFlushProbe;
@@ -14,8 +19,10 @@ use Nowo\TransactionDoctrine\Tests\Integration\Database\Support\Host\BundleNote;
 use Nowo\TransactionDoctrine\Tests\Unit\RecordingLogger;
 use RuntimeException;
 
+use function array_key_exists;
 use function array_keys;
 use function in_array;
+use function is_array;
 use function method_exists;
 use function restore_error_handler;
 use function set_error_handler;
@@ -93,8 +100,8 @@ trait HostFlushProbeScenarios
         $manager->persist(new Counter(20));
         $board = $manager->find(Board::class, 1);
         self::assertInstanceOf(Board::class, $board);
-        $board->cards->add(new Card(30, $board)); // a dirty collection; cascade persist would insert the card (audit WD-6)
-        self::assertSame([Board::class, Card::class, Counter::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]));
+        $board->cards->add(new Card(30, $board)); // cascade persist would insert the card (audit WD-6); the inverse side writes nothing for the board (1.9.3)
+        self::assertSame([Card::class, Counter::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]));
 
         self::assertSame(0, (int) $this->freshValue('SELECT counter_value FROM ddrb_counter WHERE id = 1'), 'nothing flushed');
         self::assertTrue($manager->contains($counter), 'nothing cleared');
@@ -159,7 +166,7 @@ trait HostFlushProbeScenarios
                 $card = $board->cards->first();
                 self::assertInstanceOf(Card::class, $card);
                 $board->cards->removeElement($card);
-            }, [Board::class, Card::class]],
+            }, [Card::class]], // the inverse side writes nothing for the board (1.9.3)
             'host subclass of a bundle-owned root' => [static function () use ($manager): void {
                 $item = $manager->find(HostItem::class, 2);
                 self::assertInstanceOf(HostItem::class, $item);
@@ -270,6 +277,125 @@ trait HostFlushProbeScenarios
         self::assertSame([Shelf::class], $probe->beforeHostFlush($manager, 'TestBundle', [self::BUNDLE_NAMESPACE]), 'a clean collection of another owner');
         $manager->flush();
         self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_shelf_counter WHERE shelf_id = 5 AND counter_id = 1'), 'the flush wrote the join row for the new owner');
+    }
+
+    /**
+     * 1.9.3 (Beacon census): an inverse-side collection is written only through orphan removal and cascade persist, an
+     * owning side through its diffs, and a replaced collection as the flush does. Each case runs on an entity as hydrated
+     * (its collections in its loaded state) and on one the host flushed with an onFlush listener that recomputed its change
+     * set (ORM then leaves its collections out of the loaded state), and is checked against what the flush writes.
+     */
+    private function scenarioTheProbeModelsCollectionWrites(): void
+    {
+        $manager = $this->manager();
+        $probe   = new HostFlushProbe();
+        $touch   = new TouchOnFlush();
+        $manager->getEventManager()->addEventListener([Events::onFlush], $touch);
+        $folder = static function (bool $recomputed) use ($manager): Folder {
+            $folder = $manager->find(Folder::class, 1);
+            self::assertInstanceOf(Folder::class, $folder);
+            if ($recomputed) {
+                self::touch($manager, $folder, 'leaves');
+            }
+
+            return $folder;
+        };
+        $team = static function (bool $recomputed) use ($manager): Team {
+            $team = $manager->find(Team::class, 1);
+            self::assertInstanceOf(Team::class, $team);
+            if ($recomputed) {
+                self::touch($manager, $team, 'members');
+            }
+
+            return $team;
+        };
+        $member = static function (int $id) use ($manager): Member {
+            $member = $manager->find(Member::class, $id);
+            self::assertInstanceOf(Member::class, $member);
+
+            return $member;
+        };
+
+        $cases = [];
+        foreach ([false => 'hydrated', true => 'recomputed'] as $recomputed => $state) {
+            $recomputed = (bool) $recomputed;
+            $cases += [
+                $state . ': clean inverse one-to-many, initialised' => [static function () use ($folder, $recomputed): void {
+                    self::assertCount(1, $folder($recomputed)->leaves);
+                }, []],
+                $state . ': uninitialised lazy collection' => [static function () use ($folder, $team, $recomputed): void {
+                    $leaves = $folder($recomputed)->leaves;
+                    self::assertInstanceOf(PersistentCollection::class, $leaves);
+                    self::assertFalse($leaves->isInitialized());
+                    $team($recomputed);
+                }, []],
+                $state . ': new element cascade-persisted' => [static function () use ($folder, $recomputed): void {
+                    $owner = $folder($recomputed);
+                    $owner->leaves->add(new Leaf(7, $owner, 'new'));
+                }, [Leaf::class]],
+                $state . ': element removed with orphan removal' => [static function () use ($folder, $recomputed): void {
+                    $owner = $folder($recomputed);
+                    $leaf  = $owner->leaves->first();
+                    self::assertInstanceOf(Leaf::class, $leaf);
+                    $owner->leaves->removeElement($leaf);
+                }, [Leaf::class]],
+                $state . ': owning many-to-many add' => [static function () use ($team, $member, $recomputed): void {
+                    $team($recomputed)->members->add($member(2));
+                }, [Team::class]],
+                $state . ': owning many-to-many remove' => [static function () use ($team, $member, $recomputed): void {
+                    $team($recomputed)->members->removeElement($member(1));
+                }, [Team::class]],
+                $state . ': owning many-to-many add and remove the same element' => [static function () use ($team, $member, $recomputed): void {
+                    $owner = $team($recomputed);
+                    $owner->members->add($member(2));
+                    $owner->members->removeElement($member(2));
+                }, []],
+                $state . ': inverse many-to-many changed without its owning side' => [static function () use ($team, $member, $recomputed): void {
+                    $member(2)->teams->add($team($recomputed));
+                    $member(1)->teams->clear();
+                }, []],
+                $state . ': inverse many-to-many replaced' => [static function () use ($team, $member, $recomputed): void {
+                    $team($recomputed);
+                    $member(1)->teams = new ArrayCollection();
+                }, []],
+                $state . ': owning many-to-many replaced by a non-empty collection' => [static function () use ($team, $member, $recomputed): void {
+                    $team($recomputed)->members = new ArrayCollection([$member(2)]);
+                }, [Team::class]],
+                $state . ': owning many-to-many replaced by an empty collection' => [static function () use ($team, $recomputed): void {
+                    $team($recomputed)->members = new ArrayCollection();
+                }, $recomputed ? [] : [Team::class]], // out of the loaded state: the flush deletes nothing
+                $state . ': owning many-to-many given another entity\'s empty collection' => [static function () use ($manager, $team, $recomputed): void {
+                    $other = $manager->find(Team::class, 2);
+                    self::assertInstanceOf(Team::class, $other);
+                    self::assertCount(0, $other->members); // initialised
+                    $team($recomputed)->members = $other->members;
+                }, $recomputed ? [] : [Team::class]], // wrapped empty: only the loaded collection's deletion writes
+                $state . ': orphan-removal one-to-many replaced' => [static function () use ($folder, $recomputed): void {
+                    $folder($recomputed)->leaves = new ArrayCollection();
+                }, $recomputed ? [] : [Folder::class]], // out of the loaded state: the flush deletes nothing
+            ];
+        }
+
+        try {
+            $this->assertTheProbeMatchesTheFlush($manager, $probe, $cases);
+        } finally {
+            $manager->getEventManager()->removeEventListener([Events::onFlush], $touch);
+        }
+
+        $manager->clear();
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_team_member'), 'no case flushed its change');
+        self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_leaf'));
+    }
+
+    /**
+     * The host's own flush of a label change, through TouchOnFlush: afterwards the entity's collection is no longer in its
+     * loaded state, and nothing is pending.
+     */
+    private static function touch(EntityManagerInterface $manager, Folder|Team $entity, string $collection): void
+    {
+        $entity->label .= '-';
+        $manager->flush();
+        self::assertFalse(array_key_exists($collection, $manager->getUnitOfWork()->getOriginalEntityData($entity)), 'ORM left the collection out');
     }
 
     /**
@@ -397,17 +523,37 @@ trait HostFlushProbeScenarios
             $unitOfWork = $manager->getUnitOfWork();
             $unitOfWork->computeChangeSets();
             $written = [];
-            foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityUpdates(), $unitOfWork->getScheduledEntityDeletions()] as $entities) {
+            foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions()] as $entities) {
                 foreach ($entities as $entity) {
                     $written[$entity::class] = true;
                 }
             }
 
-            foreach ([$unitOfWork->getScheduledCollectionUpdates(), $unitOfWork->getScheduledCollectionDeletions()] as $collections) {
+            // An update writes its row only for a field or an owning to-one (BasicEntityPersister::update(): no column, no
+            // statement); a collection in its change set is written, or not, by the collection persister below.
+            foreach ($unitOfWork->getScheduledEntityUpdates() as $entity) {
+                $metadata = $manager->getClassMetadata($entity::class);
+                foreach (array_keys($unitOfWork->getEntityChangeSet($entity)) as $field) {
+                    if (!$metadata->hasAssociation($field) || ($metadata->isSingleValuedAssociation($field) && !$metadata->isAssociationInverseSide($field))) {
+                        $written[$entity::class] = true;
+                    }
+                }
+            }
+
+            // The collection persisters: an update writes the join rows of an owning side's diffs; a deletion writes an
+            // owning side's join rows, or a one-to-many's rows with orphan removal; an inverse side otherwise nothing.
+            foreach ([[$unitOfWork->getScheduledCollectionUpdates(), false], [$unitOfWork->getScheduledCollectionDeletions(), true]] as [$collections, $deletion]) {
                 foreach ($collections as $collection) {
                     $owner = $collection->getOwner();
                     self::assertNotNull($owner);
-                    $written[$owner::class] = true;
+                    $metadata = $manager->getClassMetadata($owner::class);
+                    $field    = self::fieldName($collection->getMapping());
+                    $writes   = $metadata->isAssociationInverseSide($field)
+                        ? $deletion && self::removesOrphans($metadata->getAssociationMapping($field)) && !self::isManyToMany($metadata->getAssociationMapping($field))
+                        : $deletion || $collection->getInsertDiff() !== [] || $collection->getDeleteDiff() !== [];
+                    if ($writes) {
+                        $written[$owner::class] = true;
+                    }
                 }
             }
 
@@ -423,5 +569,26 @@ trait HostFlushProbeScenarios
                 self::assertTrue(str_starts_with($class, self::BUNDLE_NAMESPACE . '\\') || in_array($class, $expected, true), $label . ': ' . $class . ' is written but not reported');
             }
         }
+    }
+
+    /** @param array<string, mixed>|object $mapping An association mapping (ORM 2 array, ORM 3 object) */
+    private static function fieldName(array|object $mapping): string
+    {
+        $field = is_array($mapping) ? $mapping['fieldName'] : ($mapping instanceof AssociationMapping ? $mapping->fieldName : '');
+        self::assertIsString($field);
+
+        return $field;
+    }
+
+    /** @param array<string, mixed>|object $mapping An association mapping (ORM 2 array, ORM 3 object) */
+    private static function removesOrphans(array|object $mapping): bool
+    {
+        return is_array($mapping) ? ($mapping['orphanRemoval'] ?? false) === true : ($mapping instanceof AssociationMapping && $mapping->orphanRemoval);
+    }
+
+    /** @param array<string, mixed>|object $mapping An association mapping (ORM 2 array, ORM 3 object) */
+    private static function isManyToMany(array|object $mapping): bool
+    {
+        return is_array($mapping) ? ($mapping['type'] ?? null) === ClassMetadata::MANY_TO_MANY : ($mapping instanceof AssociationMapping && $mapping->isManyToMany());
     }
 }

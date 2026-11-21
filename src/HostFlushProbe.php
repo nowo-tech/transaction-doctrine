@@ -18,8 +18,10 @@ use Throwable;
 
 use function array_key_exists;
 use function array_keys;
+use function count;
 use function get_debug_type;
 use function is_array;
+use function is_countable;
 use function is_iterable;
 use function is_object;
 use function ksort;
@@ -38,7 +40,8 @@ use const E_USER_DEPRECATED;
  * Host-flush probe (1.9, REQ-ARCH-001 rule 6 deprecation layer, plan prerequisite P2): a bundle that still flushes the
  * HOST's entity manager in host mode calls beforeHostFlush() right before that flush. Every entity class outside the
  * bundle's own namespaces with pending work in the host's unit of work (a scheduled insert or delete, or a managed
- * entity whose fields, to-one associations or collections differ from what was loaded) is work the bundle's flush
+ * entity whose fields, owning-side to-one associations or collections differ from what was loaded in a way the flush
+ * writes) is work the bundle's flush
  * writes on the host's behalf: in 2.0 the bundles write through a private manager and no longer do. One
  * `E_USER_DEPRECATED` per bundle and foreign class per unit of work (request, message, command) says so:
  * "your pending changes to App\X were flushed by <Bundle>; 2.0 no longer does". Collected by the host's deprecation log,
@@ -154,10 +157,12 @@ final class HostFlushProbe implements ResetInterface
             }
         }
 
-        foreach ([$unitOfWork->getScheduledCollectionDeletions(), $unitOfWork->getScheduledCollectionUpdates()] as $collections) {
+        // Only the scheduled collection work a collection persister writes (1.9.3): an inverse side's update or deletion
+        // writes nothing, except the deletion of a one-to-many with orphan removal (its rows go).
+        foreach ([[$unitOfWork->getScheduledCollectionDeletions(), true], [$unitOfWork->getScheduledCollectionUpdates(), false]] as [$collections, $deletion]) {
             foreach ($collections as $collection) {
                 $owner = $collection->getOwner();
-                if ($owner !== null) {
+                if ($owner !== null && $this->collectionWorkWrites($collection->getMapping(), $deletion)) {
                     $note($owner);
                 }
             }
@@ -216,7 +221,8 @@ final class HostFlushProbe implements ResetInterface
 
     /**
      * Whether a managed entity differs from its loaded state in a way the flush writes: a field, an owning-side to-one
-     * association, or a to-many collection that is dirty or no longer the managed one. An inverse-side to-one writes
+     * association, or a collection whose change the flush writes (collectionWrites(); an inverse-side collection only
+     * through orphan removal, 1.9.3). An inverse-side to-one writes
      * nothing for its owner (1.9.2, audit XD2-2: after the host flushed an inverse one-to-one set to null, ORM keeps the
      * old value in the owner's loaded state); with orphan removal its managed former value is noted instead, as the
      * flush deletes it. A new entity a changed association would
@@ -248,15 +254,14 @@ final class HostFlushProbe implements ResetInterface
         foreach ($metadata->getAssociationNames() as $field) {
             $value = $metadata->getFieldValue($entity, $field);
             if ($metadata->isCollectionValuedAssociation($field)) {
-                // Unchanged only when it is the loaded collection itself and clean (1.9.2, audit TD192-2): a clean
-                // collection of another entity assigned here makes the flush write it for this owner.
-                if ($value instanceof PersistentCollection && !$value->isDirty() && array_key_exists($field, $original) && $value === $original[$field]) {
-                    continue;
+                $mapping = $metadata->getAssociationMapping($field);
+                if ($this->collectionWrites($entity, $field, $value, $original, $mapping)) {
+                    $changed = true;
                 }
 
-                $changed = true;
+                // The flush walks every collection, clean or not, for new entities to cascade-persist.
                 if ($value instanceof PersistentCollection || is_iterable($value)) {
-                    $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), $value instanceof PersistentCollection ? $value->unwrap() : $value, $note);
+                    $this->noteCascadedPersists($unitOfWork, $mapping, $value instanceof PersistentCollection ? $value->unwrap() : $value, $note);
                 }
             } elseif (array_key_exists($field, $original) && $value !== ($loaded = $original[$field])) {
                 $mapping = $metadata->getAssociationMapping($field);
@@ -273,6 +278,80 @@ final class HostFlushProbe implements ResetInterface
         }
 
         return $changed;
+    }
+
+    /**
+     * Whether the flush writes something for this collection of the entity, as UnitOfWork::computeChangeSet() and the
+     * collection persisters do (ORM 2.20 and 3.x alike; 1.9.3):
+     *
+     * - The flush keeps a collection only when it is a PersistentCollection of this entity; any other value (a new
+     *   ArrayCollection, an array, a collection of another entity) is wrapped in a new one, dirty unless empty.
+     * - The loaded collection (original data) is deleted when the entity no longer holds it: its join rows on an owning
+     *   side, its rows on a one-to-many with orphan removal; nothing on any other inverse side. ORM drops the collections
+     *   from the loaded state in recomputeSingleEntityChangeSet() (an onFlush listener of the host's earlier flush):
+     *   a key absent from it is skipped by the flush, so here too.
+     * - A dirty owning side writes the join rows of its insert and delete diffs. An inverse side writes nothing for its
+     *   elements (orphan removals and cascaded persists are noted apart), so a clean inverse-side collection hydrated
+     *   from the database, initialised or not, is never a change.
+     *
+     * Read only: an uninitialised collection is never loaded; an uninitialised collection of another entity assigned to
+     * an owning side counts as non-empty.
+     *
+     * @param array<string, mixed> $original The entity's loaded state
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
+     */
+    private function collectionWrites(object $entity, string $field, mixed $value, array $original, array|object $mapping): bool
+    {
+        $kept   = $value instanceof PersistentCollection && $value->getOwner() === $entity;
+        $loaded = $original[$field] ?? null;
+        if ($loaded instanceof PersistentCollection && (!$kept || $loaded !== $value) && $this->collectionWorkWrites($mapping, true)) {
+            return true; // the loaded collection is deleted
+        }
+
+        if ($value === null || !$this->isOwningSide($mapping)) {
+            return false;
+        }
+
+        if ($value instanceof PersistentCollection) {
+            if ($kept) {
+                return $value->isDirty() && ($value->getInsertDiff() !== [] || $value->getDeleteDiff() !== []);
+            }
+
+            return !$value->isInitialized() || !$value->unwrap()->isEmpty(); // wrapped with its elements
+        }
+
+        return !is_countable($value) || count($value) > 0; // wrapped, dirty unless empty
+    }
+
+    /**
+     * Whether a collection persister writes for a scheduled collection update or deletion: always on an owning side;
+     * on an inverse side only the deletion of a one-to-many with orphan removal (its rows).
+     *
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
+     */
+    private function collectionWorkWrites(array|object $mapping, bool $deletion): bool
+    {
+        return $this->isOwningSide($mapping) || ($deletion && $this->isOrphanRemoval($mapping) && $this->isOneToMany($mapping));
+    }
+
+    /**
+     * Whether an association is its owning side.
+     *
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
+     */
+    private function isOwningSide(array|object $mapping): bool
+    {
+        return is_array($mapping) ? ($mapping['isOwningSide'] ?? false) === true : ($mapping instanceof AssociationMapping && $mapping->isOwningSide()); // ORM 2 array, ORM 3 object
+    }
+
+    /**
+     * Whether an association is a one-to-many.
+     *
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
+     */
+    private function isOneToMany(array|object $mapping): bool
+    {
+        return is_array($mapping) ? ($mapping['type'] ?? null) === ClassMetadata::ONE_TO_MANY : ($mapping instanceof AssociationMapping && $mapping->isOneToMany()); // ORM 2 array, ORM 3 object
     }
 
     /**
