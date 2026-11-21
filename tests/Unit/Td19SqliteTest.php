@@ -81,6 +81,16 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioTheProbeMatchesWhatTheFlushWrites();
     }
 
+    public function testTheProbeIgnoresAFlushedInverseOrphan(): void
+    {
+        $this->scenarioTheProbeIgnoresAFlushedInverseOrphan();
+    }
+
+    public function testTheProbeWalksReportedClassesAndSwappedCollections(): void
+    {
+        $this->scenarioTheProbeWalksReportedClassesAndSwappedCollections();
+    }
+
     public function testTheProbeComparesEnumsAsTheFlushDoes(): void
     {
         $this->scenarioTheProbeComparesEnumsAsTheFlushDoes();
@@ -121,6 +131,16 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioARollbackMakesThePrivateManagerStale();
         $this->scenarioAClosedConnectionMakesThePrivateManagerStale();
         $this->scenarioAFailedHostStatementBeforeCommit();
+    }
+
+    public function testAStalePrivateManagerWithAPendingOrphanRemovalIsKept(): void
+    {
+        $this->scenarioAStalePrivateManagerWithAPendingOrphanRemovalIsKept();
+    }
+
+    public function testADroppedOrphanRemovalIsLogged(): void
+    {
+        $this->scenarioADroppedOrphanRemovalIsLogged();
     }
 
     public function testABoundaryNeverFails(): void

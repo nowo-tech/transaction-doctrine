@@ -359,6 +359,67 @@ trait RepairScenarios
     }
 
     /**
+     * Audit XD-1 (1.9.2): a host's managed orphan removal is pending work, so the unit runs once (no replay, whose
+     * repair would drop the removal) and the host's flush afterwards still deletes the orphan. Both orphanRemoval
+     * shapes: clear() on an inverse one-to-many, and an inverse one-to-one set to null. After that flush, the deleted
+     * Badge ORM keeps scheduling again (no longer managed, no flush deletes it) is no pending work: the unit replays.
+     */
+    private function scenarioAPendingOrphanRemovalMakesTheUnitRunOnce(): void
+    {
+        $this->connection->insert('ddrb_card', ['id' => 91, 'board_id' => 1]);
+        $this->connection->insert('ddrb_profile', ['id' => 1]);
+        $this->connection->insert('ddrb_badge', ['id' => 1, 'profile_id' => 1]);
+        $manager = $this->manager();
+        $board   = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $board);
+        self::assertCount(1, $board->cards);
+        $profile = $manager->find(Profile::class, 1);
+        self::assertInstanceOf(Profile::class, $profile);
+        self::assertInstanceOf(Badge::class, $profile->badge);
+
+        foreach ([
+            'ddrb_card' => static function () use ($board): void {
+                $board->cards->clear();
+            },
+            'ddrb_badge' => static function () use ($profile): void {
+                $profile->badge = null;
+            },
+        ] as $table => $orphan) {
+            $orphan();
+            $calls  = 0;
+            $caught = null;
+
+            try {
+                $this->unit()->run(static function () use (&$calls): never {
+                    ++$calls;
+
+                    throw new DeadlockException(FakeDriverException::deadlock(), null);
+                });
+            } catch (Throwable $failure) {
+                $caught = $failure;
+            }
+
+            self::assertInstanceOf(DeadlockException::class, $caught, 'run once: the failure propagates, no ConcurrencyConflict');
+            self::assertSame(1, $calls, 'a pending orphan removal makes the unit run once');
+            self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ' . $table));
+            self::assertTrue($manager->contains($board));
+            self::assertTrue($manager->contains($profile));
+
+            $manager->flush(); // the host's removal survived the unit
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ' . $table));
+        }
+
+        $result = $this->unit()->run(static function (int $attempt): int {
+            if ($attempt === 1) {
+                throw new DeadlockException(FakeDriverException::deadlock(), null);
+            }
+
+            return $attempt;
+        });
+        self::assertSame(2, $result, 'a stale, unmanaged orphan is no pending work: the unit replays');
+    }
+
+    /**
      * Audit VQ-3 / P3: the failed attempt removed one host entity and changed another without flushing. The removal is
      * cancelled and the change reverted; the replay starts clean and commits; nothing of the attempt is written.
      */

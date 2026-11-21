@@ -187,7 +187,9 @@ process):
   notice (audit TA3; the same scenarios also run on SQLite in the unit suite);
 - reads (`WITH`, `VALUES`, `TABLE` included) never move the request mark; a data-modifying CTE does;
 - a host manager with pending changes (an edit, a persist, a remove) is refused before the run, and flushed intact
-  afterwards; when `computeChangeSets()` itself throws (a `prePersist` listener on a cascade-persisted child) the
+  afterwards; so is one with a pending orphan removal (`clear()` on an inverse one-to-many with `orphanRemoval`, an
+  inverse one-to-one with `orphanRemoval` set to `null`), while the same loaded, untouched associations run (1.9.2,
+  audit XD-1); when `computeChangeSets()` itself throws (a `prePersist` listener on a cascade-persisted child) the
   refusal keeps that exception as previous (1.6.1);
 - a real lock wait timeout from a second session inside a Messenger `HandlerFailedException` answers `CONFLICT_001`,
   and `CONFLICT_002` without `Retry-After` once another handler succeeded (`HandledStamp`) or inside a

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit;
 
+use Closure;
 use Composer\InstalledVersions;
 use Doctrine\Common\EventManager;
 use Doctrine\DBAL\Connection;
@@ -28,6 +29,7 @@ use SplObjectStorage;
 use stdClass;
 
 use function array_column;
+use function spl_object_id;
 use function version_compare;
 
 use const PHP_INT_MAX;
@@ -452,6 +454,38 @@ final class DoctrineTransactionRunnerTest extends TestCase
         } catch (LogicException $refused) {
             self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
             self::assertSame($cause, $refused->getPrevious());
+        }
+    }
+
+    /**
+     * Audit XD-1 (1.9.2): an orphan removal is pending work on its own, read without computing change sets
+     * (clear() on an inverse orphanRemoval collection schedules nothing else).
+     */
+    public function testTheHostRunnerRefusesAPendingOrphanRemoval(): void
+    {
+        $connection = $this->connection([0]);
+        $connection->expects($this->never())->method('beginTransaction');
+        $unitOfWork = $this->createMock(UnitOfWork::class);
+        $unitOfWork->expects($this->never())->method('computeChangeSets');
+        $unitOfWork->method('getScheduledEntityInsertions')->willReturn([]);
+        $unitOfWork->method('getScheduledEntityUpdates')->willReturn([]);
+        $unitOfWork->method('getScheduledEntityDeletions')->willReturn([]);
+        $unitOfWork->method('getScheduledCollectionDeletions')->willReturn([]);
+        $unitOfWork->method('getScheduledCollectionUpdates')->willReturn([]);
+        $unitOfWork->method('getEntityState')->willReturn(UnitOfWork::STATE_MANAGED);
+        $orphan = new stdClass();
+        Closure::bind(static function (UnitOfWork $unitOfWork) use ($orphan): void {
+            $unitOfWork->orphanRemovals[spl_object_id($orphan)] = $orphan;
+        }, null, UnitOfWork::class)($unitOfWork);
+        $manager = $this->manager($connection, true, unitOfWork: $unitOfWork);
+        $manager->expects($this->never())->method('flush');
+
+        try {
+            DoctrineTransactionRunner::forHostEntityManager($manager)->run(static fn (): string => 'never runs');
+            self::fail('The host runner must refuse a manager with a pending orphan removal.');
+        } catch (LogicException $refused) {
+            self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
+            self::assertNull($refused->getPrevious());
         }
     }
 

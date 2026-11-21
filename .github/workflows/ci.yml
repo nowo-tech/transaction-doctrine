@@ -38,6 +38,10 @@ jobs:
             deps: 'DBAL 3 + ORM 2'
             dbal: '^3.8.2'
             orm: '^2.20'
+          # composer.json pins platform PHP 8.2 (Symfony 7.4); this leg drops the pin and resolves Symfony 8.x.
+          - php: '8.4'
+            deps: 'Symfony 8'
+            unpin_platform: true
 
     steps:
       - name: Checkout code
@@ -53,8 +57,12 @@ jobs:
       - name: Validate composer.json
         run: composer validate --strict
 
+      - name: Resolve for the runner's PHP (drop the platform pin)
+        if: matrix.unpin_platform
+        run: composer config --unset platform.php
+
       - name: Pin DBAL / ORM majors
-        if: matrix.deps != ''
+        if: matrix.dbal != ''
         run: |
           composer require "doctrine/dbal:${{ matrix.dbal }}" --no-update --no-interaction
           composer require --dev "doctrine/orm:${{ matrix.orm }}" --no-update --no-interaction

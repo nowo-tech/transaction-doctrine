@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Tests\Unit\WriteUnit;
 
+use Closure;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -32,6 +33,8 @@ use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 use Throwable;
+
+use function spl_object_id;
 
 /**
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
@@ -541,11 +544,18 @@ final class WriteUnitTest extends TestCase
      */
     public function testPendingChangesOfAnOpenManagerMakeTheUnitRunOnce(): void
     {
-        foreach (['scheduled', 'computed', 'unreadable'] as $case) {
+        foreach (['scheduled', 'orphan', 'computed', 'unreadable'] as $case) {
             $unitOfWork = $this->createMock(UnitOfWork::class);
             $calls      = 0;
             if ($case === 'scheduled') {
                 $unitOfWork->method('getScheduledEntityInsertions')->willReturn([new stdClass()]);
+            } elseif ($case === 'orphan') {
+                // Audit XD-1 (1.9.2): a managed orphan removal alone (clear() on an inverse orphanRemoval collection).
+                $orphan = new stdClass();
+                $unitOfWork->method('getEntityState')->willReturn(UnitOfWork::STATE_MANAGED);
+                Closure::bind(static function (UnitOfWork $unitOfWork) use ($orphan): void {
+                    $unitOfWork->orphanRemovals[spl_object_id($orphan)] = $orphan;
+                }, null, UnitOfWork::class)($unitOfWork);
             } elseif ($case === 'computed') {
                 $unitOfWork->method('getScheduledEntityUpdates')->willReturnOnConsecutiveCalls([], [new stdClass()]);
             } else {

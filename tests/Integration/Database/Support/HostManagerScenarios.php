@@ -259,6 +259,70 @@ trait HostManagerScenarios
         self::assertSame($token, $runner->run(static fn (): string => $token), 'A clean manager runs.');
     }
 
+    /**
+     * XD-1 (1.9.2): orphan removals are pending host work. clear() on an inverse one-to-many with orphanRemoval, and an
+     * inverse one-to-one with orphanRemoval set to null, schedule nothing but the orphan's removal, and the run's flush
+     * would delete the host's rows inside a transaction that may roll back. Both are refused before the run; the same
+     * loaded, untouched entities are accepted, and the host's own flush still deletes the orphans afterwards. After that
+     * flush ORM keeps scheduling the deleted Badge again at every computeChangeSets() (the Profile's original data still
+     * holds it), but no flush deletes anything: that stale orphan is not pending work, and the next run is accepted.
+     */
+    private function scenarioAHostWithPendingOrphanRemovalsIsRefused(): void
+    {
+        $this->connection->insert('ddrb_card', ['id' => 71, 'board_id' => 1]);
+        $this->connection->insert('ddrb_profile', ['id' => 1]);
+        $this->connection->insert('ddrb_badge', ['id' => 1, 'profile_id' => 1]);
+        $manager = $this->manager();
+        $board   = $manager->find(Board::class, 1);
+        self::assertInstanceOf(Board::class, $board);
+        self::assertCount(1, $board->cards);
+        $profile = $manager->find(Profile::class, 1);
+        self::assertInstanceOf(Profile::class, $profile);
+        self::assertInstanceOf(Badge::class, $profile->badge);
+        $ran    = 0;
+        $runner = DoctrineTransactionRunner::forHostEntityManager($manager, $this->registry);
+        $token  = bin2hex(random_bytes(4));
+        self::assertSame($token, $runner->run(static fn (): string => $token), 'Loaded, untouched orphanRemoval associations are no pending work.');
+
+        foreach ([
+            'ddrb_card' => static function () use ($board): void {
+                $board->cards->clear();
+            },
+            'ddrb_badge' => static function () use ($profile): void {
+                $profile->badge = null;
+            },
+        ] as $table => $pending) {
+            $pending();
+
+            $refused = null;
+
+            try {
+                $runner->run(static function () use (&$ran): void {
+                    ++$ran;
+                });
+            } catch (Throwable $throwable) {
+                $refused = $throwable;
+            }
+
+            self::assertInstanceOf(LogicException::class, $refused, 'A host manager with a pending orphan removal was not refused.');
+            self::assertSame(DoctrineTransactionRunner::HOST_PENDING_MESSAGE, $refused->getMessage());
+            self::assertNull($refused->getPrevious());
+            self::assertSame(0, $this->connection->getTransactionNestingLevel());
+            self::assertSame(1, (int) $this->freshValue('SELECT COUNT(*) FROM ' . $table), 'The host\'s orphan row is not deleted by the refusal.');
+
+            $manager->flush();   // the host's own decision: its orphan goes
+            self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ' . $table));
+            self::assertSame($token, $runner->run(static fn (): string => $token), 'A clean manager runs (a stale orphan is no pending work).');
+        }
+
+        self::assertSame($token, $runner->run(static fn (): string => $token), 'Still accepted on the next run.');
+        self::assertSame(0, (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_card') + (int) $this->freshValue('SELECT COUNT(*) FROM ddrb_badge'));
+        self::assertSame(0, $ran, 'The unit never ran over pending orphan removals.');
+        self::assertTrue($manager->isOpen());
+        self::assertTrue($manager->contains($board), 'The refusal never clears the host\'s manager.');
+        self::assertTrue($manager->contains($profile));
+    }
+
     /** TA3-3: a field the run changed on the host's entity stays (not cleared, not refreshed), with the notice. */
     private function scenarioAFieldTheRunChangedStaysWithANotice(): void
     {

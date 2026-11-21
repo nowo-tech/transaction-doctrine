@@ -28,6 +28,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Host runner: orphan removals count as pending host work (audit XD-1):** `forHostEntityManager()->run()` refuses a
+  host manager with pending changes before opening a transaction, but its check ignored `UnitOfWork`'s orphan removals.
+  Two host changes schedule nothing else: `clear()` on an inverse one-to-many with `orphanRemoval`, and an inverse
+  one-to-one with `orphanRemoval` set to `null`. The run was accepted and its flush deleted the host's orphan rows
+  inside the unit's transaction. Orphan removals are now pending work (read without computing change sets, ORM 2.20 and
+  3.x), so both cases are refused with `LogicException` (`HOST_PENDING_MESSAGE`) and the host's own flush still deletes
+  them; loaded, untouched orphanRemoval associations still run. Only managed orphans count: after the host flushed an
+  inverse one-to-one set to `null`, ORM schedules the deleted entity again at every change-set computation although no
+  flush deletes anything, and those runs are still accepted. Covered on SQLite and on MySQL 8.4, MariaDB 11.4 and
+  PostgreSQL 16. `HostFlushProbe` reads orphan removals through the same internal reader, so it no longer reports
+  such a stale orphan either.
+- **Write unit: a pending orphan removal makes the unit run once (audit XD-1):** `WriteUnit`'s pending-changes check
+  ignored orphan removals too, so a caller's `clear()` on an inverse one-to-many with `orphanRemoval`, or inverse
+  one-to-one set to `null`, did not stop a replay, and the repair between attempts silently dropped that removal. A
+  managed orphan removal now counts in the run-once, replay and discard decisions: the unit runs once, the failure
+  propagates, and the caller's flush still deletes the orphan. Stale, unmanaged orphans do not count.
+- **Private entity manager: a pending orphan removal keeps a stale manager (audit XD-1):** a private manager made
+  stale by a rollback was replaced when its only pending work was an orphan removal, silently dropping the bundle's
+  removal. It is now kept until that work is flushed or the boundary, as for any other pending change; once nothing
+  managed is pending, it is replaced as before.
+- **Host-flush probe: no report for a flushed inverse one-to-one orphan (audit XD2-2):** after the host flushed an
+  inverse one-to-one with `orphanRemoval` set to `null`, ORM keeps the deleted entity in the owner's loaded state, so
+  `HostFlushProbe` kept reporting the owner's class at every later bundle flush although Doctrine writes nothing for an
+  inverse side. The probe now compares only fields and owning-side to-one associations; a pending inverse orphan
+  removal is reported as the class of the entity the flush deletes, and only while that entity is managed.
+- **Host-flush probe: an already reported class is still walked (audit TD192-1):** once an entity class was reported
+  (for example by a scheduled insertion), the probe skipped the other managed entities of that class, so the orphan an
+  inverse one-to-one of one of them left, and the new entities a changed association of one of them cascade-persists,
+  were not reported although the flush deletes or inserts them. Every managed entity outside the bundle's namespaces is
+  now walked.
+- **Host-flush probe: a clean collection moved to another owner is pending work (audit TD192-2, since 1.9.0):** a
+  clean `PersistentCollection` counted as unchanged even when it was another entity's collection assigned to this
+  owner, whose flush then writes it (join rows of a many-to-many owning side). A collection is now unchanged only when
+  it is the loaded one and clean.
+- **Private entity manager: dropped orphan removals are logged (audit TD192-4):** the warning logged when a boundary
+  drops the private manager with pending changes now counts managed orphan removals too, so a manager holding only an
+  orphan removal no longer drops it silently.
+- **`#[AsWriteUnit]` controllers: no Symfony 8.1 deprecation:** `WriteUnitControllerListener` passed the replaced
+  controller's attributes to `ControllerArgumentsEvent::setController()` grouped by class name, which Symfony 8.1
+  deprecates ("Passing an array of attributes grouped by class name ... is deprecated"), once per write-unit request.
+  On Symfony >= 8.1 (the installed `Kernel::VERSION_ID`) it now passes the flat list Symfony keeps in the
+  `_controller_attributes` request attribute; on older Symfony versions it keeps passing them grouped and ignores that
+  attribute, which they never read (audit TD192-3). The attributes still reach the listeners after
+  it in both cases.
+
 ## [1.9.1] - 2026-11-20
 
 ### Fixed

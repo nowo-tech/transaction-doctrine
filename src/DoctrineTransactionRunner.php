@@ -127,9 +127,10 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
      * like forEntityManager(), but after a failure it never closes, clears or resets an open manager.
      *
      * The manager must be clean when run() starts (audit TA3-6): with pending changes (scheduled insertions, updates
-     * or deletions, after UnitOfWork::computeChangeSets(), which scans the identity map and cascade-persists new
-     * entities it reaches) run() throws LogicException before opening a transaction, since a flush inside the run
-     * would carry the host's work into a transaction that may roll back. Flush or clear first.
+     * or deletions, orphan removals (1.9.2, audit XD-1), after UnitOfWork::computeChangeSets(), which scans the
+     * identity map and cascade-persists new entities it reaches) run() throws LogicException before opening a
+     * transaction, since a flush inside the run would carry the host's work into a transaction that may roll back.
+     * Flush or clear first.
      *
      * After a failure it only:
      *
@@ -464,7 +465,7 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
     }
 
     /**
-     * The cheap signals first (scheduled insertions, deletions and collection changes); only then
+     * The cheap signals first (scheduled insertions, deletions, orphan removals and collection changes); only then
      * UnitOfWork::computeChangeSets(), which scans the whole identity map and, through cascade-persist associations,
      * persists new entities it reaches (their prePersist callbacks run, generated ids may be assigned). A unit of work
      * that cannot even compute its change sets counts as pending, and what computeChangeSets() threw is handed back in
@@ -492,13 +493,18 @@ final readonly class DoctrineTransactionRunner implements TransactionRunnerInter
         return $this->hasScheduledWork($unitOfWork);
     }
 
+    /**
+     * Orphan removals count (1.9.2, audit XD-1): `clear()` on an inverse one-to-many with orphanRemoval, or an inverse
+     * one-to-one with orphanRemoval set to null, schedules nothing else, and the flush deletes those rows.
+     */
     private function hasScheduledWork(UnitOfWork $unitOfWork): bool
     {
         return $unitOfWork->getScheduledEntityInsertions() !== []
             || $unitOfWork->getScheduledEntityUpdates() !== []
             || $unitOfWork->getScheduledEntityDeletions() !== []
             || $unitOfWork->getScheduledCollectionDeletions() !== []
-            || $unitOfWork->getScheduledCollectionUpdates() !== [];
+            || $unitOfWork->getScheduledCollectionUpdates() !== []
+            || OrphanRemovals::pending($unitOfWork) !== [];
     }
 
     private function manager(): ?EntityManagerInterface

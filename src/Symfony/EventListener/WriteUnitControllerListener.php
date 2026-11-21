@@ -13,10 +13,13 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ControllerArgumentsEvent;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpKernel\Kernel;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
+use function array_is_list;
+use function is_array;
 use function is_object;
 use function is_string;
 use function preg_match;
@@ -78,7 +81,7 @@ final readonly class WriteUnitControllerListener
         $arguments  = $event->getArguments();
         $route      = $event->getRequest()->attributes->get('_route');
         $unit       = is_string($route) ? $route : null;
-        $event->setController(fn (): mixed => $this->runAsUnit($controller, $arguments, $unit), $event->getAttributes());
+        $event->setController(fn (): mixed => $this->runAsUnit($controller, $arguments, $unit), $this->attributes($event));
     }
 
     public function listed(Request $request): bool
@@ -95,6 +98,29 @@ final readonly class WriteUnitControllerListener
         }
 
         return false;
+    }
+
+    /**
+     * The replaced controller's attributes, in the shape setController() takes (1.9.2): a flat list on Symfony >= 8.1,
+     * which deprecates attributes grouped by class name, grouped by class name before. On Symfony >= 8.1 that list is
+     * the `_controller_attributes` request attribute getAttributes() reads and fills (what getAttributes('*') returns);
+     * before 8.1 Symfony never reads that attribute, so it is ignored there (audit TD192-3: a list another listener put
+     * there must not replace the attributes). The version is read at runtime: the installed Symfony decides.
+     *
+     * @return array<array-key, mixed>
+     */
+    private function attributes(ControllerArgumentsEvent $event): array
+    {
+        $grouped = $event->getAttributes();
+        $flat    = $this->symfonyVersionId() >= 80100 ? $event->getRequest()->attributes->get('_controller_attributes') : null;
+
+        return is_array($flat) && array_is_list($flat) ? $flat : $grouped;
+    }
+
+    /** The installed Symfony's version id: decided at runtime, whichever Symfony the static analysis saw. */
+    private function symfonyVersionId(): int
+    {
+        return Kernel::VERSION_ID;
     }
 
     private function applies(ControllerArgumentsEvent $event, Request $request): bool

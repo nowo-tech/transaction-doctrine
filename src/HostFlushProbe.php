@@ -148,7 +148,7 @@ final class HostFlushProbe implements ResetInterface
 
         // Scheduled inserts and deletes, orphan removals (audit WD-6), and collections a clear() scheduled for deletion
         // (audit WD-4: the owner's join rows go).
-        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions(), $this->orphanRemovals($unitOfWork)] as $entities) {
+        foreach ([$unitOfWork->getScheduledEntityInsertions(), $unitOfWork->getScheduledEntityDeletions(), OrphanRemovals::pending($unitOfWork)] as $entities) {
             foreach ($entities as $entity) {
                 $note($entity);
             }
@@ -172,7 +172,9 @@ final class HostFlushProbe implements ResetInterface
 
             foreach ($entities as $entity) {
                 $class = $this->realClass($entity::class);
-                if (!isset($foreign[$class]) && !$this->owned($class, $prefixes) && !$unitOfWork->isUninitializedObject($entity)
+                // An already reported class is walked too (1.9.2, audit TD192-1): changed() also notes the orphans an
+                // inverse to-one leaves and the new entities a changed association cascade-persists.
+                if (!$this->owned($class, $prefixes) && !$unitOfWork->isUninitializedObject($entity)
                     && $this->changed($entityManager, $entity, $note)) {
                     $foreign[$class] = true;
                 }
@@ -213,8 +215,11 @@ final class HostFlushProbe implements ResetInterface
     }
 
     /**
-     * Whether a managed entity differs from its loaded state in a way the flush writes: a field, a to-one association,
-     * or a to-many collection that is dirty or no longer the managed one. A new entity a changed association would
+     * Whether a managed entity differs from its loaded state in a way the flush writes: a field, an owning-side to-one
+     * association, or a to-many collection that is dirty or no longer the managed one. An inverse-side to-one writes
+     * nothing for its owner (1.9.2, audit XD2-2: after the host flushed an inverse one-to-one set to null, ORM keeps the
+     * old value in the owner's loaded state); with orphan removal its managed former value is noted instead, as the
+     * flush deletes it. A new entity a changed association would
      * cascade-persist is noted too (audit WD-6). Read-only entities, and DEFERRED_EXPLICIT entities the host did not
      * persist() again, are never written: not changed (audit WD-6). Reads only (no change-set computation).
      *
@@ -243,7 +248,9 @@ final class HostFlushProbe implements ResetInterface
         foreach ($metadata->getAssociationNames() as $field) {
             $value = $metadata->getFieldValue($entity, $field);
             if ($metadata->isCollectionValuedAssociation($field)) {
-                if ($value instanceof PersistentCollection && !$value->isDirty()) {
+                // Unchanged only when it is the loaded collection itself and clean (1.9.2, audit TD192-2): a clean
+                // collection of another entity assigned here makes the flush write it for this owner.
+                if ($value instanceof PersistentCollection && !$value->isDirty() && array_key_exists($field, $original) && $value === $original[$field]) {
                     continue;
                 }
 
@@ -251,10 +258,16 @@ final class HostFlushProbe implements ResetInterface
                 if ($value instanceof PersistentCollection || is_iterable($value)) {
                     $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), $value instanceof PersistentCollection ? $value->unwrap() : $value, $note);
                 }
-            } elseif (array_key_exists($field, $original) && $value !== $original[$field]) {
-                $changed = true;
+            } elseif (array_key_exists($field, $original) && $value !== ($loaded = $original[$field])) {
+                $mapping = $metadata->getAssociationMapping($field);
+                if (!$metadata->isAssociationInverseSide($field)) {
+                    $changed = true;
+                } elseif (is_object($loaded) && $this->isOrphanRemoval($mapping) && $unitOfWork->getEntityState($loaded, UnitOfWork::STATE_NEW) === UnitOfWork::STATE_MANAGED) {
+                    $note($loaded); // the flush deletes the managed orphan (audit XD2-2: never the owner's row)
+                }
+
                 if (is_object($value)) {
-                    $this->noteCascadedPersists($unitOfWork, $metadata->getAssociationMapping($field), [$value], $note);
+                    $this->noteCascadedPersists($unitOfWork, $mapping, [$value], $note);
                 }
             }
         }
@@ -346,16 +359,13 @@ final class HostFlushProbe implements ResetInterface
     }
 
     /**
-     * The entities orphan removal deletes at the flush (UnitOfWork keeps them private; read without changing them).
+     * Whether an association removes its orphans.
      *
-     * @return array<object>
+     * @param array<string, mixed>|object $mapping The association mapping (ORM 2 array, ORM 3 object)
      */
-    private function orphanRemovals(UnitOfWork $unitOfWork): array
+    private function isOrphanRemoval(array|object $mapping): bool
     {
-        /** @var array<object> $orphans */
-        $orphans = Closure::bind(static fn (UnitOfWork $unitOfWork): array => $unitOfWork->orphanRemovals, null, UnitOfWork::class)($unitOfWork);
-
-        return $orphans;
+        return is_array($mapping) ? ($mapping['orphanRemoval'] ?? false) === true : ($mapping instanceof AssociationMapping && $mapping->orphanRemoval); // ORM 2 array, ORM 3 object
     }
 
     /**

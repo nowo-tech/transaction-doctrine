@@ -96,6 +96,13 @@ final class RepairDatabaseTest extends DatabaseTestCase
     }
 
     #[DataProvider('allServers')]
+    public function testAPendingOrphanRemovalMakesTheUnitRunOnce(string $server): void
+    {
+        $this->boot($server);
+        $this->scenarioAPendingOrphanRemovalMakesTheUnitRunOnce();
+    }
+
+    #[DataProvider('allServers')]
     public function testAnUnflushedRemovalIsCancelled(string $server): void
     {
         $this->boot($server);

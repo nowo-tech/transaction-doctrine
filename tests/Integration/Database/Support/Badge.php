@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Nowo\TransactionDoctrine\Tests\Integration\Database\Support;
+
+use Doctrine\ORM\Mapping as ORM;
+
+/**
+ * The owning side of a Profile's one-to-one with orphan removal (audit XD-1).
+ *
+ * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
+ * @copyright 2026 Nowo.tech
+ */
+#[ORM\Entity]
+#[ORM\Table(name: 'ddrb_badge')]
+class Badge
+{
+    public function __construct(
+        #[ORM\Id]
+        #[ORM\Column(type: 'integer')]
+        public int $id,
+        #[ORM\OneToOne(targetEntity: Profile::class, inversedBy: 'badge')]
+        #[ORM\JoinColumn(name: 'profile_id', referencedColumnName: 'id', nullable: false)]
+        public Profile $profile,
+    ) {
+    }
+}

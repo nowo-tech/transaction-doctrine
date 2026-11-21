@@ -12,6 +12,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Generator;
 use InvalidArgumentException;
 use LogicException;
+use Nowo\TransactionDoctrine\OrphanRemovals;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
@@ -550,12 +551,17 @@ final readonly class WriteUnit implements WriteUnitInterface
         return false;
     }
 
+    /**
+     * Managed orphan removals count (1.9.2, audit XD-1): `clear()` on an inverse one-to-many with orphanRemoval, or an
+     * inverse one-to-one with orphanRemoval set to null, schedules nothing else, and a replay's repair would drop it.
+     */
     private function hasScheduledWork(UnitOfWork $unitOfWork): bool
     {
         return $unitOfWork->getScheduledEntityInsertions() !== []
             || $unitOfWork->getScheduledEntityUpdates() !== []
             || $unitOfWork->getScheduledEntityDeletions() !== []
             || $unitOfWork->getScheduledCollectionDeletions() !== []
-            || $unitOfWork->getScheduledCollectionUpdates() !== [];
+            || $unitOfWork->getScheduledCollectionUpdates() !== []
+            || OrphanRemovals::pending($unitOfWork) !== [];
     }
 }
