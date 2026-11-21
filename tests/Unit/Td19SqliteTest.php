@@ -91,6 +91,11 @@ final class Td19SqliteTest extends DatabaseTestCase
         $this->scenarioTheProbeWalksReportedClassesAndSwappedCollections();
     }
 
+    public function testTheProbeModelsCollectionWrites(): void
+    {
+        $this->scenarioTheProbeModelsCollectionWrites();
+    }
+
     public function testTheProbeComparesEnumsAsTheFlushDoes(): void
     {
         $this->scenarioTheProbeComparesEnumsAsTheFlushDoes();
