@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.9.2](#to-192)
 - [To 1.9.1](#to-191)
 - [To 1.9.0](#to-190)
 - [To 1.8.2](#to-182)
@@ -30,6 +31,14 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.9.2
+
+From **1.9.1**:
+
+```bash
+composer update nowo-tech/transaction-doctrine
+```
 
 `composer update nowo-tech/transaction-doctrine`. No configuration change. `forHostEntityManager()->run()` now also
 refuses a host manager whose only pending work is an orphan removal (audit XD-1): `clear()` or `removeElement()` on an
