@@ -364,6 +364,12 @@ trait HostFlushProbeScenarios
                 $state . ': owning many-to-many replaced by an empty collection' => [static function () use ($team, $recomputed): void {
                     $team($recomputed)->members = new ArrayCollection();
                 }, $recomputed ? [] : [Team::class]], // out of the loaded state: the flush deletes nothing
+                $state . ': owning many-to-many given another entity\'s empty collection' => [static function () use ($manager, $team, $recomputed): void {
+                    $other = $manager->find(Team::class, 2);
+                    self::assertInstanceOf(Team::class, $other);
+                    self::assertCount(0, $other->members); // initialised
+                    $team($recomputed)->members = $other->members;
+                }, $recomputed ? [] : [Team::class]], // wrapped empty: only the loaded collection's deletion writes
                 $state . ': orphan-removal one-to-many replaced' => [static function () use ($folder, $recomputed): void {
                     $folder($recomputed)->leaves = new ArrayCollection();
                 }, $recomputed ? [] : [Folder::class]], // out of the loaded state: the flush deletes nothing
