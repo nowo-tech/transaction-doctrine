@@ -2,7 +2,7 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/transaction-doctrine`  
-**Last audited**: 2026-11-20 (1.8.0)
+**Last audited**: 2026-11-22 (1.9.3)
 
 ## Runner
 
@@ -53,6 +53,10 @@
 | `WriteUnit/Dbal/CommitTrackingDriver.php` | Write units | FR-WU-005 |
 | `WriteUnit/Dbal/CommitTrackingConnection.php` | Write units | FR-WU-005 |
 | `WriteUnit/Dbal/CommitTrackingStatement.php` | Write units | FR-WU-005 |
+| `WriteUnit/TransactionMark.php` | Write units | FR-WU-006 |
+| `WriteUnit/TransactionOutcome.php` | Write units | FR-WU-006 |
+| `WriteUnit/OutermostTransactions.php` | Write units | FR-WU-006 |
+| `WriteUnit/Dbal/NativeServer.php` | Write units | FR-WU-006 |
 
 ## Symfony bundle (spec [002-write-units](../002-write-units/spec.md))
 
@@ -70,7 +74,25 @@
 | `Symfony/Conflict/ConflictResponseFormatterInterface.php` | Symfony bundle | FR-SF-005 |
 | `Symfony/Conflict/TransientFailureConflictMapper.php` | Symfony bundle | FR-SF-005 |
 | `Symfony/EventListener/WorkerConnectionHygiene.php` | Symfony bundle | FR-SF-006 |
+| `Symfony/Boundary/UnitOfWorkFrames.php` | Symfony bundle | FR-SF-008 |
+| `Symfony/EventListener/UnitOfWorkBoundaryListener.php` | Symfony bundle | FR-SF-008 |
 | `../templates/conflict.html.twig`, `../templates/conflict_ui_kit.html.twig`, `../translations/*` | Symfony bundle | FR-SF-007 |
+
+## Private entity manager (spec [002-write-units](../002-write-units/spec.md))
+
+| Source file | Spec section | Requirement IDs |
+| --- | --- | --- |
+| `HostFlushProbe.php` | Private entity manager and host-flush probe | FR-PM-004 |
+| `OrphanRemovals.php` | Private entity manager and host-flush probe | FR-PM-004 |
+| `PrivateManager/PrivateEntityManager.php` | Private entity manager and host-flush probe | FR-PM-001 |
+| `PrivateManager/PrivateManagerRegistry.php` | Private entity manager and host-flush probe | FR-PM-001 |
+| `PrivateManager/PrivateManagerRepositoryFactory.php` | Private entity manager and host-flush probe | FR-PM-001 |
+| `PrivateManager/PrivateEntityManagerMiddleware.php` | Private entity manager and host-flush probe | FR-PM-002 |
+| `PrivateManager/PrivateEntityManagerDriver.php` | Private entity manager and host-flush probe | FR-PM-002 |
+| `PrivateManager/PrivateEntityManagerConnection.php` | Private entity manager and host-flush probe | FR-PM-002 |
+| `PrivateManager/PrivateEntityManagerStatement.php` | Private entity manager and host-flush probe | FR-PM-002 |
+| `PrivateManager/TransactionLevelListenerInterface.php` | Private entity manager and host-flush probe | FR-PM-002 |
+| `PrivateManager/DependencyInjection/PrivateEntityManagerPass.php` | Private entity manager and host-flush probe | FR-PM-003 |
 
 ## Coverage summary
 
@@ -80,6 +102,7 @@
 | Repair | 1 | 1 |
 | Classification | 4 | 4 |
 | Observability | 1 | 1 |
-| Write units | 17 | 17 |
-| Symfony bundle | 12 | 12 |
-| **Total production sources** | **37** | **37** |
+| Write units | 21 | 21 |
+| Symfony bundle | 14 | 14 |
+| Private entity manager | 11 | 11 |
+| **Total production sources** | **54** | **54** |
