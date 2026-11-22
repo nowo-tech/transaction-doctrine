@@ -68,6 +68,10 @@ unit; closed managers are reset at every main request.
   `ConnectionRepairer`, clear / reset); after a database failure ping connected connections only.
 - **FR-WU-004**: `ConcurrencyConflict` (a contract `TransientStorageFailure`), `LockConflictExceptionInterface`,
   `#[AsWriteUnit]`.
+- **FR-WU-006**: `TransactionMark`, `TransactionOutcome`, `OutermostTransactions`, `Dbal\NativeServer` (1.9) —
+  `CommitLedger::mark()` / `outcome()`: which outermost transaction of a connection a write belongs to and whether
+  exactly that one committed or rolled back (a savepoint released inside a host transaction rolled back later reads as
+  rolled back); one open outcome per native connection held in a `WeakMap`, no request data, no cap, no history.
 
 ### Symfony bundle
 
@@ -86,6 +90,28 @@ unit; closed managers are reset at every main request.
 - **FR-SF-006**: `WorkerConnectionHygiene` — request / exception / terminate / message-failed listeners; the mark on
   the request.
 - **FR-SF-007**: `templates/conflict.html.twig`, `templates/conflict_ui_kit.html.twig`, translations en / es / fr / de.
+- **FR-SF-008**: `Boundary\UnitOfWorkFrames`, `UnitOfWorkBoundaryListener` (1.9, 1.9.1) — reset the host-flush probe
+  and every private entity manager (tag `nowo_transaction_doctrine.private_entity_manager`) at the OUTERMOST boundary
+  of a main request, a Messenger message or a console command only; nested units never reset the running unit; a
+  throwing listener never leaves the process inside a unit; works with the kernel reset off (FrankenPHP worker).
+
+### Private entity manager and host-flush probe (1.9, REQ-ARCH-001 rule 6)
+
+- **FR-PM-001**: `PrivateManager\PrivateEntityManager`, `PrivateManagerRegistry`, `PrivateManagerRepositoryFactory` —
+  a bundle's private entity manager on the application's connection, configuration and event manager; a stable
+  decorator recreated when the identity map may describe rows a rollback undid or the manager closed; the registry
+  resolves the bundle's manager name and entity classes to it and everything else to the application's registry; one
+  repository factory per manager so replaced managers are collected in worker mode.
+- **FR-PM-002**: `PrivateManager\PrivateEntityManagerMiddleware`, `PrivateEntityManagerDriver`,
+  `PrivateEntityManagerConnection`, `PrivateEntityManagerStatement`, `TransactionLevelListenerInterface` — DBAL 3 / 4
+  middleware telling the manager how the connection's transactions end (outermost commit / rollback, savepoint
+  rollback / release, a connection released with a transaction open, a failed statement on PostgreSQL).
+- **FR-PM-003**: `PrivateManager\DependencyInjection\PrivateEntityManagerPass` — checks the source manager exists and
+  tags the bundle's middleware `doctrine.middleware` for that manager's connection only.
+- **FR-PM-004**: `HostFlushProbe`, `OrphanRemovals` — read-only probe called before a bundle flushes the host manager:
+  one `E_USER_DEPRECATED` per bundle, foreign class and unit of work naming pending host changes the flush would write
+  (never computes change sets, clears or resets the host manager); `OrphanRemovals` lists the managed entities orphan
+  removal deletes at the next flush.
 
 ---
 
