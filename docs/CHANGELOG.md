@@ -54,7 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Nowo\TransactionContract\…` types (same class: `catch`, `instanceof` and type declarations interoperate both ways),
   registered eagerly through Composer `autoload.files` (`aliases.php`). Removed in 2.0.
 - `Nowo\TransactionDoctrine\ConflictCode`: use `Nowo\TransactionContract\ConflictCode` and `ConflictCodeResolver`.
-  It stays an enum of its own in 1.x (its static helpers delegate to the resolver). Removed in 2.0.
+  It stays an enum of its own in 1.x (its static helpers delegate to the resolver). Removed in 2.0. `forFailure()` and
+  `forRequest()` trigger a silenced `E_USER_DEPRECATED`; the aliases trigger none (registered eagerly for every
+  process, no hook on alias use).
 
 No BC break: every 1.9 name, signature and behaviour keeps working. One visible difference: the runtime class name of
 a write unit's conflict (`get_class()`, the `exception_class` log key) is now

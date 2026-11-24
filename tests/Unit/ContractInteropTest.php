@@ -23,7 +23,11 @@ use ReflectionClass;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request;
 
+use function error_clear_last;
+use function error_get_last;
 use function sprintf;
+
+use const E_USER_DEPRECATED;
 
 /**
  * transaction-doctrine >= 1.10: the deprecated names are aliases of the framework-free contract types, so catch,
@@ -181,5 +185,33 @@ final class ContractInteropTest extends TestCase
         $derived = new ConflictResponseContext(409, 1, 'e', 'm', null, $failure);
         self::assertSame(ConflictCode::RetrySafe, $derived->code);
         self::assertSame(ContractConflictCode::RetrySafe, $derived->contractCode);
+    }
+
+    public function testTheDeprecatedHelpersTriggerARuntimeDeprecation(): void
+    {
+        $failure = new ContractConcurrencyConflict(1, ContractTransientFailureKind::Deadlock, 1, new LogicException('deadlock'));
+        $prefix  = 'Since nowo-tech/transaction-doctrine 1.10: Nowo\\TransactionDoctrine\\ConflictCode::';
+
+        error_clear_last();
+        ConflictCode::forFailure($failure);
+        self::assertSame(['type' => E_USER_DEPRECATED, 'message' => $prefix . 'forFailure() is deprecated, use ConflictCodeResolver::forFailure() (returns Nowo\\TransactionContract\\ConflictCode).'], $this->lastError());
+
+        error_clear_last();
+        ConflictCode::forRequest(Request::create('/'), $failure);
+        self::assertSame(['type' => E_USER_DEPRECATED, 'message' => $prefix . 'forRequest() is deprecated, use ConflictCodeResolver::forRequest() (returns Nowo\\TransactionContract\\ConflictCode).'], $this->lastError());
+
+        error_clear_last();
+        ConflictCodeResolver::forFailure($failure);
+        self::assertNull(error_get_last(), 'The resolver is not deprecated.');
+    }
+
+    /**
+     * @return array{type: int, message: string}|null
+     */
+    private function lastError(): ?array
+    {
+        $error = error_get_last();
+
+        return $error === null ? null : ['type' => $error['type'], 'message' => $error['message']];
     }
 }

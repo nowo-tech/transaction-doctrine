@@ -11,6 +11,11 @@ declare(strict_types=1);
  * the autoloader, so `catch (Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict $e)` would miss a thrown
  * Nowo\TransactionContract\ConcurrencyConflict if nothing had loaded the old name before.
  *
+ * No runtime deprecation is triggered for the aliases: they are registered for every process, so a notice here would
+ * fire for every host whether or not it names an old type, and PHP offers no hook when an alias is used. The
+ * deprecation is documented (CHANGELOG, UPGRADING) and IDEs / static analysis resolve the old names to the contract
+ * types. The deprecated ConflictCode::forFailure() / forRequest() do trigger E_USER_DEPRECATED.
+ *
  * Nowo\TransactionDoctrine\ConflictCode is not aliased: it keeps its static forFailure() / forRequest() (Doctrine,
  * HttpFoundation, Messenger) and is a deprecated enum of its own; see Nowo\TransactionDoctrine\ConflictCodeResolver.
  *

@@ -60,15 +60,26 @@ short names), and `ConflictCode::forRequest()` / `forFailure()` by `ConflictCode
 
 Notes:
 
+- **Require both:** a bundle that names the contract types must require `nowo-tech/transaction-contract: ^1.1`
+  **and** `nowo-tech/transaction-doctrine: ^1.10` (when it uses transaction-doctrine at all). With transaction-doctrine
+  <= 1.9 the old and new types are different classes: a contract `ConcurrencyConflict(committed: true)` would not be
+  seen by its resolver and would be answered `CONFLICT_001` (retried, a double write). transaction-contract 1.1
+  declares `conflict: nowo-tech/transaction-doctrine <1.10` so Composer refuses that mix.
+- **Compare codes by meaning, not by identity:** use `$code->retrySafe()` or `$code->value`, never
+  `=== ConflictCode::Committed` across the two enums (`Nowo\TransactionDoctrine\ConflictCode::Committed !==
+  Nowo\TransactionContract\ConflictCode::Committed`).
 - The three aliased types are the same class under both names, so mixed code (a host catching the old name, a bundle
   throwing the new one, or the other way round) keeps working.
 - `ConflictCode` is not an alias: an old-enum case is not `===` to a contract case. Code that compares a code returned
-  by `ConflictCodeResolver` must compare with `Nowo\TransactionContract\ConflictCode` cases (or `->value`); convert
+  by `ConflictCodeResolver` must use `->retrySafe()` or `->value` (or contract cases only); convert
   with `toContract()` / `ConflictCode::fromContract()`. `ConflictResponsePolicy` and `ConflictResponseContext` accept
   both. A formatter reads `$context->contractCode` (the contract enum) instead of `$context->code`.
 - The runtime class name of a write unit's conflict (`get_class()`, the `exception_class` log key, error trackers'
   grouping) is now `Nowo\TransactionContract\ConcurrencyConflict`. Code that compares class *names* with the old
   `::class` string must use `instanceof` instead.
+- `ConflictCode::forFailure()` / `forRequest()` now trigger a silenced `E_USER_DEPRECATED` (shown by Symfony's
+  deprecation log and the profiler). The aliases trigger nothing at runtime: they are registered for every process and
+  PHP has no hook when an alias is used.
 - A bundle whose public API exposes the old `ConflictCode` type (a property, a return type) changes that type in its
   own next major, or converts at the edge.
 

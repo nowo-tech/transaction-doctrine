@@ -9,6 +9,10 @@ use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Symfony\Component\HttpFoundation\Request;
 use Throwable;
 
+use function trigger_error;
+
+use const E_USER_DEPRECATED;
+
 /**
  * The platform's conflict code (REQ-RUNTIME-003 rule 6), carried by every conflict answer next to the 409 (or 503):
  *
@@ -39,6 +43,9 @@ enum ConflictCode: string
     public const RETRY_SAFE = 'CONFLICT_001';
     public const COMMITTED  = 'CONFLICT_002';
 
+    /** Symfony-style deprecation prefix (a silenced E_USER_DEPRECATED, collected by Symfony's error handler). */
+    private const DEPRECATION_PREFIX = 'Since nowo-tech/transaction-doctrine 1.10: Nowo\TransactionDoctrine\ConflictCode::';
+
     /** Nothing was committed: the client may retry after `Retry-After`. */
     case RetrySafe = 'CONFLICT_001';
 
@@ -52,6 +59,8 @@ enum ConflictCode: string
      */
     public static function forFailure(Throwable $failure, ?CommitMark $since = null): self
     {
+        @trigger_error(self::DEPRECATION_PREFIX . 'forFailure() is deprecated, use ConflictCodeResolver::forFailure() (returns Nowo\TransactionContract\ConflictCode).', E_USER_DEPRECATED);
+
         return self::fromContract(ConflictCodeResolver::forFailure($failure, $since));
     }
 
@@ -61,6 +70,8 @@ enum ConflictCode: string
      */
     public static function forRequest(Request $request, Throwable $failure): self
     {
+        @trigger_error(self::DEPRECATION_PREFIX . 'forRequest() is deprecated, use ConflictCodeResolver::forRequest() (returns Nowo\TransactionContract\ConflictCode).', E_USER_DEPRECATED);
+
         return self::fromContract(ConflictCodeResolver::forRequest($request, $failure));
     }
 

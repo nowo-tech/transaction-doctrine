@@ -52,7 +52,7 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_it
  * - `conflict_response`: the 409 (or 503) + `Retry-After` + `X-Conflict-Code` answer of a lock conflict, its template
  *   and JSON code, and the ConflictResponsePolicy service every bundle reads the status from;
  * - with `commit_detection`, the request commit watermark (RequestCommitWatermark at kernel.request): a conflict
- *   after a commit earlier in the same request answers CONFLICT_002 (ConflictCode::forRequest());
+ *   after a commit earlier in the same request answers CONFLICT_002 (ConflictCodeResolver::forRequest());
  * - request memos: services implementing ResetBetweenAttemptsInterface are autoconfigured (tag
  *   `nowo_transaction_doctrine.reset_between_attempts`, ordered by priority) and emptied before every replay; a
  *   WriteUnitRetryEvent is dispatched on `event_dispatcher` then;

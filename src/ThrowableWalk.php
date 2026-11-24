@@ -30,7 +30,7 @@ use function spl_object_id;
  *
  * Stateless: safe in a long-running worker.
  *
- * @internal Bundles use TransientFailureClassifier::findConflict() and ConflictCode
+ * @internal Bundles use TransientFailureClassifier::findConflict() and ConflictCodeResolver
  *
  * @author Héctor Franco Aceituno <hectorfranco@nowo.tech>
  * @copyright 2026 Nowo.tech

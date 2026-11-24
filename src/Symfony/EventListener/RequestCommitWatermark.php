@@ -17,7 +17,7 @@ use Symfony\Component\HttpKernel\Event\RequestEvent;
  * from the RequestStack), so a conflict in a fragment after a commit in the page still answers CONFLICT_002; it takes
  * its own only when no main mark can be found.
  *
- * ConflictCode::forRequest() reads the mark: the bundle's responder and every bundle answering in its own shape get
+ * ConflictCodeResolver::forRequest() reads the mark: the bundle's responder and every bundle answering in its own shape get
  * CONFLICT_002 when anything was committed earlier in the same request. Registered when `commit_detection` is on.
  *
  * Keeps no state of its own (FrankenPHP worker mode, kernel reset off): the mark lives on the request and the ledger

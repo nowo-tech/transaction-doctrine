@@ -45,7 +45,7 @@ use const PHP_URL_SCHEME;
  * (TransientFailureClassifier::findLockConflict(), bounded), or whatever a tagged
  * ConflictExceptionMapperInterface accepts (the exception-mapping hook: no route-name matching here).
  *
- * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCode::forRequest()): CONFLICT_001 when nothing
+ * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCodeResolver::forRequest()): CONFLICT_001 when nothing
  * was committed (with `Retry-After`), CONFLICT_002 when part of the request was (ConcurrencyConflict::$committed, a
  * lost savepoint with no deadlock behind it, or a commit since the request's CommitMark, taken at kernel.request when
  * `commit_detection` is on; no `Retry-After`). It is the first tagged ConflictResponseFormatterInterface that returns

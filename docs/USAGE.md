@@ -683,7 +683,8 @@ same names, values and semantics, and the old names are deprecated:
 ConcurrencyConflict, LockConflictExceptionInterface};` instead of the `Nowo\TransactionDoctrine\…` names, and
 `ConflictCodeResolver::forRequest()` / `forFailure()` instead of `ConflictCode::forRequest()` / `forFailure()` at the
 HTTP / Messenger edge. Require `nowo-tech/transaction-contract: ^1.1` directly when the `Domain` / `Contract` layer
-names these types.
+names these types, together with `nowo-tech/transaction-doctrine: ^1.10`, and compare codes with `->retrySafe()` or
+`->value`, never `===` across the two enums.
 
 ## How bundles comply with REQ-RUNTIME-003 using transaction-doctrine
 

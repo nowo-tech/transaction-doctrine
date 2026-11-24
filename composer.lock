@@ -167,16 +167,19 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-contract.git",
-                "reference": "0bfb0c6036e074f15f691cfacb78cffd4057177a"
+                "reference": "6f8cc886ec941d041d1a7845c1058217e89e5211"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/0bfb0c6036e074f15f691cfacb78cffd4057177a",
-                "reference": "0bfb0c6036e074f15f691cfacb78cffd4057177a",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/6f8cc886ec941d041d1a7845c1058217e89e5211",
+                "reference": "6f8cc886ec941d041d1a7845c1058217e89e5211",
                 "shasum": ""
             },
             "require": {
                 "php": ">=8.2 <8.6"
+            },
+            "conflict": {
+                "nowo-tech/transaction-doctrine": "<1.10"
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.0",
@@ -236,8 +239,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-24T04:31:53+00:00",
-            "published-time": "2026-11-24T04:32:00+00:00"
+            "time": "2026-11-24T06:04:02+00:00",
+            "published-time": "2026-11-24T06:04:08+00:00"
         },
         {
             "name": "psr/cache",
