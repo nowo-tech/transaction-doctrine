@@ -72,7 +72,8 @@ final class ConcurrencyConflictResponderTest extends TestCase
         self::assertStringContainsString('<title>409 — ', $html);
         self::assertStringContainsString('data-testid="concurrency-conflict" data-conflict-code="CONFLICT_001"', $html);
         self::assertSame('A write gave up after repeated database lock conflicts; answered the conflict status.', $logger->records[0]['message']);
-        self::assertSame(['route' => 'app_board', 'method' => 'GET', 'attempts' => 3, 'status' => 409, 'committed' => false, 'code' => 'CONFLICT_001', 'exception_class' => ConcurrencyConflict::class, 'exception_code' => 0], $logger->records[0]['context']);
+        // 1.10: the runtime name of the aliased class is the contract's.
+        self::assertSame(['route' => 'app_board', 'method' => 'GET', 'attempts' => 3, 'status' => 409, 'committed' => false, 'code' => 'CONFLICT_001', 'exception_class' => \Nowo\TransactionContract\ConcurrencyConflict::class, 'exception_code' => 0], $logger->records[0]['context']);
     }
 
     public function testThePageIsTranslated(): void

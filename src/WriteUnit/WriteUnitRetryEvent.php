@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\WriteUnit;
 
-use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionContract\TransientFailureKind;
 use Throwable;
 
 /**

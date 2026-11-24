@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\WriteUnit;
 
 use InvalidArgumentException;
-use Nowo\TransactionDoctrine\TransientFailureKind;
+use Nowo\TransactionContract\TransientFailureKind;
 
 use function in_array;
 use function max;

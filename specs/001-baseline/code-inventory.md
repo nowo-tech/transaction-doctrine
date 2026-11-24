@@ -2,7 +2,7 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/transaction-doctrine`  
-**Last audited**: 2026-11-22 (1.9.3)
+**Last audited**: 2026-11-24 (1.10.0)
 
 ## Runner
 
@@ -22,9 +22,10 @@
 | Source file | Spec section | Requirement IDs |
 | --- | --- | --- |
 | `TransientFailureClassifier.php` | Transient classifier | FR-CLS-001 |
-| `TransientFailureKind.php` | Transient kinds | FR-CLS-002 |
+| `../aliases.php` (deprecated aliases `TransientFailureKind`, `WriteUnit/ConcurrencyConflict`, `WriteUnit/LockConflictExceptionInterface`; the types live in transaction-contract 1.1) | Framework-free conflict types (spec [005](../005-framework-free-conflict-types/spec.md)) | FR-CLS-002, FR-WU-004, 005 FR-001 |
 | `ThrowableWalk.php` | Transient classifier | FR-CLS-001 |
-| `ConflictCode.php` | Conflict codes (spec [004-conflict-codes](../004-conflict-codes/spec.md)) | 004 FR-001, 004 FR-006 |
+| `ConflictCode.php` (deprecated) | Conflict codes (spec [004-conflict-codes](../004-conflict-codes/spec.md)) | 004 FR-001, 004 FR-006, 005 FR-002 |
+| `ConflictCodeResolver.php` | Framework-free conflict types (spec [005](../005-framework-free-conflict-types/spec.md)) | 004 FR-001, 005 FR-003 |
 
 ## Observability
 
@@ -40,8 +41,6 @@
 | `WriteUnit/WriteUnitInterface.php` | Write units | FR-WU-001 |
 | `WriteUnit/WriteUnitPolicy.php` | Write units | FR-WU-002 |
 | `WriteUnit/DoctrineStateRepairer.php` | Write units | FR-WU-003 |
-| `WriteUnit/ConcurrencyConflict.php` | Write units | FR-WU-004 |
-| `WriteUnit/LockConflictExceptionInterface.php` | Write units | FR-WU-004 |
 | `WriteUnit/AsWriteUnit.php` | Write units | FR-WU-004 |
 | `WriteUnit/CommitLedger.php` | Write units | FR-WU-005 |
 | `WriteUnit/CommitMark.php` | Write units | FR-WU-005, 004 FR-001 |
@@ -102,7 +101,7 @@
 | Repair | 1 | 1 |
 | Classification | 4 | 4 |
 | Observability | 1 | 1 |
-| Write units | 21 | 21 |
+| Write units | 19 | 19 |
 | Symfony bundle | 14 | 14 |
 | Private entity manager | 11 | 11 |
-| **Total production sources** | **54** | **54** |
+| **Total production sources** (`src/`; `aliases.php` mapped above) | **52** | **52** |

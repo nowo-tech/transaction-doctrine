@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony\EventListener;
 
-use Nowo\TransactionDoctrine\ConflictCode;
+use Nowo\TransactionContract\ConcurrencyConflict;
+use Nowo\TransactionContract\ConflictCode;
+use Nowo\TransactionContract\LockConflictExceptionInterface;
+use Nowo\TransactionDoctrine\ConflictCodeResolver;
 use Nowo\TransactionDoctrine\SafeLog;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictExceptionMapperInterface;
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseContext;
@@ -12,8 +15,6 @@ use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponseFormatterInterface
 use Nowo\TransactionDoctrine\Symfony\Conflict\ConflictResponsePolicy;
 use Nowo\TransactionDoctrine\ThrowableWalk;
 use Nowo\TransactionDoctrine\TransientFailureClassifier;
-use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
-use Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -44,7 +45,7 @@ use const PHP_URL_SCHEME;
  * (TransientFailureClassifier::findLockConflict(), bounded), or whatever a tagged
  * ConflictExceptionMapperInterface accepts (the exception-mapping hook: no route-name matching here).
  *
- * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCode::forRequest()): CONFLICT_001 when nothing
+ * The answer carries a conflict code (REQ-RUNTIME-003 rule 6, ConflictCodeResolver::forRequest()): CONFLICT_001 when nothing
  * was committed (with `Retry-After`), CONFLICT_002 when part of the request was (ConcurrencyConflict::$committed, a
  * lost savepoint with no deadlock behind it, or a commit since the request's CommitMark, taken at kernel.request when
  * `commit_detection` is on; no `Retry-After`). It is the first tagged ConflictResponseFormatterInterface that returns
@@ -115,7 +116,7 @@ final readonly class ConcurrencyConflictResponder
 
         $request  = $event->getRequest();
         $attempts = $this->attempts($failure);
-        $code     = ConflictCode::forRequest($request, $failure);
+        $code     = ConflictCodeResolver::forRequest($request, $failure);
         SafeLog::log($this->logger, 'warning', 'A write gave up after repeated database lock conflicts; answered the conflict status.', [
             'route'     => $this->route($request),
             'method'    => $request->getMethod(),
@@ -144,7 +145,7 @@ final readonly class ConcurrencyConflictResponder
 
     public function respond(Request $request, Throwable $failure): Response
     {
-        $code      = ConflictCode::forRequest($request, $failure);
+        $code      = ConflictCodeResolver::forRequest($request, $failure);
         $committed = !$code->retrySafe();
         $context   = new ConflictResponseContext(
             $this->policy->status,

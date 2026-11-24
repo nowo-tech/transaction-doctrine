@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.10.0](#to-1100)
 - [To 1.9.3](#to-193)
 - [To 1.9.2](#to-192)
 - [To 1.9.1](#to-191)
@@ -32,6 +33,55 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.10.0
+
+From **1.9.x**:
+
+```bash
+composer update nowo-tech/transaction-doctrine nowo-tech/transaction-contract --with-dependencies
+```
+
+Nothing breaks: the old names keep working until 2.0. To prepare for 2.0, and to let a bundle's `Domain` / `Contract`
+layer pass REQ-ARCH-002 (Deptrac), switch to the framework-free names of `nowo-tech/transaction-contract` 1.1:
+
+| Deprecated (removed in 2.0) | Use instead | How BC is kept in 1.x |
+|---|---|---|
+| `Nowo\TransactionDoctrine\TransientFailureKind` | `Nowo\TransactionContract\TransientFailureKind` | Class alias: the same enum |
+| `Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict` | `Nowo\TransactionContract\ConcurrencyConflict` | Class alias: the same class |
+| `Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface` | `Nowo\TransactionContract\LockConflictExceptionInterface` | Class alias: the same interface |
+| `Nowo\TransactionDoctrine\ConflictCode` (the value) | `Nowo\TransactionContract\ConflictCode` | Own enum, same cases and values; `toContract()` / `fromContract()` |
+| `ConflictCode::forFailure()` / `ConflictCode::forRequest()` | `Nowo\TransactionDoctrine\ConflictCodeResolver::forFailure()` / `forRequest()` | The old methods delegate and return the deprecated enum |
+
+One-line migration for bundles: replace `use Nowo\TransactionDoctrine\{ConflictCode, TransientFailureKind,
+WriteUnit\ConcurrencyConflict, WriteUnit\LockConflictExceptionInterface}` by `use Nowo\TransactionContract\…` (same
+short names), and `ConflictCode::forRequest()` / `forFailure()` by `ConflictCodeResolver::forRequest()` /
+`forFailure()`; require `nowo-tech/transaction-contract: ^1.1` when the bundle names the types itself.
+
+Notes:
+
+- **Require both:** a bundle that names the contract types must require `nowo-tech/transaction-contract: ^1.1`
+  **and** `nowo-tech/transaction-doctrine: ^1.10` (when it uses transaction-doctrine at all). With transaction-doctrine
+  <= 1.9 the old and new types are different classes: a contract `ConcurrencyConflict(committed: true)` would not be
+  seen by its resolver and would be answered `CONFLICT_001` (retried, a double write). transaction-contract 1.1
+  declares `conflict: nowo-tech/transaction-doctrine <1.10` so Composer refuses that mix.
+- **Compare codes by meaning, not by identity:** use `$code->retrySafe()` or `$code->value`, never
+  `=== ConflictCode::Committed` across the two enums (`Nowo\TransactionDoctrine\ConflictCode::Committed !==
+  Nowo\TransactionContract\ConflictCode::Committed`).
+- The three aliased types are the same class under both names, so mixed code (a host catching the old name, a bundle
+  throwing the new one, or the other way round) keeps working.
+- `ConflictCode` is not an alias: an old-enum case is not `===` to a contract case. Code that compares a code returned
+  by `ConflictCodeResolver` must use `->retrySafe()` or `->value` (or contract cases only); convert
+  with `toContract()` / `ConflictCode::fromContract()`. `ConflictResponsePolicy` and `ConflictResponseContext` accept
+  both. A formatter reads `$context->contractCode` (the contract enum) instead of `$context->code`.
+- The runtime class name of a write unit's conflict (`get_class()`, the `exception_class` log key, error trackers'
+  grouping) is now `Nowo\TransactionContract\ConcurrencyConflict`. Code that compares class *names* with the old
+  `::class` string must use `instanceof` instead.
+- `ConflictCode::forFailure()` / `forRequest()` now trigger a silenced `E_USER_DEPRECATED` (shown by Symfony's
+  deprecation log and the profiler). The aliases trigger nothing at runtime: they are registered for every process and
+  PHP has no hook when an alias is used.
+- A bundle whose public API exposes the old `ConflictCode` type (a property, a return type) changes that type in its
+  own next major, or converts at the edge.
 
 ## To 1.9.3
 

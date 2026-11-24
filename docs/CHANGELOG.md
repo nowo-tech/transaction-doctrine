@@ -30,6 +30,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Framework-free conflict types (REQ-ARCH-002 prerequisite):** requires `nowo-tech/transaction-contract` ^1.1, which
+  now holds `ConflictCode`, `TransientFailureKind`, `ConcurrencyConflict` and `LockConflictExceptionInterface` with the
+  names, values and semantics of 1.9. A bundle's `Domain` / `Contract` layer can name them without depending on this
+  package (whose `ConflictCode` imports HttpFoundation and Messenger).
+- `ConflictCodeResolver::forFailure()` / `forRequest()`: the code of a failure as the contract enum (the logic of
+  `ConflictCode::forFailure()` / `forRequest()`, moved).
+- `ConflictCode::toContract()` / `ConflictCode::fromContract()`; `ConflictResponseContext::$contractCode`.
+
+### Changed
+
+- `ConflictResponsePolicy::headersFor()` / `httpExceptionFor()` and `ConflictResponseContext`'s `$code` argument accept
+  either `ConflictCode` enum.
+- Internal code (write units, classifier, responder, Messenger middleware, bundle configuration) names the contract
+  types. Write units throw the same `ConcurrencyConflict` class as before.
+
+### Deprecated
+
+- `Nowo\TransactionDoctrine\TransientFailureKind`, `Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict` and
+  `Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface`: now class aliases of the
+  `Nowo\TransactionContract\…` types (same class: `catch`, `instanceof` and type declarations interoperate both ways),
+  registered eagerly through Composer `autoload.files` (`aliases.php`). Removed in 2.0.
+- `Nowo\TransactionDoctrine\ConflictCode`: use `Nowo\TransactionContract\ConflictCode` and `ConflictCodeResolver`.
+  It stays an enum of its own in 1.x (its static helpers delegate to the resolver). Removed in 2.0. `forFailure()` and
+  `forRequest()` trigger a silenced `E_USER_DEPRECATED`; the aliases trigger none (registered eagerly for every
+  process, no hook on alias use).
+
+No BC break: every 1.9 name, signature and behaviour keeps working. One visible difference: the runtime class name of
+a write unit's conflict (`get_class()`, the `exception_class` log key) is now
+`Nowo\TransactionContract\ConcurrencyConflict`; `ConcurrencyConflict::class` written under the old name still
+resolves to the old string, so compare classes with `instanceof`, not by name.
+
 ## [1.9.3] - 2026-11-21
 
 ### Fixed

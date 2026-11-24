@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, master]
 
+# transaction-contract >= 1.1 conflicts with transaction-doctrine < 1.10. Composer checks that rule against this root
+# package too, and on a detached PR checkout it may not guess the version (falling back to 1.0.0): pin it. Bump with
+# the branch alias.
+env:
+  COMPOSER_ROOT_VERSION: 1.10.x-dev
+
 jobs:
   git-hygiene:
     name: Git history (no AI co-author trailers)

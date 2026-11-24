@@ -13,6 +13,8 @@ services:
     environment:
       XDEBUG_MODE: coverage
       COMPOSER_ALLOW_SUPERUSER: "1"
+      # Same as CI: transaction-contract >= 1.1 conflicts with transaction-doctrine < 1.10 (root version guess).
+      COMPOSER_ROOT_VERSION: 1.10.x-dev
       # Real-database suite (make test-with-db); throwaway local credentials only.
       TD_MYSQL_URL: mysql://root:root@mysql:3306/ddrb
       TD_MARIADB_URL: mysql://root:root@mariadb:3306/ddrb

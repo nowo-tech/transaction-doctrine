@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony;
 
+use Nowo\TransactionContract\TransientFailureKind;
 use Nowo\TransactionDoctrine\HostFlushProbe;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Nowo\TransactionDoctrine\Symfony\Boundary\UnitOfWorkFrames;
@@ -17,7 +18,6 @@ use Nowo\TransactionDoctrine\Symfony\EventListener\UnitOfWorkBoundaryListener;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WorkerConnectionHygiene;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
-use Nowo\TransactionDoctrine\TransientFailureKind;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
@@ -52,7 +52,7 @@ use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_it
  * - `conflict_response`: the 409 (or 503) + `Retry-After` + `X-Conflict-Code` answer of a lock conflict, its template
  *   and JSON code, and the ConflictResponsePolicy service every bundle reads the status from;
  * - with `commit_detection`, the request commit watermark (RequestCommitWatermark at kernel.request): a conflict
- *   after a commit earlier in the same request answers CONFLICT_002 (ConflictCode::forRequest());
+ *   after a commit earlier in the same request answers CONFLICT_002 (ConflictCodeResolver::forRequest());
  * - request memos: services implementing ResetBetweenAttemptsInterface are autoconfigured (tag
  *   `nowo_transaction_doctrine.reset_between_attempts`, ordered by priority) and emptied before every replay; a
  *   WriteUnitRetryEvent is dispatched on `event_dispatcher` then;

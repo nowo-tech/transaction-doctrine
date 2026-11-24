@@ -9,6 +9,7 @@ return RectorConfig::configure()
     ->withPaths([
         __DIR__ . '/src',
         __DIR__ . '/tests',
+        __DIR__ . '/aliases.php',
     ])
     // Machine-wide cap: at most 2 worker processes; generous timeout for slow (WSL2 / CI) hosts.
     ->withParallel(300, 2, 10)

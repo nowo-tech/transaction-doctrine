@@ -20,6 +20,7 @@
   - [Conflict codes: CONFLICT_001 and CONFLICT_002 (1.5.0)](#conflict-codes-conflict_001-and-conflict_002-150)
   - [Request commit watermark (1.6.0)](#request-commit-watermark-160)
   - [The X-Conflict-Code header (1.6.0)](#the-x-conflict-code-header-160)
+  - [Framework-free conflict types (1.10)](#framework-free-conflict-types-110)
 - [How bundles comply with REQ-RUNTIME-003 using transaction-doctrine](#how-bundles-comply-with-req-runtime-003-using-transaction-doctrine)
 - [Worker connection hygiene](#worker-connection-hygiene)
 - [Outermost-commit epoch per connection (1.9)](#outermost-commit-epoch-per-connection-19)
@@ -495,7 +496,7 @@ status.`) with the route name, method, attempts, status, `committed` and `code`;
 
 The responder never matches route names. A failure is a conflict when:
 
-1. it (or anything in its previous chain) implements `Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface`
+1. it (or anything in its previous chain) implements `Nowo\TransactionContract\LockConflictExceptionInterface` (or its deprecated alias `Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface`)
    (`ConcurrencyConflict` does); or
 2. a service implementing `ConflictExceptionMapperInterface` says so (autoconfigured, tag
    `nowo_transaction_doctrine.conflict_exception_mapper`):
@@ -565,8 +566,10 @@ transient storage failures and lost savepoints. Unique violations and lost conne
 ### Conflict codes: CONFLICT_001 and CONFLICT_002 (1.5.0)
 
 Every conflict answer carries one code (nowo-tech REQ-RUNTIME-003 rule 6). It is a
-`Nowo\TransactionDoctrine\ConflictCode` (backed enum; constants `ConflictCode::RETRY_SAFE` and
-`ConflictCode::COMMITTED` for attributes and strings):
+`Nowo\TransactionContract\ConflictCode` (framework-free backed enum, transaction-contract >= 1.1; constants
+`ConflictCode::RETRY_SAFE` and `ConflictCode::COMMITTED` for attributes and strings). The 1.5-1.9 enum
+`Nowo\TransactionDoctrine\ConflictCode` is deprecated since 1.10 (same cases and values; see
+[Framework-free conflict types](#framework-free-conflict-types-110)):
 
 | Code | When | Client should | `Retry-After` | JSON `error` |
 |------|------|---------------|---------------|--------------|
@@ -575,9 +578,10 @@ Every conflict answer carries one code (nowo-tech REQ-RUNTIME-003 rule 6). It is
 
 - JSON: the `code` key, next to the unchanged `error` key.
 - HTML: `data-conflict-code` on the `data-testid="concurrency-conflict"` element.
-- Formatters: `$context->code` (`ConflictResponseContext`).
-- Own answers outside the responder (JSON-RPC, MCP tools, a console command): `ConflictCode::forFailure($failure)`;
-  inside an HTTP request `ConflictCode::forRequest($request, $failure)` (1.6.0, next section).
+- Formatters: `$context->contractCode` (1.10, the contract enum; `$context->code` is the deprecated enum).
+- Own answers outside the responder (JSON-RPC, MCP tools, a console command): `ConflictCodeResolver::forFailure($failure)`;
+  inside an HTTP request `ConflictCodeResolver::forRequest($request, $failure)` (1.10; before, the same static methods
+  of the deprecated `ConflictCode`, which still work).
 
 The status stays `conflict_response.status` (409 by default, 503 per host).
 
@@ -601,9 +605,9 @@ mark. The responder answers `CONFLICT_002` (no `Retry-After`) when the ledger mo
 A bundle that answers in its own shape gets the same rule with one call:
 
 ```php
-use Nowo\TransactionDoctrine\ConflictCode;
+use Nowo\TransactionDoctrine\ConflictCodeResolver;
 
-$code = ConflictCode::forRequest($request, $failure);   // CONFLICT_002 when anything committed since the mark
+$code = ConflictCodeResolver::forRequest($request, $failure);   // CONFLICT_002 when anything committed since the mark
 ```
 
 Outside HTTP (a Messenger handler, a console command) take your own mark before the work, from the
@@ -613,7 +617,7 @@ Outside HTTP (a Messenger handler, a console command) take your own mark before 
 ```php
 $mark = new CommitMark($ledger);
 // … the work …
-$code = ConflictCode::forFailure($failure, $mark);
+$code = ConflictCodeResolver::forFailure($failure, $mark);
 ```
 
 Without commit detection there is no mark and the failure alone decides, as in 1.5. A commit before the mark (an
@@ -633,19 +637,54 @@ own code in the body, never in this header.
 A bundle that answers itself, or that renders through the host's error page, sends it through the policy:
 
 ```php
-$code = ConflictCode::forRequest($request, $failure);
+$code = ConflictCodeResolver::forRequest($request, $failure);
 $response = new JsonResponse(['error' => 'unavailable', 'code' => $code->value], $policy->status, $policy->headersFor($code, $hint));
 // HTML routes rendered by the host's error page: the page carries the code in the header even when its body has none.
 throw $policy->httpExceptionFor($code, 'The change could not be saved. Reload and try again.', $failure, $hint);
 ```
 
 `headersFor()` returns `X-Conflict-Code` always and `Retry-After` only for `CONFLICT_001`. `headers()` and
-`httpException()` keep their 1.5 output (`Retry-After` only) for BC; prefer the `…For()` variants.
+`httpException()` keep their 1.5 output (`Retry-After` only) for BC; prefer the `…For()` variants. From 1.10
+`headersFor()` and `httpExceptionFor()` take either `ConflictCode` enum.
 
 - **Cross-origin APIs** must list the header in `Access-Control-Expose-Headers` (for example NelmioCorsBundle
   `expose_headers: ['X-Conflict-Code', 'Retry-After']`), or browsers hide it from scripts.
 - **Clients key on the `code` body key or on `X-Conflict-Code`, never on `error`.** The `error` strings differ between
   bundles (`concurrency_conflict`, `unavailable`, `conflict`) and are kept only for BC.
+
+### Framework-free conflict types (1.10)
+
+transaction-doctrine is not framework-free (its resolver reads HttpFoundation requests and Messenger wrappers), so a
+bundle whose `Domain` / `Contract` layer named its types failed REQ-ARCH-002 (Deptrac). Since 1.10 the four value
+types live in [`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract) 1.1, with the
+same names, values and semantics, and the old names are deprecated:
+
+| Deprecated (removed in 2.0) | Use instead | How BC is kept in 1.x |
+|---|---|---|
+| `Nowo\TransactionDoctrine\TransientFailureKind` | `Nowo\TransactionContract\TransientFailureKind` | Class alias: the same enum |
+| `Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict` | `Nowo\TransactionContract\ConcurrencyConflict` | Class alias: the same class |
+| `Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface` | `Nowo\TransactionContract\LockConflictExceptionInterface` | Class alias: the same interface |
+| `Nowo\TransactionDoctrine\ConflictCode` (the value) | `Nowo\TransactionContract\ConflictCode` | Own enum, same cases and values; `toContract()` / `fromContract()` |
+| `ConflictCode::forFailure()` / `ConflictCode::forRequest()` | `Nowo\TransactionDoctrine\ConflictCodeResolver::forFailure()` / `forRequest()` | The old methods delegate and return the deprecated enum |
+
+- **Aliases, not subclasses.** Each aliased old name *is* the contract type, so `catch`, `instanceof`, type
+  declarations and `===` on enum cases match either name, in both directions: a `catch (WriteUnit\ConcurrencyConflict
+  $e)` catches a `new Nowo\TransactionContract\ConcurrencyConflict(…)`, and a contract `catch` catches one built under
+  the old name. The aliases are registered eagerly (Composer `autoload.files`, `aliases.php`), because `catch` and
+  `instanceof` never trigger the autoloader.
+- **ConflictCode is the exception**: it keeps its static `forFailure()` / `forRequest()`, so it stays an enum of its
+  own. `ConflictCode::Committed !== Nowo\TransactionContract\ConflictCode::Committed`; convert with
+  `$code->toContract()` / `ConflictCode::fromContract($code)`, or compare `->value`. Every transaction-doctrine API that
+  takes a code (`ConflictResponsePolicy::headersFor()` / `httpExceptionFor()`, `ConflictResponseContext`) accepts both.
+- Internally transaction-doctrine now uses the contract names; write units still throw the same
+  `ConcurrencyConflict` class.
+
+**Migrating a bundle** (one line): `use Nowo\TransactionContract\{ConflictCode, TransientFailureKind,
+ConcurrencyConflict, LockConflictExceptionInterface};` instead of the `Nowo\TransactionDoctrine\…` names, and
+`ConflictCodeResolver::forRequest()` / `forFailure()` instead of `ConflictCode::forRequest()` / `forFailure()` at the
+HTTP / Messenger edge. Require `nowo-tech/transaction-contract: ^1.1` directly when the `Domain` / `Contract` layer
+names these types, together with `nowo-tech/transaction-doctrine: ^1.10`, and compare codes with `->retrySafe()` or
+`->value`, never `===` across the two enums.
 
 ## How bundles comply with REQ-RUNTIME-003 using transaction-doctrine
 
@@ -661,7 +700,8 @@ A bundle that writes inherits most of REQ-RUNTIME-003 from this package:
    A bundle with its own error shape registers a `ConflictResponseFormatterInterface` and copies `$context->code`; a
    bundle that maps a transient failure itself reads the status and headers from `ConflictResponsePolicy`
    (`headersFor($code)`, `httpExceptionFor($code, …)`: `X-Conflict-Code` + `Retry-After` only for `CONFLICT_001`) and
-   the code from `ConflictCode::forRequest($request, $failure)` (1.6.0: counts commits earlier in the request).
+   the code from `ConflictCodeResolver::forRequest($request, $failure)` (1.10; counts commits earlier in the request).
+   Name the conflict types from `Nowo\TransactionContract` in the bundle's domain / contract layer (1.10).
    Never map unique violations or lost connections to a conflict.
 4. **Never reset or clear the host's entity manager (rule 2):** build the runner with `forHostEntityManager()` when
    it receives the host's manager; `forEntityManager()` is for the bundle's own.
