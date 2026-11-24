@@ -23,8 +23,8 @@ use ReflectionClass;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Request;
 
-use function error_clear_last;
-use function error_get_last;
+use function restore_error_handler;
+use function set_error_handler;
 use function sprintf;
 
 use const E_USER_DEPRECATED;
@@ -187,31 +187,26 @@ final class ContractInteropTest extends TestCase
         self::assertSame(ContractConflictCode::RetrySafe, $derived->contractCode);
     }
 
-    public function testTheDeprecatedHelpersTriggerARuntimeDeprecation(): void
+    public function testTheDeprecatedHelpersTriggerNoRuntimeDeprecation(): void
     {
         $failure = new ContractConcurrencyConflict(1, ContractTransientFailureKind::Deadlock, 1, new LogicException('deadlock'));
-        $prefix  = 'Since nowo-tech/transaction-doctrine 1.10: Nowo\\TransactionDoctrine\\ConflictCode::';
+        $raised  = [];
 
-        error_clear_last();
-        ConflictCode::forFailure($failure);
-        self::assertSame(['type' => E_USER_DEPRECATED, 'message' => $prefix . 'forFailure() is deprecated, use ConflictCodeResolver::forFailure() (returns Nowo\\TransactionContract\\ConflictCode).'], $this->lastError());
+        // @phpstan-ignore frankenphp.worker.noSetErrorExceptionHandler (test helper, restored in finally)
+        set_error_handler(static function (int $level, string $message) use (&$raised): bool {
+            $raised[] = [$level, $message];
 
-        error_clear_last();
-        ConflictCode::forRequest(Request::create('/'), $failure);
-        self::assertSame(['type' => E_USER_DEPRECATED, 'message' => $prefix . 'forRequest() is deprecated, use ConflictCodeResolver::forRequest() (returns Nowo\\TransactionContract\\ConflictCode).'], $this->lastError());
+            return true;
+        }, E_USER_DEPRECATED);
 
-        error_clear_last();
-        ConflictCodeResolver::forFailure($failure);
-        self::assertNull(error_get_last(), 'The resolver is not deprecated.');
-    }
+        try {
+            self::assertSame(ConflictCode::RetrySafe, ConflictCode::forFailure($failure));
+            self::assertSame(ConflictCode::RetrySafe, ConflictCode::forRequest(Request::create('/'), $failure));
+            self::assertSame(ContractConflictCode::RetrySafe, ConflictCodeResolver::forFailure($failure));
+        } finally {
+            restore_error_handler();
+        }
 
-    /**
-     * @return array{type: int, message: string}|null
-     */
-    private function lastError(): ?array
-    {
-        $error = error_get_last();
-
-        return $error === null ? null : ['type' => $error['type'], 'message' => $error['message']];
+        self::assertSame([], $raised, 'The deprecated helpers are flagged by docblock only: no runtime deprecation, even for hosts that fail on deprecations.');
     }
 }

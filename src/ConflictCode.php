@@ -9,10 +9,6 @@ use Nowo\TransactionDoctrine\WriteUnit\CommitMark;
 use Symfony\Component\HttpFoundation\Request;
 use Throwable;
 
-use function trigger_error;
-
-use const E_USER_DEPRECATED;
-
 /**
  * The platform's conflict code (REQ-RUNTIME-003 rule 6), carried by every conflict answer next to the 409 (or 503):
  *
@@ -43,9 +39,6 @@ enum ConflictCode: string
     public const RETRY_SAFE = 'CONFLICT_001';
     public const COMMITTED  = 'CONFLICT_002';
 
-    /** Symfony-style deprecation prefix (a silenced E_USER_DEPRECATED, collected by Symfony's error handler). */
-    private const DEPRECATION_PREFIX = 'Since nowo-tech/transaction-doctrine 1.10: Nowo\TransactionDoctrine\ConflictCode::';
-
     /** Nothing was committed: the client may retry after `Retry-After`. */
     case RetrySafe = 'CONFLICT_001';
 
@@ -56,22 +49,22 @@ enum ConflictCode: string
      * The code of a conflict failure: ConflictCodeResolver::forFailure(), as this (deprecated) enum.
      *
      * @param CommitMark|null $since A watermark taken before the work that failed (null = the failure alone decides)
+     *
+     * @deprecated since 1.10, use ConflictCodeResolver::forFailure() (returns Nowo\TransactionContract\ConflictCode); removed in 2.0. Flagged by docblock only: no runtime deprecation is triggered.
      */
     public static function forFailure(Throwable $failure, ?CommitMark $since = null): self
     {
-        @trigger_error(self::DEPRECATION_PREFIX . 'forFailure() is deprecated, use ConflictCodeResolver::forFailure() (returns Nowo\TransactionContract\ConflictCode).', E_USER_DEPRECATED);
-
         return self::fromContract(ConflictCodeResolver::forFailure($failure, $since));
     }
 
     /**
      * The code of a conflict met while handling $request: ConflictCodeResolver::forRequest(), as this (deprecated)
      * enum.
+     *
+     * @deprecated since 1.10, use ConflictCodeResolver::forRequest() (returns Nowo\TransactionContract\ConflictCode); removed in 2.0. Flagged by docblock only: no runtime deprecation is triggered.
      */
     public static function forRequest(Request $request, Throwable $failure): self
     {
-        @trigger_error(self::DEPRECATION_PREFIX . 'forRequest() is deprecated, use ConflictCodeResolver::forRequest() (returns Nowo\TransactionContract\ConflictCode).', E_USER_DEPRECATED);
-
         return self::fromContract(ConflictCodeResolver::forRequest($request, $failure));
     }
 

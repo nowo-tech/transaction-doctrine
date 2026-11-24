@@ -14,7 +14,7 @@ declare(strict_types=1);
  * No runtime deprecation is triggered for the aliases: they are registered for every process, so a notice here would
  * fire for every host whether or not it names an old type, and PHP offers no hook when an alias is used. The
  * deprecation is documented (CHANGELOG, UPGRADING) and IDEs / static analysis resolve the old names to the contract
- * types. The deprecated ConflictCode::forFailure() / forRequest() do trigger E_USER_DEPRECATED.
+ * types. The deprecated ConflictCode::forFailure() / forRequest() are flagged by docblock only (no runtime notice either).
  *
  * Nowo\TransactionDoctrine\ConflictCode is not aliased: it keeps its static forFailure() / forRequest() (Doctrine,
  * HttpFoundation, Messenger) and is a deprecated enum of its own; see Nowo\TransactionDoctrine\ConflictCodeResolver.

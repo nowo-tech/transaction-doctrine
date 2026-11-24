@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [Unreleased](#unreleased)
+- [To 1.10.1](#to-1101)
 - [To 1.10.0](#to-1100)
 - [To 1.9.3](#to-193)
 - [To 1.9.2](#to-192)
@@ -33,6 +34,12 @@
 - [1.0.0](#100)
 
 ## Unreleased
+
+## To 1.10.1
+
+No action needed. `ConflictCode::forFailure()` / `forRequest()` (deprecated) no longer trigger a runtime
+`E_USER_DEPRECATED`, so hosts that fail on deprecations work again. Migrating to `ConflictCodeResolver` stays
+recommended (`@deprecated` docblock; removed in 2.0).
 
 ## To 1.10.0
 
@@ -77,8 +84,9 @@ Notes:
 - The runtime class name of a write unit's conflict (`get_class()`, the `exception_class` log key, error trackers'
   grouping) is now `Nowo\TransactionContract\ConcurrencyConflict`. Code that compares class *names* with the old
   `::class` string must use `instanceof` instead.
-- `ConflictCode::forFailure()` / `forRequest()` now trigger a silenced `E_USER_DEPRECATED` (shown by Symfony's
-  deprecation log and the profiler). The aliases trigger nothing at runtime: they are registered for every process and
+- `ConflictCode::forFailure()` / `forRequest()` are deprecated by docblock (`@deprecated`: PHPStan and IDEs flag
+  them). They trigger no runtime `E_USER_DEPRECATED` (1.10.0 did; 1.10.1 removed the notice so hosts that fail on
+  deprecations keep working). The aliases trigger nothing at runtime either: they are registered for every process and
   PHP has no hook when an alias is used.
 - A bundle whose public API exposes the old `ConflictCode` type (a property, a return type) changes that type in its
   own next major, or converts at the edge.

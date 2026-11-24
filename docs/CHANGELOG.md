@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.10.1] - 2026-11-24](#1101---2026-11-24)
 - [[1.10.0] - 2026-11-24](#1100---2026-11-24)
 - [[1.9.3] - 2026-11-21](#193---2026-11-21)
 - [[1.9.2] - 2026-11-21](#192---2026-11-21)
@@ -30,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [[1.0.0] - 2026-11-15](#100---2026-11-15)
 
 ## [Unreleased]
+
+## [1.10.1] - 2026-11-24
+
+### Fixed
+
+- The deprecated ConflictCode methods no longer trigger a runtime E_USER_DEPRECATED: bundles that fail CI on deprecations broke on 1.10.0. Migration to ConflictCodeResolver stays recommended (docblock deprecation).
 
 ## [1.10.0] - 2026-11-24
 
@@ -58,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registered eagerly through Composer `autoload.files` (`aliases.php`). Removed in 2.0.
 - `Nowo\TransactionDoctrine\ConflictCode`: use `Nowo\TransactionContract\ConflictCode` and `ConflictCodeResolver`.
   It stays an enum of its own in 1.x (its static helpers delegate to the resolver). Removed in 2.0. `forFailure()` and
-  `forRequest()` trigger a silenced `E_USER_DEPRECATED`; the aliases trigger none (registered eagerly for every
+  `forRequest()` are deprecated by docblock (1.10.0 also triggered a silenced `E_USER_DEPRECATED`; removed in 1.10.1); the aliases trigger none (registered eagerly for every
   process, no hook on alias use).
 
 No BC break: every 1.9 name, signature and behaviour keeps working. One visible difference: the runtime class name of
