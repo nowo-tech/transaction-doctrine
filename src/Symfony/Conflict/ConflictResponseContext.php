@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony\Conflict;
 
+use Nowo\TransactionContract\ConflictCode as ContractConflictCode;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Throwable;
 
@@ -15,8 +16,14 @@ use Throwable;
  */
 final readonly class ConflictResponseContext
 {
-    /** The conflict code (REQ-RUNTIME-003 rule 6): CONFLICT_002 when committed, else CONFLICT_001. */
+    /**
+     * The conflict code (REQ-RUNTIME-003 rule 6): CONFLICT_002 when committed, else CONFLICT_001. Typed with the
+     * deprecated enum for BC; read $contractCode instead (it becomes the contract enum in 2.0).
+     */
     public ConflictCode $code;
+
+    /** The same code as the framework-free contract enum (transaction-doctrine >= 1.10). */
+    public ContractConflictCode $contractCode;
 
     /**
      * @param int $status The status the answer gets (409 or 503)
@@ -27,7 +34,8 @@ final readonly class ConflictResponseContext
      * @param int|null $attempts Attempts of the write unit, when the failure is a ConcurrencyConflict
      * @param bool $committed Whether part of the unit was already committed (ConcurrencyConflict::$committed): answer
      *                        "reload before trying again", never invite a blind retry
-     * @param ConflictCode|null $code The conflict code; null = derived from $committed (CONFLICT_002 when true)
+     * @param ConflictCode|ContractConflictCode|null $code The conflict code, either enum; null = derived from
+     *                                                     $committed (CONFLICT_002 when true)
      */
     public function __construct(
         public int $status,
@@ -37,8 +45,9 @@ final readonly class ConflictResponseContext
         public ?int $attempts,
         public Throwable $failure,
         public bool $committed = false,
-        ?ConflictCode $code = null,
+        ConflictCode|ContractConflictCode|null $code = null,
     ) {
-        $this->code = $code ?? ($committed ? ConflictCode::Committed : ConflictCode::RetrySafe);
+        $this->code         = $code === null ? ($committed ? ConflictCode::Committed : ConflictCode::RetrySafe) : ConflictCode::fromContract($code);
+        $this->contractCode = $this->code->toContract();
     }
 }

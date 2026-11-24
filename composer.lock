@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "96bdd446e60f4a41a4dd01fe0363575c",
+    "content-hash": "b8130e0352425de87198356b8d08d0c4",
     "packages": [
         {
             "name": "doctrine/dbal",
@@ -163,16 +163,16 @@
         },
         {
             "name": "nowo-tech/transaction-contract",
-            "version": "v1.0.1",
+            "version": "dev-feat/framework-free-conflict-types",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-contract.git",
-                "reference": "dfb6566338d726719f23699d7109d70c08c45050"
+                "reference": "0bfb0c6036e074f15f691cfacb78cffd4057177a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/dfb6566338d726719f23699d7109d70c08c45050",
-                "reference": "dfb6566338d726719f23699d7109d70c08c45050",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/0bfb0c6036e074f15f691cfacb78cffd4057177a",
+                "reference": "0bfb0c6036e074f15f691cfacb78cffd4057177a",
                 "shasum": ""
             },
             "require": {
@@ -180,6 +180,8 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.0",
+                "igor-php/igor-php": "^0.10.0 || ^0.11.0",
+                "nowo-tech/phpstan-frankenphp": "^1.4",
                 "phpstan/phpstan": "^2.0",
                 "phpstan/phpstan-phpunit": "^2.0",
                 "phpunit/phpunit": "^10.0 || ^11.0",
@@ -188,7 +190,7 @@
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "1.0.x-dev"
+                    "dev-main": "1.1.x-dev"
                 }
             },
             "autoload": {
@@ -212,7 +214,7 @@
                     "homepage": "https://nowo.tech"
                 }
             ],
-            "description": "Framework-free transaction port: TransactionRunnerInterface::run(callable) and the TransientStorageFailure exception with a Retry-After hint. No dependencies beyond PHP: no Symfony, no Doctrine.",
+            "description": "Framework-free transaction port: TransactionRunnerInterface::run(callable), the TransientStorageFailure exception with a Retry-After hint, and the conflict types (ConflictCode, TransientFailureKind, ConcurrencyConflict, LockConflictExceptionInterface). No dependencies beyond PHP: no Symfony, no Doctrine.",
             "homepage": "https://github.com/nowo-tech/transaction-contract",
             "keywords": [
                 "contracts",
@@ -228,7 +230,14 @@
                 "issues": "https://github.com/nowo-tech/transaction-contract/issues",
                 "source": "https://github.com/nowo-tech/transaction-contract"
             },
-            "time": "2026-11-15T08:04:23+00:00"
+            "funding": [
+                {
+                    "url": "https://github.com/HecFranco",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-11-24T04:31:53+00:00",
+            "published-time": "2026-11-24T04:32:00+00:00"
         },
         {
             "name": "psr/cache",
@@ -8266,9 +8275,18 @@
             "time": "2026-09-25T13:20:01+00:00"
         }
     ],
-    "aliases": [],
+    "aliases": [
+        {
+            "package": "nowo-tech/transaction-contract",
+            "version": "dev-feat/framework-free-conflict-types",
+            "alias": "1.1.0",
+            "alias_normalized": "1.1.0.0"
+        }
+    ],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "nowo-tech/transaction-contract": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
@@ -8278,5 +8296,5 @@
     "platform-overrides": {
         "php": "8.2.0"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }

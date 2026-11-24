@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nowo\TransactionDoctrine\Symfony\Conflict;
 
 use InvalidArgumentException;
+use Nowo\TransactionContract\ConflictCode as ContractConflictCode;
 use Nowo\TransactionDoctrine\ConflictCode;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
@@ -74,11 +75,12 @@ final readonly class ConflictResponsePolicy
      * The headers of a conflict answer with code $code: `X-Conflict-Code` always, `Retry-After` only for CONFLICT_001
      * (a CONFLICT_002 answer must not invite a blind retry, whatever the failure's hint says).
      *
+     * @param ConflictCode|ContractConflictCode $code Either enum (transaction-doctrine >= 1.10 accepts the contract's)
      * @param int|null $hint A failure's own hint; null = the configured value
      *
      * @return array{X-Conflict-Code: string, Retry-After?: string}
      */
-    public function headersFor(ConflictCode $code, ?int $hint = null): array
+    public function headersFor(ConflictCode|ContractConflictCode $code, ?int $hint = null): array
     {
         if (!$code->retrySafe()) {
             return [self::CODE_HEADER => $code->value];
@@ -91,9 +93,10 @@ final readonly class ConflictResponsePolicy
      * An HTTP exception with the policy's status and headersFor($code), for routes rendered by the host's error page:
      * the page then carries the code in `X-Conflict-Code` even when its body has none.
      *
+     * @param ConflictCode|ContractConflictCode $code Either enum (transaction-doctrine >= 1.10 accepts the contract's)
      * @param string $message Generic, client-safe text
      */
-    public function httpExceptionFor(ConflictCode $code, string $message, ?Throwable $previous = null, ?int $hint = null): HttpException
+    public function httpExceptionFor(ConflictCode|ContractConflictCode $code, string $message, ?Throwable $previous = null, ?int $hint = null): HttpException
     {
         return new HttpException($this->status, $message, $previous, $this->headersFor($code, $hint));
     }

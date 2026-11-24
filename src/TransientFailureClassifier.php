@@ -10,8 +10,9 @@ use Doctrine\DBAL\Exception\ConstraintViolationException;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\RetryableException;
+use Nowo\TransactionContract\LockConflictExceptionInterface;
+use Nowo\TransactionContract\TransientFailureKind;
 use Nowo\TransactionContract\TransientStorageFailure;
-use Nowo\TransactionDoctrine\WriteUnit\LockConflictExceptionInterface;
 use PDOException;
 use Throwable;
 

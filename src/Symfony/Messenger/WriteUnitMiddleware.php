@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony\Messenger;
 
-use Nowo\TransactionDoctrine\WriteUnit\ConcurrencyConflict;
+use Nowo\TransactionContract\ConcurrencyConflict;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnit;
 use Nowo\TransactionDoctrine\WriteUnit\WriteUnitInterface;
 use Symfony\Component\Messenger\Envelope;

@@ -43,8 +43,8 @@ Transient failures (deadlocks, lock waits, serialization failures) become `Trans
 rethrown unchanged. The full behaviour reference (failure table, nested runs, DBAL 3 emulated nesting, wiring) is in
 [Usage](docs/USAGE.md).
 
-Also exported: `TransientFailureClassifier`, `TransientFailureKind`, `ConnectionRepairer` (the same logic as
-`nowo-tech/doctrine-deadlock-retry-bundle` 3.0).
+Also exported: `TransientFailureClassifier`, `ConnectionRepairer` (the same logic as
+`nowo-tech/doctrine-deadlock-retry-bundle` 3.0) and `ConflictCodeResolver` (1.10).
 
 ## Write units and the 409 lock-conflict answer (1.3.0)
 
@@ -67,6 +67,17 @@ committed, or anything was committed earlier in the same request (request commit
 `LockConflictExceptionInterface` or a `ConflictExceptionMapperInterface` service, and shape their own answers with a
 `ConflictResponseFormatterInterface` service, never by route name. See [Usage](docs/USAGE.md#write-units-130) and
 [Configuration](docs/CONFIGURATION.md#symfony-bundle).
+
+## Framework-free conflict types (1.10)
+
+`ConflictCode`, `TransientFailureKind`, `ConcurrencyConflict` and `LockConflictExceptionInterface` now live in
+[`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract) 1.1 (no Symfony, no Doctrine),
+so a bundle's domain / contract layer passes REQ-ARCH-002 (Deptrac). The old `Nowo\TransactionDoctrine\…` names are
+deprecated (removed in 2.0): three are aliases of the contract types (same class, `catch` and `instanceof` match both
+ways), and `ConflictCode` keeps its helpers and converts with `toContract()` / `fromContract()`. Migration for
+bundles: `use Nowo\TransactionContract\…` for the four types, `ConflictCodeResolver::forRequest()` / `forFailure()`
+for the code of a failure. See [Usage](docs/USAGE.md#framework-free-conflict-types-110) and
+[Upgrading](docs/UPGRADING.md#to-1100).
 
 ## Logging (optional)
 

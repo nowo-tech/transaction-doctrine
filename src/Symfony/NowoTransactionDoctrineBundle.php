@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nowo\TransactionDoctrine\Symfony;
 
+use Nowo\TransactionContract\TransientFailureKind;
 use Nowo\TransactionDoctrine\HostFlushProbe;
 use Nowo\TransactionDoctrine\PrivateManager\PrivateEntityManager;
 use Nowo\TransactionDoctrine\Symfony\Boundary\UnitOfWorkFrames;
@@ -17,7 +18,6 @@ use Nowo\TransactionDoctrine\Symfony\EventListener\UnitOfWorkBoundaryListener;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WorkerConnectionHygiene;
 use Nowo\TransactionDoctrine\Symfony\EventListener\WriteUnitControllerListener;
 use Nowo\TransactionDoctrine\Symfony\Messenger\WriteUnitMiddleware;
-use Nowo\TransactionDoctrine\TransientFailureKind;
 use Nowo\TransactionDoctrine\WriteUnit\CommitLedger;
 use Nowo\TransactionDoctrine\WriteUnit\Dbal\CommitTrackingMiddleware;
 use Nowo\TransactionDoctrine\WriteUnit\DoctrineStateRepairer;
