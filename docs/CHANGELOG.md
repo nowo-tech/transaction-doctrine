@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of contents
 
 - [[Unreleased]](#unreleased)
+- [[1.10.0] - 2026-11-24](#1100---2026-11-24)
 - [[1.9.3] - 2026-11-21](#193---2026-11-21)
 - [[1.9.2] - 2026-11-21](#192---2026-11-21)
 - [[1.9.1] - 2026-11-20](#191---2026-11-20)
@@ -29,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [[1.0.0] - 2026-11-15](#100---2026-11-15)
 
 ## [Unreleased]
+
+## [1.10.0] - 2026-11-24
 
 ### Added
 
@@ -699,7 +702,7 @@ resolves to the old string, so compare classes with `instanceof`, not by name.
 
 Requires `nowo-tech/transaction-contract ^1.0` and `doctrine/dbal ^4.0`; `doctrine/orm ^3.0` and `doctrine/persistence` are optional.
 
-[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.9.3...HEAD
+[Unreleased]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.10.0...HEAD
 [1.9.0]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.2...v1.9.0
 [1.8.2]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/nowo-tech/transaction-doctrine/compare/v1.8.0...v1.8.1
