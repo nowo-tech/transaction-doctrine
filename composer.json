@@ -36,7 +36,7 @@
     "require": {
         "php": ">=8.2 <8.6",
         "doctrine/dbal": "^3.8.2 || ^4.0",
-        "nowo-tech/transaction-contract": "dev-feat/framework-free-conflict-types as 1.1.0",
+        "nowo-tech/transaction-contract": "^1.1",
         "psr/log": "^1.0 || ^2.0 || ^3.0"
     },
     "require-dev": {

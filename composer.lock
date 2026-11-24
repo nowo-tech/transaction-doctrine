@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b8130e0352425de87198356b8d08d0c4",
+    "content-hash": "c68d993637a0ecc0d47ea1c13b93790f",
     "packages": [
         {
             "name": "doctrine/dbal",
@@ -163,16 +163,16 @@
         },
         {
             "name": "nowo-tech/transaction-contract",
-            "version": "dev-feat/framework-free-conflict-types",
+            "version": "v1.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nowo-tech/transaction-contract.git",
-                "reference": "6f8cc886ec941d041d1a7845c1058217e89e5211"
+                "reference": "4f009b79a6fbe742538be037b17d70bbfeefbc53"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/6f8cc886ec941d041d1a7845c1058217e89e5211",
-                "reference": "6f8cc886ec941d041d1a7845c1058217e89e5211",
+                "url": "https://api.github.com/repos/nowo-tech/transaction-contract/zipball/4f009b79a6fbe742538be037b17d70bbfeefbc53",
+                "reference": "4f009b79a6fbe742538be037b17d70bbfeefbc53",
                 "shasum": ""
             },
             "require": {
@@ -239,8 +239,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-24T06:04:02+00:00",
-            "published-time": "2026-11-24T06:04:08+00:00"
+            "time": "2026-11-24T06:06:44+00:00",
+            "published-time": "2026-11-24T06:07:24+00:00"
         },
         {
             "name": "psr/cache",
@@ -8278,18 +8278,9 @@
             "time": "2026-09-25T13:20:01+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "nowo-tech/transaction-contract",
-            "version": "dev-feat/framework-free-conflict-types",
-            "alias": "1.1.0",
-            "alias_normalized": "1.1.0.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "nowo-tech/transaction-contract": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
