@@ -10,7 +10,7 @@ Use this when suggesting code, tests, documentation, or CI changes for this repo
 
 ### Code
 
-- Follow **PSR-12** and project conventions in `.php-cs-fixer.dist.php`.
+- Follow **PER-CS** (PSR-12 successor) and project conventions in `.php-cs-fixer.dist.php`.
 - Use **strict comparison** (`===`).
 - No static or cross-request state: the library must work in FrankenPHP worker mode with kernel reset off.
 - Keep changes **minimal**; align with `composer cs-check`, `composer phpstan`, `composer igor` and `composer test`.

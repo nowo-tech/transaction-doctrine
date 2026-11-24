@@ -72,7 +72,7 @@ unchanged.
 
 ## Success Criteria
 
-- **SC-001**: **5/5** `src/` files mapped.
+- **SC-001**: **52/52** `src/` files mapped (plus `aliases.php`).
 - **SC-002**: PHPUnit covers 100% of lines and methods (CI gate); the real-database suite runs on MySQL 8.4,
   MariaDB 11.4 and PostgreSQL 16 for DBAL 4 + ORM 3, DBAL 3 + ORM 3 and DBAL 3 + ORM 2.
 

@@ -14,7 +14,7 @@ This document records which [PHP-FIG PSRs](https://www.php-fig.org/psr/) apply t
 
 | PSR | Decision | How |
 | --- | -------- | --- |
-| PSR-12 (coding style) | **Adopted** | `@PSR12` in `.php-cs-fixer.dist.php` (REQ-CS-001). |
+| PSR-12 (coding style) | **Adopted** | `@PER-CS` + `@PER-CS:risky` (PSR-12 successor) in `.php-cs-fixer.dist.php` (REQ-CS-001, REQ-CS-009). |
 | PSR-4 (autoloading) | **Adopted** | `composer.json` PSR-4 map for `src/` and `tests/`. |
 
 ## Interface / contract PSRs
