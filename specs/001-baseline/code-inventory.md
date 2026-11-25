@@ -2,7 +2,7 @@
 
 **Baseline spec**: [`spec.md`](spec.md)  
 **Package**: `nowo-tech/transaction-doctrine`  
-**Last audited**: 2026-11-24 (1.10.1)
+**Last audited**: 2026-11-27 (1.10.1; 52/52 re-verified, no src change since)
 
 ## Runner
 
