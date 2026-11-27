@@ -9,7 +9,7 @@
 
 ## Requirements
 
-- PHP **8.2** to **8.5** (`>=8.2 <8.6`).
+- PHP **8.2** to **8.5** (`>=8.2 <8.7`).
 - `doctrine/dbal` **^3.8.2 || ^4.0**.
 - [`nowo-tech/transaction-contract`](https://github.com/nowo-tech/transaction-contract) **^1.0** (installed automatically).
 
